@@ -390,7 +390,7 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
     </div>
     <p class="note">Keep a record of what you advised and why. Eighteen months later, this
     is what shows a client, a board or an underwriter that the call was reasoned rather than
-    guessed. Held in this page only for now &mdash; export it before you close the tab.</p>
+    guessed. Saved in this browser on this machine &mdash; export the CSV to keep it elsewhere.</p>
   </div>
 </div>
 
@@ -1364,30 +1364,67 @@ renderBoard(null);
 renderLog();
 paint();
 
-fetch("readings.json").then(r => r.ok ? r.json() : null).then(d => {
-  if (!d) throw new Error("no readings.json");
-  DATA = d;
-  paint();                      // the charts and the chokepoint block need the data
-  renderBoard(d);
-  const first = (d.readings || [])[0] || {};
-  const ep = d.corridors_in_episode || [];
+/* A page that quietly says "no readings" hides the one fact needed to fix it.
+   Report the status, the URL, and what to do about it. */
+function dataFailed(reason, detail){
+  const msg = "Data not loaded — " + reason;
+  document.getElementById("stamp").textContent = "no data";
+  document.getElementById("footStamp").textContent = "no data";
   const band = document.getElementById("sBand");
-  band.textContent = first.band || "—";
-  band.className = "v big " + (ep.length ? "hot" : "ok");
-  document.getElementById("sMonth").textContent = d.as_of || "—";
-  document.getElementById("sTar").textContent = first.tar != null ? first.tar : "—";
-  document.getElementById("sCut").textContent =
-    d.recursive_cut != null ? d.recursive_cut : "—";
-  const epc = document.getElementById("sEp");
-  epc.textContent = ep.length ? ep.join(", ") : "none";
-  epc.className = "v" + (ep.length ? " hot" : " ok");
-  const stamp = "readings as of " + d.as_of;
-  document.getElementById("stamp").textContent = stamp;
-  document.getElementById("footStamp").textContent = stamp;
-}).catch(() => {
-  document.getElementById("stamp").textContent = "no readings — serve over http";
-  document.getElementById("footStamp").textContent = "no readings loaded";
-});
+  band.textContent = "no data";
+  band.className = "v big hot";
+  const note = document.getElementById("boardNote");
+  note.className = "note hot";
+  note.innerHTML = "<strong>" + msg + "</strong><br>" + detail;
+  const v = document.getElementById("verdict");
+  v.className = "verdict neg";
+  document.getElementById("vTag").textContent = "no data";
+  document.getElementById("vCall").textContent = "Readings could not be loaded.";
+  document.getElementById("vBody").innerHTML = detail;
+  console.error(msg, detail);
+}
+
+fetch("readings.json", { cache: "no-store" })
+  .then(r => {
+    if (!r.ok) throw new Error("HTTP " + r.status + " " + r.statusText);
+    return r.json();
+  })
+  .then(d => {
+    if (!d || !Array.isArray(d.readings)) throw new Error("file loaded but has no readings array");
+    if (!d.history) throw new Error("file is from an older build: no history field. "
+      + "Re-run tar_ingest.py and redeploy.");
+    DATA = d;
+    paint();
+    renderBoard(d);
+    const first = (d.readings || [])[0] || {};
+    const ep = d.corridors_in_episode || [];
+    const band = document.getElementById("sBand");
+    band.textContent = first.band || "\u2014";
+    band.className = "v big " + (ep.length ? "hot" : "ok");
+    document.getElementById("sMonth").textContent = d.as_of || "\u2014";
+    document.getElementById("sTar").textContent = first.tar != null ? first.tar : "\u2014";
+    document.getElementById("sCut").textContent =
+      d.recursive_cut != null ? d.recursive_cut : "\u2014";
+    const epc = document.getElementById("sEp");
+    epc.textContent = ep.length ? ep.join(", ") : "none";
+    epc.className = "v" + (ep.length ? " hot" : " ok");
+    const stamp = "readings as of " + d.as_of;
+    document.getElementById("stamp").textContent = stamp;
+    document.getElementById("footStamp").textContent = stamp;
+  })
+  .catch(err => {
+    const url = new URL("readings.json", location.href).href;
+    const local = location.protocol === "file:";
+    dataFailed(err.message,
+      local
+        ? "This page was opened directly from disk, and browsers block reading files that "
+          + "way. Serve the folder instead: <code>python -m http.server 8000</code>, then "
+          + "open <code>http://localhost:8000/threshold-engine.html</code>."
+        : "Tried <code>" + url + "</code>. If that address returns 404, the deployment did "
+          + "not include readings.json — run the workflow from the Actions tab and check it "
+          + "finishes green. If it returns JSON, the file is present but unreadable and the "
+          + "message above says why.");
+  });
 </script>
 </body>
 </html>
