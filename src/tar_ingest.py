@@ -391,9 +391,28 @@ def build_readings(df: pd.DataFrame) -> dict:
             months_since_trigger=trig, validated=False, caveats=caveats,
         )))
 
+    # The full series, so the site can show where this month sits in forty years
+    # rather than asserting a level with no context. Alarm flags come from the
+    # recursive cut, so each month is judged against thresholds built only from
+    # months before it — the history is honest at every point, not just the end.
+    hist = ind[["tar"]].copy()
+    hist["cut"] = cut
+    hist["alarm"] = alarm
+    hist = hist[hist["tar"].notna()]
+    history = {
+        "months": [d.strftime("%Y-%m") for d in hist.index],
+        "tar": [round(float(v), 3) for v in hist["tar"]],
+        "cut": [None if pd.isna(v) else round(float(v), 3) for v in hist["cut"]],
+        "alarm": [bool(v) for v in hist["alarm"]],
+    }
+
     active = [r["corridor"] for r in readings if r["regime"] == "in episode"]
     return {
         "as_of": str(last.date()),
+        "history": history,
+        "onsets": {k: list(v) for k, v in ONSETS.items()},
+        "band_cuts": [[lo, label] for lo, label, _, _ in BANDS],
+        "post_onset_months": POST_ONSET_MONTHS,
         "corridors_in_episode": active,
         "regime_note": (
             "One or more corridors are inside the post-onset window, so an elevated "
@@ -546,6 +565,20 @@ def selftest() -> int:
                if r["regime"] == "in episode")
     assert all(r["horizon"] is not None for r in out["readings"]
                if r["regime"] == "at risk")
+
+    # 10. History is emitted, aligned, and each alarm flag respects its own
+    #     recursive cut rather than a single end-of-sample threshold.
+    h = out["history"]
+    assert len(h["months"]) == len(h["tar"]) == len(h["cut"]) == len(h["alarm"])
+    assert len(h["months"]) > 300, len(h["months"])
+    assert h["months"][-1] == str(out["as_of"])[:7]
+    for i, (t, c, al) in enumerate(zip(h["tar"], h["cut"], h["alarm"])):
+        if c is not None:
+            assert al == (t >= c), f"alarm flag disagrees with its own cut at {h['months'][i]}"
+        else:
+            assert al is False, f"alarm set before a cut existed at {h['months'][i]}"
+    assert out["band_cuts"][0][0] == 0.0 and len(out["band_cuts"]) == len(BANDS)
+    assert "Strait of Hormuz" in out["onsets"]
 
     print("all checks passed")
     print(f"  synthetic TAR now       {out['readings'][0]['tar']}")
