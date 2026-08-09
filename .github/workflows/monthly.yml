@@ -1,10 +1,23 @@
 name: monthly reading
 
 on:
+  # Pages serves from docs/, and docs/ is only written by this workflow — so a
+  # push that changes src/ would otherwise leave the live site on the old files.
+  # Running on push makes every commit deploy. Pushes made by this workflow use
+  # GITHUB_TOKEN, which GitHub deliberately does not let trigger workflows, so
+  # there is no loop.
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+
   schedule:
     # 09:00 UTC on the 5th. The release lands in the first days of the month;
     # the 5th leaves slack without waiting a fortnight.
     - cron: "0 9 5 * *"
+
   workflow_dispatch:        # lets you run it by hand from the Actions tab
 
 permissions:
