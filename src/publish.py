@@ -207,18 +207,18 @@ def render(path: Path = PAGE) -> None:
         Y = lambda v: h - pad - (v - lo) / rng * (h - 2 * pad)
         d = " ".join(("M" if k == 0 else "L") + f"{X(i):.1f} {Y(v):.1f}"
                      for k, (i, v) in enumerate(pts))
-        dots = "".join(f'<circle cx="{X(i):.1f}" cy="{Y(v):.1f}" r="2.6" fill="#37C2A8"/>'
+        dots = "".join(f'<circle cx="{X(i):.1f}" cy="{Y(v):.1f}" r="2.6" fill="#3FD9BC"/>'
                        for i, v in pts)
         spark = (f'<div class="canvas" style="margin-top:var(--s4)">'
                  f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="Published indicator '
                  f'value by month">'
-                 f'<path d="{d}" fill="none" stroke="#37C2A8" stroke-width="4" '
+                 f'<path d="{d}" fill="none" stroke="#3FD9BC" stroke-width="4" '
                  f'stroke-opacity=".16"/>'
-                 f'<path d="{d}" fill="none" stroke="#37C2A8" stroke-width="1.9"/>{dots}'
+                 f'<path d="{d}" fill="none" stroke="#3FD9BC" stroke-width="1.9"/>{dots}'
                  f'<text x="{pad}" y="{h-3}" font-family="IBM Plex Mono,monospace" '
-                 f'font-size="9.5" fill="#7C97A3">{esc(entries[0]["as_of"])}</text>'
+                 f'font-size="9.5" fill="#63808D">{esc(entries[0]["as_of"])}</text>'
                  f'<text x="{w-pad}" y="{h-3}" text-anchor="end" '
-                 f'font-family="IBM Plex Mono,monospace" font-size="9.5" fill="#7C97A3">'
+                 f'font-family="IBM Plex Mono,monospace" font-size="9.5" fill="#63808D">'
                  f'{esc(entries[-1]["as_of"])}</text></svg></div>')
 
     path.write_text(f"""<!DOCTYPE html>

@@ -14,96 +14,29 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:ital,wght@0,600;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-:root{
-  --water:#E9EFF1; --land:#DBCDB2; --ink:#10222E; --ink-soft:#4A6070;
-  --rule:#B4C3C8; --caution:#C0157A; --sound:#1F5F6B; --paper:#F6F9FA;
-  /* chart-dark palette, used only inside the map canvas */
-  --sea:#0B1D26; --sea-hi:#12303D; --coast:#2E5361; --terra:#1A2E36;
-  --zone:#E4467F; --zone-new:#FFB020; --at-risk:#37C2A8;
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--water);color:var(--ink);
-  font:15px/1.55 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1180px;margin:0 auto;padding:30px 20px 64px}
-nav{display:flex;gap:18px;align-items:baseline;padding-bottom:18px;
-  font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase}
-nav a{color:var(--ink-soft);text-decoration:none}
-nav a:hover{color:var(--ink)}
-nav .here{color:var(--ink);border-bottom:2px solid var(--caution);padding-bottom:3px}
-.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.16em;
-  text-transform:uppercase;color:var(--ink-soft)}
-h1{font-family:Spectral,Georgia,serif;font-weight:600;font-size:clamp(26px,4.4vw,40px);
-  line-height:1.08;letter-spacing:-.015em;margin:10px 0 12px;max-width:25ch}
-.thesis{font-family:Spectral,Georgia,serif;font-style:italic;font-size:clamp(15px,2vw,18px);
-  color:var(--ink-soft);max-width:64ch;margin:0 0 22px}
-
-/* ---- map shell ---- */
-.stage{position:relative;border:1px solid var(--ink);background:var(--sea)}
-#map{height:min(70vh,640px);background:var(--sea)}
-.leaflet-container{font-family:"IBM Plex Sans",sans-serif;background:var(--sea)}
-.leaflet-control-attribution{background:rgba(11,29,38,.82)!important;color:#7C97A3!important;
-  font-size:10px!important}
-.leaflet-control-attribution a{color:#9FB6BF!important}
-.leaflet-bar,.leaflet-control-layers{border:1px solid #24485A!important;
-  background:#0F2833!important;box-shadow:none!important}
-.leaflet-bar a{background:#0F2833!important;color:#CFE0E6!important;
-  border-bottom:1px solid #24485A!important}
-.leaflet-bar a:hover{background:#16394A!important}
-.leaflet-control-layers-toggle{background-color:#0F2833!important}
-.leaflet-control-layers-expanded{color:#CFE0E6!important;
-  font:12px/1.4 "IBM Plex Mono",monospace!important;padding:9px 11px!important}
-
-/* floating readout, top-left of the canvas */
-.readout{position:absolute;z-index:500;top:12px;left:12px;max-width:270px;
-  background:rgba(11,29,38,.9);border:1px solid #24485A;color:#DCE9EE;padding:12px 14px}
-.readout .k{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.14em;
-  text-transform:uppercase;color:#7C97A3}
-.readout .v{font-family:Spectral,Georgia,serif;font-size:20px;line-height:1.15;margin:3px 0 9px}
-.readout .v.hot{color:#FF7AB0}
-.readout .row{display:flex;justify-content:space-between;gap:12px;
-  font-family:"IBM Plex Mono",monospace;font-size:11.5px;padding:3px 0;
-  border-top:1px solid #1E3E4C}
-.readout .row span:last-child{color:#DCE9EE}
-.readout .row span:first-child{color:#7C97A3}
-
-/* pulse for a corridor inside the post-onset window */
-@keyframes ping{0%{r:9;opacity:.85}70%{r:26;opacity:0}100%{r:26;opacity:0}}
-.ping{animation:ping 2.6s ease-out infinite}
-@media (prefers-reduced-motion:reduce){.ping{animation:none;opacity:.5}}
-
-.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0 0}
-.seg{display:flex;border:1px solid var(--rule);background:#fff}
-.seg button{padding:8px 13px;border:0;background:transparent;cursor:pointer;
-  font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-soft)}
-.seg button+button{border-left:1px solid var(--rule)}
-.seg button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
-.seg button:focus-visible{outline:2px solid var(--caution);outline-offset:2px}
-
-.panel{background:var(--paper);border:1px solid var(--rule);padding:18px;margin-top:22px}
-.panel h2{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;
-  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);
-  margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid var(--rule)}
-.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px 22px;font-size:13px}
-.legend span{display:flex;gap:9px;align-items:center}
-.sw{width:20px;height:12px;flex:0 0 20px;border-radius:2px}
-.dot{width:11px;height:11px;border-radius:50%;flex:0 0 11px}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--rule)}
-th{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--ink-soft);font-weight:600}
-td.m{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
-.note{font-size:12.5px;color:var(--ink-soft);border-left:3px solid var(--land);
-  padding-left:12px;margin:16px 0 0;max-width:78ch}
-.leaflet-popup-content-wrapper{background:#0F2833;color:#DCE9EE;border-radius:2px}
-.leaflet-popup-tip{background:#0F2833}
-.pop b{font-family:Spectral,Georgia,serif;font-size:15px}
-.pop dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:8px 0 0;font-size:12.5px}
-.pop dt{font-family:"IBM Plex Mono",monospace;color:#7C97A3;text-transform:uppercase;font-size:9.5px}
+/* Map-specific only. Ground, type, nav, panels, tables and Leaflet chrome all
+   come from site.css so this page cannot drift from the rest of the product. */
+.stage{position:relative;border:1px solid var(--rule);border-radius:4px;
+  overflow:hidden;background:var(--sea);box-shadow:var(--edge)}
+#map{height:min(72vh,660px);background:var(--sea)}
+.readout{position:absolute;z-index:500;top:14px;left:14px;max-width:282px;
+  background:rgba(6,18,26,.88);backdrop-filter:blur(10px);
+  border:1px solid var(--rule);border-radius:4px;color:var(--ink);padding:14px 16px;
+  font:15px/1.55 var(--sans)}
+.readout .k{font:9.5px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+  color:var(--ink-faint)}
+.readout .v{font:600 21px/1.15 var(--serif);margin:4px 0 11px;letter-spacing:-.012em}
+.readout .v.hot{color:var(--caution)}
+.readout .row{display:flex;justify-content:space-between;gap:14px;
+  font:11.5px/1.7 var(--mono);padding:3px 0;border-top:1px solid var(--rule-soft)}
+.readout .row span:first-child{color:var(--ink-faint)}
+.readout .row span:last-child{color:var(--ink)}
+.pop b{font:600 15px/1.2 var(--serif)}
+.pop dl{display:grid;grid-template-columns:auto 1fr;gap:4px 11px;margin:9px 0 0;
+  font:12.5px/1.5 var(--sans)}
+.pop dt{font:9.5px/1.6 var(--mono);color:var(--ink-faint);text-transform:uppercase}
 .pop dd{margin:0;font-variant-numeric:tabular-nums}
-.pop .warn{color:#FF7AB0;font-size:11.5px;margin:8px 0 0;max-width:32ch}
-.leaflet-tooltip{background:#0F2833;border:1px solid #24485A;color:#DCE9EE;
-  font:11.5px/1.3 "IBM Plex Mono",monospace;box-shadow:none}
-.leaflet-tooltip:before{display:none}
+.pop .warn{color:var(--caution);font:11.5px/1.5 var(--sans);margin:9px 0 0;max-width:32ch}
 </style>
 <style data-inlined="site.css" data-css-hash="4084d117ea3d">
 /* ===========================================================================

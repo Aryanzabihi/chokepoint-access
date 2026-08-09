@@ -245,10 +245,11 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
 <header class="masthead">
   <div class="eyebrow">Maritime war risk &middot; act-or-wait decision tool</div>
-  <h1>Act now, or wait? Answered with your own numbers.</h1>
-  <p class="thesis">Most war risk alerts do not justify spending money. Enter what acting
-  early costs you, and this tells you whether the current signal is worth acting on &mdash;
-  and says so plainly when it is not.</p>
+  <h1>Act now, or wait? <em>Answered with your own numbers.</em></h1>
+  <p class="thesis">Most war risk alerts do not justify spending money. Tell us what acting
+  early costs you against crisis prices, and this says whether the current signal is worth
+  acting on &mdash; <strong>including the months when it is not</strong>. One alert in three
+  is followed by a real disruption, and every call we have made is published in advance.</p>
 </header>
 
 <div class="status">
@@ -325,7 +326,9 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
       <p id="vBody"></p>
     </div>
 
-    <figure style="margin-top:var(--s5)">
+    <section class="panel">
+      <h2>Act or wait &mdash; your position</h2>
+    <figure>
       <div class="canvas">
         <svg id="curve" viewBox="0 0 780 400" role="img" aria-labelledby="curveTitle curveDesc">
           <title id="curveTitle">Value of following the alarm against the client's own cost ratio</title>
@@ -335,8 +338,11 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
       </div>
       <figcaption id="curveCap"></figcaption>
     </figure>
+    </section>
 
-    <figure style="margin-top:var(--s5)">
+    <section class="panel">
+      <h2>Forty years of readings</h2>
+    <figure>
       <div class="canvas">
         <svg id="hist" viewBox="0 0 780 340" role="img" aria-labelledby="histTitle">
           <title id="histTitle">Index value by month since 1985, with alert threshold and onsets</title>
@@ -344,8 +350,11 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
       </div>
       <figcaption id="histCap"></figcaption>
     </figure>
+    </section>
 
-    <figure style="margin-top:var(--s5)">
+    <section class="panel">
+      <h2>Where this month sits</h2>
+    <figure>
       <div class="canvas">
         <svg id="dist" viewBox="0 0 780 220" role="img" aria-labelledby="distTitle">
           <title id="distTitle">Where this month sits in the distribution of all months since 1985</title>
@@ -353,8 +362,9 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
       </div>
       <figcaption id="distCap"></figcaption>
     </figure>
+    </section>
 
-    <div class="row" style="margin-top:var(--s4)">
+    <div class="row" style="margin-top:var(--s5)">
       <button class="btn" id="log">Record this advice</button>
       <button class="btn ghost" id="csv" disabled>Export log (CSV)</button>
       <button class="btn ghost" id="clear" disabled>Clear log</button>
