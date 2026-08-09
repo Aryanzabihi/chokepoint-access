@@ -13,221 +13,313 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-<style data-inlined="site.css" data-css-hash="4084d117ea3d">
+<style data-inlined="site.css" data-css-hash="4b94eaa2ee58">
 /* ===========================================================================
-   Chokepoint access — shared design system.
+   Chokepoint Access — design system.
 
-   Two surfaces, deliberately: light paper for chrome and reading, dark chart
-   canvas for anything that is an instrument reading. The split is the whole
-   visual argument — prose is prose, measurements are measurements.
+   One surface, not two. Earlier versions used light chrome around dark charts,
+   which made every reading look like a foreign object dropped into a document.
+   The whole product is an instrument, so the whole product is instrument-dark
+   and the charts belong to the page instead of interrupting it.
 
-   Linked by threshold-engine.html, map.html and the generated record page.
+   Variable names are unchanged from the previous version so the pages and the
+   inline map styles keep working; only the values and the components moved.
    =========================================================================== */
 
 :root{
-  /* paper surface */
-  --water:#E9EFF1; --water-deep:#DCE6E9; --paper:#F6F9FA;
-  --ink:#10222E; --ink-soft:#4A6070; --ink-faint:#7C8F9B;
-  --rule:#B4C3C8; --rule-soft:#D3DEE2; --land:#DBCDB2;
+  /* ground */
+  --void:#06121A; --water:#0A1B24; --water-deep:#0E2530; --paper:#0E2530;
+  --raise:#12303D; --sea:#0B1D26; --sea-2:#0F2833;
 
-  /* instrument surface */
-  --sea:#0B1D26; --sea-2:#0F2833; --sea-line:#1E3E4C; --sea-edge:#24485A;
-  --sea-ink:#DCE9EE; --sea-soft:#7C97A3;
+  /* line */
+  --rule:#1B3A47; --rule-soft:#16303C; --sea-line:#1E3E4C; --sea-edge:#24485A;
+
+  /* type */
+  --ink:#E6F0F4; --ink-soft:#93AEB9; --ink-faint:#63808D; --sea-ink:#E6F0F4;
+  --sea-soft:#93AEB9; --land:#2A4B59;
 
   /* signal */
-  --caution:#C0157A; --caution-lit:#E4467F;
-  --sound:#1F5F6B;   --sound-lit:#37C2A8;
-  --amber:#B87400;   --amber-lit:#FFB020;
+  --caution:#FF5C9E; --caution-lit:#FF5C9E; --caution-dim:#7A1A46;
+  --sound:#3FD9BC;   --sound-lit:#3FD9BC;  --sound-dim:#12564C;
+  --amber:#FFB020;   --amber-lit:#FFB020;
 
-  --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px; --s6:38px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px; --s6:44px;
   --mono:"IBM Plex Mono",ui-monospace,monospace;
   --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
   --serif:Spectral,Georgia,"Times New Roman",serif;
+  --edge:0 1px 0 rgba(255,255,255,.04) inset;
 }
 
 *{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
 body{
-  margin:0;background:var(--water);color:var(--ink);
-  font:15px/1.55 var(--sans);
+  margin:0;color:var(--ink);
+  font:15.5px/1.62 var(--sans);
+  background:
+    radial-gradient(1100px 620px at 12% -8%, #12303D 0%, transparent 62%),
+    radial-gradient(900px 500px at 92% 4%, #16233A 0%, transparent 58%),
+    var(--void);
+  background-attachment:fixed;
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
 }
-.wrap{max-width:1180px;margin:0 auto;padding:var(--s5) 20px var(--s6)}
+.wrap{max-width:1200px;margin:0 auto;padding:0 22px var(--s6)}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
-::selection{background:var(--caution);color:#fff}
+::selection{background:var(--caution);color:#0A1B24}
+a{color:var(--sound)}
 
-/* ---- skip link, focus ---- */
 .skip{position:absolute;left:-9999px}
-.skip:focus{left:var(--s3);top:var(--s3);z-index:9999;background:var(--ink);
-  color:var(--paper);padding:var(--s2) var(--s3)}
-a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
-[tabindex]:focus-visible{outline:2px solid var(--caution);outline-offset:2px}
+.skip:focus{left:var(--s3);top:var(--s3);z-index:9999;background:var(--sound);
+  color:var(--void);padding:var(--s2) var(--s3);border-radius:3px}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{
+  outline:2px solid var(--sound);outline-offset:2px}
 
-/* ---- navigation ---- */
-.nav{display:flex;gap:var(--s4);align-items:baseline;flex-wrap:wrap;
-  padding-bottom:var(--s4);margin-bottom:var(--s4);
+/* ---------- entrance motion: content arrives, it does not just exist ---------- */
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.masthead,.status,.grid,.panel,figure,.foot{animation:rise .5s cubic-bezier(.2,.7,.3,1) both}
+.status{animation-delay:.06s} .grid{animation-delay:.1s}
+.panel{animation-delay:.14s} figure{animation-delay:.1s} .foot{animation-delay:.2s}
+
+/* ---------- navigation: sticky, glass, with a live indicator ---------- */
+.nav{
+  position:sticky;top:0;z-index:60;display:flex;gap:var(--s5);align-items:center;
+  flex-wrap:wrap;margin:0 -22px var(--s5);padding:var(--s3) 22px;
+  background:rgba(6,18,26,.72);backdrop-filter:blur(14px) saturate(1.3);
   border-bottom:1px solid var(--rule);
-  font:500 11.5px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase}
-.nav a{color:var(--ink-soft);text-decoration:none;padding-bottom:3px;
-  border-bottom:2px solid transparent;transition:color .12s,border-color .12s}
-.nav a:hover{color:var(--ink);border-bottom-color:var(--rule)}
-.nav .here{color:var(--ink);border-bottom:2px solid var(--caution);padding-bottom:3px}
+  font:500 11.5px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;
+}
+.nav a{color:var(--ink-faint);text-decoration:none;position:relative;padding:6px 0;
+  transition:color .16s}
+.nav a:hover{color:var(--ink)}
+.nav .here{color:var(--ink);position:relative;padding:6px 0}
+.nav .here::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;
+  background:linear-gradient(90deg,var(--sound),var(--caution))}
 .nav .spacer{flex:1}
-.nav .stamp{color:var(--ink-faint);letter-spacing:.06em;text-transform:none}
+.nav .stamp{color:var(--ink-faint);letter-spacing:.06em;text-transform:none;
+  font-size:11px}
 
-/* ---- masthead ---- */
-.eyebrow{font:11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
-  color:var(--ink-soft)}
-h1{font:600 clamp(27px,4.6vw,42px)/1.06 var(--serif);letter-spacing:-.016em;
-  margin:var(--s3) 0 var(--s3);max-width:26ch}
-.thesis{font:italic 400 clamp(15px,2vw,18.5px)/1.5 var(--serif);
-  color:var(--ink-soft);max-width:64ch;margin:0}
-.masthead{padding-bottom:var(--s5)}
+/* ---------- masthead / hero ---------- */
+.masthead{padding:var(--s6) 0 var(--s5);max-width:60ch}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;
+  font:11px/1 var(--mono);letter-spacing:.17em;text-transform:uppercase;
+  color:var(--sound);padding:6px 10px;border:1px solid var(--sound-dim);
+  border-radius:999px;background:rgba(63,217,188,.06)}
+h1{font:600 clamp(30px,5.4vw,52px)/1.03 var(--serif);letter-spacing:-.022em;
+  margin:var(--s4) 0 var(--s4);max-width:24ch}
+h1 em{font-style:normal;background:linear-gradient(100deg,var(--sound),#8AE0FF 60%);
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.thesis{font:400 clamp(16px,2vw,19px)/1.6 var(--sans);color:var(--ink-soft);
+  max-width:62ch;margin:0}
+.thesis strong{color:var(--ink);font-weight:500}
 
-/* ---- status strip: the live reading, always above the fold ---- */
-.status{display:flex;flex-wrap:wrap;align-items:stretch;
-  background:var(--sea);border:1px solid var(--ink);color:var(--sea-ink)}
-.status .cell{padding:var(--s3) var(--s4);border-right:1px solid var(--sea-line);
-  min-width:132px;flex:1 1 auto}
-.status .cell:last-child{border-right:0}
-.status .k{font:10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
-  color:var(--sea-soft)}
-.status .v{font:500 18px/1.2 var(--mono);margin-top:6px}
-.status .v.big{font:600 21px/1.15 var(--serif);letter-spacing:-.01em}
-.status .v.hot{color:var(--caution-lit)}
-.status .v.ok{color:var(--sound-lit)}
-.status .v.dim{color:var(--sea-soft)}
+/* ---------- status strip ---------- */
+.status{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);
+  border-radius:4px;overflow:hidden;
+  grid-template-columns:repeat(auto-fit,minmax(158px,1fr))}
+.status .cell{padding:var(--s4);background:linear-gradient(180deg,#102B37,#0C222D);
+  box-shadow:var(--edge)}
+.status .k{font:10px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+  color:var(--ink-faint)}
+.status .v{font:500 19px/1.2 var(--mono);margin-top:9px;color:var(--ink)}
+.status .v.big{font:600 23px/1.15 var(--serif);letter-spacing:-.012em}
+.status .v.hot{color:var(--caution)} .status .v.ok{color:var(--sound)}
+.status .v.dim{color:var(--ink-faint)}
 
-/* ---- panels ---- */
-.panel{background:var(--paper);border:1px solid var(--rule);padding:var(--s4);
-  margin-top:var(--s5)}
-.panel > h2{font:600 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
-  color:var(--ink-soft);margin:0 0 var(--s4);padding-bottom:var(--s2);
-  border-bottom:1px solid var(--rule)}
-.panel.tight{padding:var(--s3) var(--s4)}
+/* ---------- panels ---------- */
+.panel{background:linear-gradient(180deg,#0F2A35,#0B1F29);
+  border:1px solid var(--rule);border-radius:4px;padding:var(--s5);
+  margin-top:var(--s5);box-shadow:var(--edge)}
+.panel > h2{display:flex;align-items:center;gap:10px;
+  font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+  color:var(--ink-faint);margin:0 0 var(--s4);padding-bottom:var(--s3);
+  border-bottom:1px solid var(--rule-soft)}
+.panel > h2::before{content:"";width:14px;height:2px;flex:0 0 14px;
+  background:linear-gradient(90deg,var(--sound),transparent)}
 .grid{display:grid;gap:var(--s5);align-items:start}
-@media (min-width:900px){.grid.split{grid-template-columns:312px 1fr}}
+@media (min-width:960px){.grid.split{grid-template-columns:340px 1fr}}
 
-/* ---- form controls ---- */
-label{display:block;font:500 12.5px/1.4 var(--sans);margin-bottom:5px}
-.field{margin-bottom:var(--s4)}
-.field:last-child{margin-bottom:0}
-.hint{font:11.5px/1.42 var(--sans);color:var(--ink-soft);margin:5px 0 0}
+/* ---------- controls ---------- */
+label{display:block;font:500 12.5px/1.45 var(--sans);margin-bottom:6px;color:var(--ink)}
+.field{margin-bottom:var(--s5)} .field:last-child{margin-bottom:0}
+.hint{font:11.5px/1.5 var(--sans);color:var(--ink-faint);margin:6px 0 0}
 input[type=text],input[type=number],select{
-  width:100%;padding:9px 10px;border:1px solid var(--rule);background:#fff;
-  color:var(--ink);font:14px/1.2 var(--mono);border-radius:0}
-input[type=text]:hover,select:hover{border-color:var(--ink-faint)}
-input[type=range]{width:100%;margin:var(--s2) 0 0;accent-color:var(--caution);height:22px}
-.readout{font:500 22px/1 var(--mono);letter-spacing:-.01em}
-.readout .unit{font:400 13px/1 var(--sans);color:var(--ink-soft);margin-left:2px}
+  width:100%;padding:10px 11px;border:1px solid var(--rule);border-radius:3px;
+  background:#08191F;color:var(--ink);font:14px/1.2 var(--mono);
+  transition:border-color .15s,box-shadow .15s}
+input[type=text]:hover,select:hover{border-color:var(--sea-edge)}
+input[type=text]:focus,select:focus{border-color:var(--sound);
+  box-shadow:0 0 0 3px rgba(63,217,188,.12);outline:none}
+select{appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-soft) 50%),
+                   linear-gradient(135deg,var(--ink-soft) 50%,transparent 50%);
+  background-position:calc(100% - 17px) 52%,calc(100% - 12px) 52%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:32px}
 
-.seg{display:flex;border:1px solid var(--rule);background:#fff}
-.seg button{flex:1;padding:9px 8px;border:0;background:transparent;cursor:pointer;
-  font:12.5px/1 var(--mono);color:var(--ink-soft);transition:background .12s,color .12s}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:26px;
+  background:transparent;margin:var(--s2) 0 0;cursor:grab}
+input[type=range]:active{cursor:grabbing}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;
+  background:linear-gradient(90deg,var(--sound-dim),var(--sea-edge))}
+input[type=range]::-moz-range-track{height:4px;border-radius:2px;
+  background:linear-gradient(90deg,var(--sound-dim),var(--sea-edge))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;
+  margin-top:-6px;border-radius:50%;background:var(--ink);border:3px solid var(--sound);
+  box-shadow:0 0 0 4px rgba(63,217,188,.14);transition:box-shadow .15s}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
+  background:var(--ink);border:3px solid var(--sound)}
+input[type=range]:hover::-webkit-slider-thumb{box-shadow:0 0 0 7px rgba(63,217,188,.18)}
+.readout{font:500 26px/1 var(--mono);letter-spacing:-.02em;color:var(--ink)}
+.readout .unit{font:400 13px/1 var(--sans);color:var(--ink-faint);margin-left:3px}
+
+.seg{display:flex;border:1px solid var(--rule);border-radius:3px;overflow:hidden;
+  background:#08191F}
+.seg button{flex:1;padding:10px 8px;border:0;background:transparent;cursor:pointer;
+  font:12.5px/1 var(--mono);color:var(--ink-faint);transition:background .15s,color .15s}
 .seg button + button{border-left:1px solid var(--rule)}
-.seg button:hover{background:var(--water-deep)}
-.seg button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
-.seg.wide button{flex:0 0 auto;padding:9px 14px}
+.seg button:hover{background:var(--raise);color:var(--ink)}
+.seg button[aria-pressed=true]{color:var(--void);
+  background:linear-gradient(180deg,var(--sound),#2CBFA5)}
+.seg.wide button{flex:0 0 auto;padding:10px 15px}
 
-.btn{border:1px solid var(--ink);background:var(--ink);color:var(--paper);
-  padding:10px 16px;cursor:pointer;font:11.5px/1 var(--mono);letter-spacing:.09em;
-  text-transform:uppercase;transition:opacity .12s}
-.btn:hover{opacity:.85}
-.btn.ghost{background:transparent;color:var(--ink)}
-.btn.ghost:hover{background:var(--water-deep);opacity:1}
-.btn:disabled{opacity:.4;cursor:not-allowed}
-.row{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--sound);border-radius:3px;cursor:pointer;padding:11px 17px;
+  background:linear-gradient(180deg,var(--sound),#2CBFA5);color:var(--void);
+  font:600 11.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  transition:transform .12s,filter .15s}
+.btn:hover{filter:brightness(1.1)} .btn:active{transform:translateY(1px)}
+.btn.ghost{background:transparent;color:var(--ink-soft);border-color:var(--rule)}
+.btn.ghost:hover{background:var(--raise);color:var(--ink);filter:none}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none;filter:none}
+.row{display:flex;gap:var(--s3);flex-wrap:wrap;align-items:center}
 
-/* ---- verdict ---- */
-.verdict{background:#fff;border:1px solid var(--rule);border-left-width:5px;
-  padding:var(--s4) var(--s4) var(--s4) var(--s5)}
-.verdict .tag{font:10.5px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
-  color:var(--ink-soft)}
-.verdict .call{font:600 clamp(20px,3.2vw,28px)/1.16 var(--serif);margin:var(--s2) 0 var(--s2)}
-.verdict p{margin:0;max-width:64ch;color:var(--ink-soft);font-size:14px}
+/* ---------- verdict: the loudest thing on the page ---------- */
+.verdict{position:relative;border:1px solid var(--rule);border-radius:4px;
+  padding:var(--s5) var(--s5) var(--s5) calc(var(--s5) + 6px);
+  background:linear-gradient(180deg,#102B36,#0A1D26);overflow:hidden}
+.verdict::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+.verdict .tag{font:10.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-faint)}
+.verdict .call{font:600 clamp(22px,3.4vw,32px)/1.14 var(--serif);
+  letter-spacing:-.018em;margin:var(--s3) 0 var(--s3)}
+.verdict p{margin:0;max-width:66ch;color:var(--ink-soft);font-size:14.5px}
 .verdict p strong{color:var(--ink);font-weight:500}
-.verdict.pos{border-left-color:var(--sound)} .verdict.pos .call{color:var(--sound)}
-.verdict.neg{border-left-color:var(--caution)} .verdict.neg .call{color:var(--caution)}
-.verdict.warn{border-left-color:var(--amber)} .verdict.warn .call{color:var(--amber)}
+.verdict.pos::before{background:linear-gradient(180deg,var(--sound),#1E8C7C)}
+.verdict.pos .call{color:var(--sound)}
+.verdict.neg::before{background:linear-gradient(180deg,var(--caution),#9C2559)}
+.verdict.neg .call{color:var(--caution)}
+.verdict.warn::before{background:linear-gradient(180deg,var(--amber),#8A5E05)}
+.verdict.warn .call{color:var(--amber)}
 
-/* ---- instrument canvas ---- */
+/* ---------- charts ---------- */
 figure{margin:0}
-.canvas{background:var(--sea);border:1px solid var(--ink)}
+.canvas{background:var(--sea);border:1px solid var(--rule);border-radius:4px;
+  overflow:hidden;box-shadow:var(--edge)}
 .canvas svg{display:block;width:100%;height:auto}
-figcaption{font:11.5px/1.45 var(--sans);color:var(--ink-soft);margin-top:var(--s3);
-  max-width:74ch}
+figcaption{font:12px/1.55 var(--sans);color:var(--ink-faint);margin-top:var(--s3);
+  max-width:76ch}
 
-/* ---- cards + band gauge ---- */
+/* ---------- cards + gauge ---------- */
 .cards{display:grid;gap:var(--s3);
-  grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
-.card{background:#fff;border:1px solid var(--rule);padding:var(--s3) var(--s4) var(--s4)}
-.card .name{font:600 14.5px/1.25 var(--serif)}
-.card .meta{font:11px/1.4 var(--mono);color:var(--ink-soft);margin-top:3px}
-.card.ep{border-color:var(--caution)}
-.gauge{margin-top:var(--s3)}
-.gauge .track{position:relative;height:8px;background:var(--water-deep);
-  border:1px solid var(--rule-soft)}
-.gauge .fill{position:absolute;inset:0 auto 0 0;background:var(--sound)}
-.gauge .fill.hot{background:var(--caution)}
-.gauge .cut{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--ink-faint)}
-.gauge .scale{display:flex;justify-content:space-between;
-  font:9.5px/1 var(--mono);color:var(--ink-faint);margin-top:5px}
+  grid-template-columns:repeat(auto-fill,minmax(252px,1fr))}
+.card{background:linear-gradient(180deg,#112D39,#0C222C);border:1px solid var(--rule);
+  border-radius:4px;padding:var(--s4);transition:transform .16s,border-color .16s}
+.card:hover{transform:translateY(-2px);border-color:var(--sea-edge)}
+.card .name{font:600 15px/1.25 var(--serif);color:var(--ink)}
+.card .meta{font:11px/1.5 var(--mono);color:var(--ink-faint);margin-top:4px}
+.card.ep{border-color:var(--caution-dim)}
+.gauge{margin-top:var(--s4)}
+.gauge .track{position:relative;height:8px;border-radius:4px;background:#08191F;
+  border:1px solid var(--rule-soft);overflow:visible}
+.gauge .fill{position:absolute;inset:0 auto 0 0;border-radius:4px;
+  background:linear-gradient(90deg,var(--sound-dim),var(--sound));
+  transition:width .4s cubic-bezier(.2,.7,.3,1)}
+.gauge .fill.hot{background:linear-gradient(90deg,var(--caution-dim),var(--caution))}
+.gauge .cut{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--sea-edge)}
+.gauge .scale{display:flex;justify-content:space-between;font:9.5px/1 var(--mono);
+  color:var(--ink-faint);margin-top:6px}
 
-/* ---- badges ---- */
-.badge{display:inline-block;font:10px/1.6 var(--mono);letter-spacing:.09em;
-  text-transform:uppercase;padding:2px 7px;border:1px solid var(--rule);
-  color:var(--ink-soft);white-space:nowrap}
-.badge.hot{border-color:var(--caution);color:var(--caution)}
-.badge.ok{border-color:var(--sound);color:var(--sound)}
-.badge.none{background:var(--water-deep)}
+/* ---------- badges ---------- */
+.badge{display:inline-block;font:10px/1.7 var(--mono);letter-spacing:.09em;
+  text-transform:uppercase;padding:2px 8px;border-radius:999px;
+  border:1px solid var(--rule);color:var(--ink-faint);white-space:nowrap}
+.badge.hot{border-color:var(--caution-dim);color:var(--caution);
+  background:rgba(255,92,158,.08)}
+.badge.ok{border-color:var(--sound-dim);color:var(--sound);
+  background:rgba(63,217,188,.07)}
+.badge.none{background:#08191F}
 
-/* ---- tables ---- */
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--rule-soft)}
-thead th{font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
-  color:var(--ink-soft);border-bottom:1px solid var(--rule)}
-tbody tr:hover{background:var(--water)}
+/* ---------- tables ---------- */
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:10px 10px;border-bottom:1px solid var(--rule-soft)}
+thead th{font:600 10px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;
+  color:var(--ink-faint);border-bottom:1px solid var(--rule)}
+tbody tr{transition:background .12s}
+tbody tr:hover{background:rgba(63,217,188,.05)}
 td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
-.scroll{overflow-x:auto}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
 
-/* ---- stats ---- */
-.stats{display:flex;flex-wrap:wrap;gap:var(--s5) var(--s6);
-  padding:var(--s4) 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
-.stats .stat b{display:block;font:500 24px/1 var(--mono);letter-spacing:-.01em}
-.stats .stat span{display:block;font:11.5px/1.35 var(--sans);color:var(--ink-soft);
-  max-width:24ch;margin-top:5px}
+/* ---------- stats ---------- */
+.stats{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);
+  border-radius:4px;overflow:hidden;
+  grid-template-columns:repeat(auto-fit,minmax(168px,1fr))}
+.stats .stat{padding:var(--s4);background:linear-gradient(180deg,#102B37,#0C222D)}
+.stats .stat b{display:block;font:500 27px/1 var(--mono);letter-spacing:-.02em;
+  color:var(--sound)}
+.stats .stat span{display:block;font:11.5px/1.45 var(--sans);color:var(--ink-faint);
+  max-width:26ch;margin-top:7px}
 
-/* ---- notes, empty states ---- */
-.note{font:12.5px/1.5 var(--sans);color:var(--ink-soft);
-  border-left:3px solid var(--land);padding-left:var(--s3);margin:var(--s4) 0 0;
-  max-width:78ch}
+/* ---------- notes, empty ---------- */
+.note{font:12.5px/1.6 var(--sans);color:var(--ink-faint);border-left:2px solid var(--land);
+  padding-left:var(--s4);margin:var(--s4) 0 0;max-width:80ch}
 .note.hot{border-left-color:var(--caution);color:var(--caution)}
-.note strong{color:var(--ink);font-weight:600}
-.empty{font:italic 400 14px/1.5 var(--serif);color:var(--ink-soft);padding:var(--s3) 0;margin:0}
+.note strong{color:var(--ink-soft);font-weight:600}
+.empty{font:italic 400 14.5px/1.6 var(--serif);color:var(--ink-faint);
+  padding:var(--s4) 0;margin:0}
 
-/* ---- legend ---- */
-.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));
-  gap:10px var(--s5);font-size:13px}
-.legend span{display:flex;gap:9px;align-items:center}
+/* ---------- legend ---------- */
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(236px,1fr));
+  gap:12px var(--s5);font-size:13px;color:var(--ink-soft)}
+.legend span{display:flex;gap:10px;align-items:center}
 .legend .sw{width:20px;height:12px;flex:0 0 20px;border-radius:2px}
 .legend .dot{width:11px;height:11px;border-radius:50%;flex:0 0 11px}
 .legend .key{width:22px;flex:0 0 22px;border-top-width:3px}
 
-/* ---- footer ---- */
-.foot{margin-top:var(--s6);padding-top:var(--s4);border-top:1px solid var(--rule);
-  font:11.5px/1.6 var(--mono);color:var(--ink-faint);
-  display:flex;gap:var(--s4);flex-wrap:wrap}
+/* ---------- footer ---------- */
+.foot{margin-top:var(--s6);padding-top:var(--s5);border-top:1px solid var(--rule);
+  font:11.5px/1.7 var(--mono);color:var(--ink-faint);
+  display:flex;gap:var(--s5);flex-wrap:wrap;align-items:baseline}
 .foot a{color:var(--ink-soft);text-decoration:none}
 .foot a:hover{color:var(--ink)}
+.foot .spacer{flex:1}
+
+/* ---------- leaflet, on the same ground ---------- */
+.leaflet-container{background:var(--sea)!important;font-family:var(--sans)!important}
+.leaflet-control-attribution{background:rgba(6,18,26,.82)!important;
+  color:var(--ink-faint)!important;font-size:10px!important}
+.leaflet-control-attribution a{color:var(--ink-soft)!important}
+.leaflet-bar,.leaflet-control-layers{border:1px solid var(--rule)!important;
+  background:var(--sea-2)!important;box-shadow:none!important;border-radius:3px!important}
+.leaflet-bar a{background:var(--sea-2)!important;color:var(--ink)!important;
+  border-bottom:1px solid var(--rule)!important}
+.leaflet-bar a:hover{background:var(--raise)!important}
+.leaflet-control-layers-toggle{background-color:var(--sea-2)!important}
+.leaflet-control-layers-expanded{color:var(--ink)!important;
+  font:12px/1.5 var(--mono)!important;padding:10px 12px!important}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--sea-2)!important;
+  color:var(--ink)!important;border-radius:3px!important}
+.leaflet-tooltip{background:var(--sea-2)!important;border:1px solid var(--rule)!important;
+  color:var(--ink)!important;font:11.5px/1.4 var(--mono)!important;box-shadow:none!important}
+.leaflet-tooltip:before{display:none!important}
+@keyframes ping{0%{r:9;opacity:.85}70%{r:26;opacity:0}100%{r:26;opacity:0}}
+.ping{animation:ping 2.6s ease-out infinite}
 
 @media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
   *,*::before,*::after{animation-duration:.001ms!important;
     animation-iteration-count:1!important;transition-duration:.001ms!important}
 }
 @media print{
-  body{background:#fff}
+  body{background:#fff;color:#000}
   .nav,.seg,.btn,.row{display:none}
-  .panel,.verdict,.card{border-color:#999;background:#fff}
+  .panel,.verdict,.card,.status,.stats{border-color:#999;background:#fff;color:#000}
 }
 </style>
 </head>
@@ -245,10 +337,11 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
 <header class="masthead">
   <div class="eyebrow">Maritime war risk &middot; act-or-wait decision tool</div>
-  <h1>Act now, or wait? Answered with your own numbers.</h1>
-  <p class="thesis">Most war risk alerts do not justify spending money. Enter what acting
-  early costs you, and this tells you whether the current signal is worth acting on &mdash;
-  and says so plainly when it is not.</p>
+  <h1>Act now, or wait? <em>Answered with your own numbers.</em></h1>
+  <p class="thesis">Most war risk alerts do not justify spending money. Tell us what acting
+  early costs you against crisis prices, and this says whether the current signal is worth
+  acting on &mdash; <strong>including the months when it is not</strong>. One alert in three
+  is followed by a real disruption, and every call we have made is published in advance.</p>
 </header>
 
 <div class="status">
@@ -313,11 +406,38 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
   </form>
 
   <div>
-    <div class="verdict" id="verdict">
+    <section class="panel" id="cxPanel" style="margin-top:0">
+      <h2>Selected chokepoint</h2>
+      <div id="cx"></div>
+      <p class="note" id="cxNote"></p>
+    </section>
+
+    <div class="verdict" id="verdict" style="margin-top:var(--s5)">
       <div class="tag" id="vTag">Verdict</div>
       <div class="call" id="vCall">&mdash;</div>
       <p id="vBody"></p>
     </div>
+
+    <section class="panel">
+      <h2>Act or wait &mdash; your position</h2>
+
+      <figure>
+        <div class="canvas">
+          <svg id="dial" viewBox="0 0 780 380" role="img" aria-labelledby="dialTitle">
+            <title id="dialTitle">Where your cost ratio falls across the three decisions</title>
+          </svg>
+        </div>
+        <figcaption id="dialCap"></figcaption>
+      </figure>
+
+      <figure style="margin-top:var(--s5)">
+        <div class="canvas">
+          <svg id="bars" viewBox="0 0 780 240" role="img" aria-labelledby="barsTitle">
+            <title id="barsTitle">What each policy would have cost you over the evaluation window</title>
+          </svg>
+        </div>
+        <figcaption id="barsCap"></figcaption>
+      </figure>
 
     <figure style="margin-top:var(--s5)">
       <div class="canvas">
@@ -329,10 +449,36 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
       </div>
       <figcaption id="curveCap"></figcaption>
     </figure>
+    </section>
 
-    <div class="row" style="margin-top:var(--s4)">
+    <section class="panel">
+      <h2>Forty years of readings</h2>
+    <figure>
+      <div class="canvas">
+        <svg id="hist" viewBox="0 0 780 340" role="img" aria-labelledby="histTitle">
+          <title id="histTitle">Index value by month since 1985, with alert threshold and onsets</title>
+        </svg>
+      </div>
+      <figcaption id="histCap"></figcaption>
+    </figure>
+    </section>
+
+    <section class="panel">
+      <h2>Where this month sits</h2>
+    <figure>
+      <div class="canvas">
+        <svg id="dist" viewBox="0 0 780 220" role="img" aria-labelledby="distTitle">
+          <title id="distTitle">Where this month sits in the distribution of all months since 1985</title>
+        </svg>
+      </div>
+      <figcaption id="distCap"></figcaption>
+    </figure>
+    </section>
+
+    <div class="row" style="margin-top:var(--s5)">
       <button class="btn" id="log">Record this advice</button>
       <button class="btn ghost" id="csv" disabled>Export log (CSV)</button>
+      <button class="btn ghost" id="clear" disabled>Clear log</button>
     </div>
     <p class="note">Keep a record of what you advised and why. Eighteen months later, this
     is what shows a client, a board or an underwriter that the call was reasoned rather than
@@ -349,9 +495,12 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
   <h2>Chokepoint status</h2>
   <div class="cards" id="board"></div>
   <p class="note" id="boardNote"></p>
-  <p class="note"><strong>Read this before using the per-chokepoint view.</strong> The signal
-  is global. It tells you that escalation risk is rising somewhere, not which route will be
-  hit. Per-chokepoint figures are indicative only and are not forecasts for that route.</p>
+  <p class="note"><strong>What the percentage is.</strong> The share of the world's
+  country-level risk coverage currently sitting on that chokepoint's flanking states,
+  against its own long-run average. It is a measure of where attention is, not a forecast:
+  a chokepoint can hold a large share for months without anything closing. The risk
+  <em>level</em> in the strip at the top of this page is global and is the same figure for
+  every chokepoint &mdash; which is why it is shown once, not seven times.</p>
 </section>
 
 <section class="panel">
@@ -421,7 +570,16 @@ const CORRIDORS = [
 ];
 
 const S = { win:6, alpha:0.12, adopt:0, resp:1 };
-const LOG = [];
+let DATA = null;                          // readings.json once loaded
+let CX = CORRIDORS[0][0];                 // selected chokepoint
+const STORE = "cx-advice-log-v1";
+function loadLog(){
+  try { return JSON.parse(localStorage.getItem(STORE) || "[]"); } catch (e) { return []; }
+}
+function saveLog(){
+  try { localStorage.setItem(STORE, JSON.stringify(LOG)); } catch (e) { /* session only */ }
+}
+const LOG = loadLog();
 const pc = x => (x*100).toFixed(1) + "%";
 const esc = s => String(s).replace(/[&<>"]/g, c =>
   ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
@@ -448,9 +606,37 @@ function quotedBand(){
 }
 
 /* ---------- verdict ---------- */
+function cxReading(){
+  if (!DATA) return null;
+  return (DATA.readings || []).find(r => r.corridor === CX) || null;
+}
+
 function renderVerdict(){
   const [lo,hi] = quotedBand(), a = S.alpha, p = paid();
   const inside = a >= lo && a <= hi;
+  const r = cxReading();
+
+  // A chokepoint already inside a disruption cannot be given a timing verdict:
+  // the reading describes what is happening, not what is coming. This overrides
+  // the cost test rather than sitting beside it.
+  if (r && r.regime === "in episode"){
+    document.getElementById("verdict").className = "verdict warn";
+    document.getElementById("vTag").textContent =
+      esc(CX) + " \u00b7 disruption already under way";
+    document.getElementById("vCall").textContent =
+      "No timing decision applies here.";
+    document.getElementById("vBody").innerHTML =
+      esc(CX) + " has been disrupted since <strong>" + esc(r.onset) + "</strong>, "
+      + r.months_since_onset + " months ago. The current risk level describes that "
+      + "disruption; it is not a warning of a new one, so no lead time can be claimed "
+      + "and no early action is justified by timing. Decisions here are about the "
+      + "exposure you already have. Pick a chokepoint that is still open to use the "
+      + "cost test.";
+    document.getElementById("curveCap").textContent =
+      "The cost test below still shows where your ratio falls, but it applies to "
+      + "chokepoints that are not already disrupted.";
+    return;
+  }
   document.getElementById("verdict").className =
     "verdict " + (inside ? "pos" : (a < lo ? "warn" : "neg"));
 
@@ -463,23 +649,23 @@ function renderVerdict(){
   const bandTxt = "<strong>" + pc(lo) + " to " + pc(hi) + "</strong>";
 
   if (inside){
-    call.textContent = "Following the alarm pays for this client.";
-    body.innerHTML = "At a " + S.win + "-month window the alarm carries positive value where "
+    call.textContent = "Yes — acting on this alert pays for you.";
+    body.innerHTML = "Over a " + S.win + "-month window, acting on the alert is worth money where "
       + "acting early costs " + bandTxt + " of crisis-price replacement. This client is inside "
       + "that range. One alarm in three precedes a disruption, so what is justified is "
-      + "reversible: checking alternates, extending hedge tenors, limited forward booking. "
+      + "reversible: check alternatives, extend hedge tenors, book forward in part. "
       + "Not irreversible commitment.";
   } else if (a < lo){
-    call.textContent = "Don't wait for the alarm — act every cycle.";
+    call.textContent = "Don't wait for alerts — act every cycle.";
     body.innerHTML = "Acting early is so cheap relative to what a closure costs this client "
-      + "that always acting beats following any signal. The alarm only adds value between "
+      + "that acting every cycle beats waiting for any signal. Alerts only add value between "
       + bandTxt + ". Below it, the signal is an argument for standing policy, not for timing.";
   } else {
-    call.textContent = "Don't act on the alarm.";
-    body.innerHTML = "Above " + pc(hi) + ", never acting beats following the alarm: 70 false "
-      + "alarms at month level cost this client more than the 41 missed onsets save. The band "
-      + "is " + bandTxt + ". Selling them a subscription that drives spend here would lose them "
-      + "money."
+    call.textContent = "No — don't act on this alert.";
+    body.innerHTML = "Above " + pc(hi) + ", never acting beats following alerts: 70 false "
+      + "alerts would cost you more than the 41 missed disruptions would save. The range "
+      + "is " + bandTxt + ". At your cost level, a service that pushed you to act here would "
+      + "lose you money."
       + (S.adopt > 0 ? " Crowding is part of why — their quoted " + pc(a) + " becomes "
                        + pc(p) + " paid." : "");
   }
@@ -493,7 +679,54 @@ function renderVerdict(){
       + "the full curve.";
 }
 
-/* ---------- chart ---------- */
+/* ---------- selected chokepoint ---------- */
+function renderCx(){
+  const meta = CORRIDORS.find(c => c[0] === CX) || ["", "", ""];
+  const r = cxReading();
+  const onsets = (DATA && DATA.onsets && DATA.onsets[CX]) || [];
+  const box = document.getElementById("cx");
+  const note = document.getElementById("cxNote");
+
+  if (!r){
+    box.innerHTML = '<p class="empty">No reading loaded for ' + esc(CX) + '.</p>';
+    note.className = "note";
+    note.textContent = "Serve this page over http with readings.json alongside it.";
+    return;
+  }
+
+  const ep = r.regime === "in episode";
+  const rows = [
+    ["Status", ep
+      ? '<span class="badge hot">disrupted since ' + esc(r.onset) + '</span>'
+      : '<span class="badge ok">open &mdash; no disruption under way</span>'],
+    ["Warning time", ep ? "none &mdash; the disruption has already begun"
+                        : esc(r.horizon || "\u2014")],
+    ["Past disruptions", onsets.length
+      ? onsets.length + " since 1985 (" + onsets.map(esc).join(", ") + ")"
+      : "none since 1985"],
+    ["Signal basis", esc(meta[2])],
+    ["Share of world risk coverage", r.share == null
+      ? "not measurable &mdash; the release carries none of its flanking states"
+      : r.share.toFixed(1) + "% now, against a long-run " + (r.share_avg || 0).toFixed(1)
+        + "% (" + (r.salience_z >= 0 ? "+" : "") + r.salience_z
+        + " standard deviations)"]
+  ];
+
+  box.innerHTML = '<dl style="display:grid;grid-template-columns:minmax(140px,30%) 1fr;'
+    + 'gap:7px 16px;margin:0">'
+    + rows.map(([k,v]) => '<dt style="font:10.5px/1.5 var(--mono);letter-spacing:.06em;'
+        + 'text-transform:uppercase;color:var(--ink-soft)">' + k + '</dt><dd style="margin:0">'
+        + v + '</dd>').join("")
+    + '</dl>';
+
+  note.className = ep ? "note hot" : "note";
+  note.innerHTML = "<strong>The risk level is the same for every chokepoint.</strong> "
+    + "The index measures how the world's news is composed, not where trouble will land, "
+    + "so switching chokepoint changes the status, the warning time and the history "
+    + "&mdash; not the number.";
+}
+
+/* ---------- shared svg helpers ---------- */
 const SVGNS = "http://www.w3.org/2000/svg";
 function el(tag, attrs, text){
   const n = document.createElementNS(SVGNS, tag);
@@ -501,142 +734,633 @@ function el(tag, attrs, text){
   if (text != null) n.textContent = text;
   return n;
 }
+const clear = n => { while (n.firstChild) n.removeChild(n.firstChild); };
+const INK = "#DCE9EE", SOFT = "#7C97A3", LINE = "#1E3E4C", EDGE = "#24485A";
+const TEAL = "#37C2A8", PINK = "#E4467F", AMBER = "#FFB020";
+
+/* One <defs> per canvas: gradients and a glow, so strokes sit on the dark
+   ground instead of fighting it. */
+function defs(id){
+  const d = el("defs", {});
+  const g1 = el("linearGradient", { id:id+"-area", x1:0, y1:0, x2:0, y2:1 });
+  g1.appendChild(el("stop", { offset:"0%",  "stop-color":TEAL, "stop-opacity":.42 }));
+  g1.appendChild(el("stop", { offset:"100%","stop-color":TEAL, "stop-opacity":0 }));
+  const g2 = el("linearGradient", { id:id+"-pays", x1:0, y1:0, x2:0, y2:1 });
+  g2.appendChild(el("stop", { offset:"0%",  "stop-color":PINK, "stop-opacity":.26 }));
+  g2.appendChild(el("stop", { offset:"100%","stop-color":PINK, "stop-opacity":.06 }));
+  const g3 = el("linearGradient", { id:id+"-hist", x1:0, y1:0, x2:0, y2:1 });
+  g3.appendChild(el("stop", { offset:"0%",  "stop-color":TEAL, "stop-opacity":.34 }));
+  g3.appendChild(el("stop", { offset:"100%","stop-color":TEAL, "stop-opacity":.02 }));
+  const f = el("filter", { id:id+"-glow", x:"-40%", y:"-40%", width:"180%", height:"180%" });
+  f.appendChild(el("feGaussianBlur", { stdDeviation:"3.4", result:"b" }));
+  const mg = el("feMerge", {});
+  mg.appendChild(el("feMergeNode", { in:"b" }));
+  mg.appendChild(el("feMergeNode", { in:"SourceGraphic" }));
+  f.appendChild(mg);
+  [g1,g2,g3,f].forEach(x => d.appendChild(x));
+  return d;
+}
+function label(x, y, t, o){
+  return el("text", Object.assign({ x, y, "font-family":"IBM Plex Mono,monospace",
+    "font-size":10, fill:SOFT }, o || {}), t);
+}
+
+/* =========================== the dial =========================== */
+/* A gauge, not a line chart. The three decisions are arcs, your cost ratio is a
+   needle, and the answer is the largest thing on the canvas. The curve below
+   still explains why the band sits where it does, for anyone who asks. */
+const DL = { cx:390, cy:300, rO:214, rI:150, xMax:0.40 };
+const dlAng = v => 180 - (Math.min(v, DL.xMax) / DL.xMax) * 180;
+const polar = (cx, cy, r, deg) => {
+  const a = deg * Math.PI / 180;
+  return [cx + r * Math.cos(a), cy - r * Math.sin(a)];
+};
+function annulus(a0, a1){
+  const [x0,y0] = polar(DL.cx, DL.cy, DL.rO, a0), [x1,y1] = polar(DL.cx, DL.cy, DL.rO, a1);
+  const [x2,y2] = polar(DL.cx, DL.cy, DL.rI, a1), [x3,y3] = polar(DL.cx, DL.cy, DL.rI, a0);
+  const big = Math.abs(a1 - a0) > 180 ? 1 : 0;
+  return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${DL.rO} ${DL.rO} 0 ${big} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`
+       + ` L${x2.toFixed(1)} ${y2.toFixed(1)} A${DL.rI} ${DL.rI} 0 ${big} 0 ${x3.toFixed(1)} ${y3.toFixed(1)} Z`;
+}
+
+function drawDial(){
+  const svg = document.getElementById("dial");
+  const [blo,bhi] = quotedBand();
+  const key = [S.win, S.adopt, S.resp].join("|");
+
+  if (svg.dataset.key !== key){
+    svg.dataset.key = key;
+    clear(svg);
+    svg.appendChild(el("title", {}, "Where your cost ratio falls across the three decisions"));
+    svg.appendChild(defs("dl"));
+    const g = el("g", {});
+
+    const zones = [
+      [0, blo, TEAL, "ACT EVERY CYCLE", "too cheap to bother timing"],
+      [blo, bhi, PINK, "THE ALERT PAYS", "timing is worth money"],
+      [bhi, DL.xMax, "#5B7784", "DON'T ACT", "false alerts cost more"]
+    ];
+    zones.forEach(([from,to,col,head,sub]) => {
+      if (to - from < 0.004) return;
+      g.appendChild(el("path", { d:annulus(dlAng(from), dlAng(to)), fill:col,
+        "fill-opacity": col === PINK ? .5 : .17, stroke:col, "stroke-opacity":.5,
+        "stroke-width":1 }));
+      const mid = (dlAng(from) + dlAng(to)) / 2;
+      const [lx,ly] = polar(DL.cx, DL.cy, DL.rO + 26, mid);
+      const anchor = mid > 105 ? "end" : mid < 75 ? "start" : "middle";
+      g.appendChild(label(lx, ly, head, { "text-anchor":anchor, "font-size":10.5,
+        "letter-spacing":1.2, fill:col, "font-weight":600 }));
+      g.appendChild(label(lx, ly + 13, sub, { "text-anchor":anchor, "font-size":9.5 }));
+    });
+
+    /* the band edges, called out with their numbers */
+    [blo,bhi].forEach(v => {
+      const [x0,y0] = polar(DL.cx, DL.cy, DL.rI - 4, dlAng(v));
+      const [x1,y1] = polar(DL.cx, DL.cy, DL.rO + 6, dlAng(v));
+      g.appendChild(el("line", { x1:x0, y1:y0, x2:x1, y2:y1, stroke:PINK,
+        "stroke-width":1.4, "stroke-opacity":.8 }));
+      const [tx,ty] = polar(DL.cx, DL.cy, DL.rI - 20, dlAng(v));
+      g.appendChild(label(tx, ty, pc(v), { "text-anchor":"middle", "font-size":10,
+        fill:PINK }));
+    });
+
+    /* ticks every 5%, numbers every 10% */
+    for (let i = 0; i <= 8; i++){
+      const v = i * 0.05, a = dlAng(v), major = i % 2 === 0;
+      const [x0,y0] = polar(DL.cx, DL.cy, DL.rO + 2, a);
+      const [x1,y1] = polar(DL.cx, DL.cy, DL.rO + (major ? 11 : 6), a);
+      g.appendChild(el("line", { x1:x0, y1:y0, x2:x1, y2:y1, stroke:EDGE,
+        "stroke-width": major ? 1.4 : .9 }));
+      if (major){
+        const [tx,ty] = polar(DL.cx, DL.cy, DL.rO + 24, a);
+        g.appendChild(label(tx, ty + 3, Math.round(v * 100) + "%",
+          { "text-anchor":"middle", "font-size":9.5 }));
+      }
+    }
+    svg.appendChild(g);
+
+    /* needle, rotated by CSS so it sweeps rather than jumps */
+    const n = el("g", { id:"dlNeedle",
+      style:`transform-origin:${DL.cx}px ${DL.cy}px;transition:transform .42s cubic-bezier(.2,.8,.25,1)` });
+    n.appendChild(el("line", { x1:DL.cx - 26, y1:DL.cy, x2:DL.cx + DL.rO - 6, y2:DL.cy,
+      stroke:INK, "stroke-width":2.6, "stroke-linecap":"round", filter:"url(#dl-glow)" }));
+    n.appendChild(el("circle", { cx:DL.cx + DL.rO - 6, cy:DL.cy, r:5, fill:INK }));
+    svg.appendChild(n);
+    svg.appendChild(el("circle", { cx:DL.cx, cy:DL.cy, r:11, fill:"#0B1D26",
+      stroke:INK, "stroke-width":2.4 }));
+
+    /* the answer, centred under the arc */
+    svg.appendChild(el("text", { id:"dlVerdict", x:DL.cx, y:DL.cy - 96,
+      "text-anchor":"middle", "font-family":"Spectral,Georgia,serif", "font-weight":600,
+      "font-size":38, "letter-spacing":"-0.02em" }));
+    svg.appendChild(el("text", { id:"dlSub", x:DL.cx, y:DL.cy - 66, "text-anchor":"middle",
+      "font-family":"IBM Plex Mono,monospace", "font-size":12, fill:SOFT }));
+    svg.appendChild(el("text", { id:"dlYou", x:DL.cx, y:DL.cy + 44, "text-anchor":"middle",
+      "font-family":"IBM Plex Mono,monospace", "font-size":13, fill:INK }));
+  }
+
+  const a = S.alpha, [lo,hi] = quotedBand();
+  const inside = a >= lo && a <= hi;
+  const col = inside ? TEAL : (a < lo ? AMBER : PINK);
+  document.getElementById("dlNeedle").style.transform = `rotate(${(-dlAng(a)).toFixed(2)}deg)`;
+  const vd = document.getElementById("dlVerdict");
+  vd.textContent = inside ? "Act" : (a < lo ? "Always act" : "Wait");
+  vd.setAttribute("fill", col);
+  document.getElementById("dlSub").textContent = inside
+    ? "the alert is worth following"
+    : (a < lo ? "make it standing policy" : "this alert is not worth acting on");
+  document.getElementById("dlYou").textContent =
+    "your cost " + pc(a) + (S.adopt > 0 && S.resp > 0 ? "  \u2192 paid " + pc(paid()) : "");
+
+  document.getElementById("dialCap").textContent =
+    "The needle is your own cost of acting early. The pink arc is where following the "
+    + "alert beats both always acting and never acting — for a " + S.win + "-month window "
+    + "that is " + pc(lo) + " to " + pc(hi) + " of crisis price.";
+}
+
+/* =========================== the money =========================== */
+/* Expected outlay under each policy over the 484 evaluated months, priced in
+   units of one crisis-price replacement. This is the same arithmetic as the
+   curve, said in money instead of in a score. */
+function policyCosts(a){
+  return [
+    ["Act every cycle", N * a, "pay early every month, disruption or not"],
+    ["Follow the alert", (H + F) * a + M, "pay early on " + (H + F) + " alerts, absorb "
+      + M + " missed disruptions"],
+    ["Never act", H + M, "absorb all " + (H + M) + " disruptions at crisis price"]
+  ];
+}
+
+function drawBars(){
+  const svg = document.getElementById("bars");
+  clear(svg);
+  svg.appendChild(el("title", {}, "What each policy would have cost you"));
+  svg.appendChild(defs("br"));
+
+  const W = 780, L = 168, R = 150, T = 34, rowH = 46;
+  const rows = policyCosts(paid());
+  const max = Math.max(...rows.map(r => r[1]));
+  const best = rows.reduce((m, r) => r[1] < m[1] ? r : m, rows[0]);
+  const worst = rows.reduce((m, r) => r[1] > m[1] ? r : m, rows[0]);
+  const g = el("g", {});
+
+  g.appendChild(label(L, 20, "COST OVER " + N + " MONTHS, IN CRISIS-PRICE UNITS",
+    { "font-size":9.5, "letter-spacing":1.4 }));
+
+  rows.forEach(([name, cost, why], i) => {
+    const y = T + i * rowH, isBest = name === best[0];
+    const w = (cost / max) * (W - L - R);
+    g.appendChild(label(L - 14, y + 15, name, { "text-anchor":"end", "font-size":12,
+      fill: isBest ? INK : SOFT, "font-weight": isBest ? 600 : 400,
+      "font-family":"IBM Plex Sans,sans-serif" }));
+    g.appendChild(el("rect", { x:L, y:y + 3, width:W - L - R, height:20, rx:2,
+      fill:"#0E2530" }));
+    g.appendChild(el("rect", { x:L, y:y + 3, width:Math.max(2, w), height:20, rx:2,
+      fill: isBest ? TEAL : "#3B5A67", "fill-opacity": isBest ? .85 : .6,
+      style:"transition:width .42s cubic-bezier(.2,.8,.25,1)" }));
+    g.appendChild(label(L + Math.max(2, w) + 10, y + 18, cost.toFixed(1),
+      { "font-size":12.5, fill: isBest ? TEAL : SOFT }));
+    if (isBest){
+      g.appendChild(el("rect", { x:L + w + 52, y:y + 4, width:74, height:18, rx:9,
+        fill:"none", stroke:TEAL, "stroke-opacity":.6 }));
+      g.appendChild(label(L + w + 89, y + 17, "CHEAPEST", { "text-anchor":"middle",
+        "font-size":9, "letter-spacing":1, fill:TEAL }));
+    }
+    g.appendChild(label(L, y + 38, why, { "font-size":9.5 }));
+  });
+
+  const saved = worst[1] - best[1];
+  g.appendChild(el("line", { x1:L, y1:T + 3 * rowH + 6, x2:W - 40, y2:T + 3 * rowH + 6,
+    stroke:LINE }));
+  g.appendChild(label(L, T + 3 * rowH + 28,
+    "Choosing " + best[0].toLowerCase() + " over the worst option saves "
+    + saved.toFixed(1) + " units \u2014 " + Math.round(saved / worst[1] * 100) + "% of the bill.",
+    { "font-size":11.5, fill:INK, "font-family":"IBM Plex Sans,sans-serif" }));
+  svg.appendChild(g);
+
+  document.getElementById("barsCap").textContent =
+    "One unit is what a disruption costs you at crisis prices. Multiply by your own "
+    + "figure to read it in money: at 1 unit = \u00a31m, the gap between best and worst is "
+    + "\u00a3" + (saved).toFixed(1) + "m over the period. Counts are fixed at " + H
+    + " correct calls, " + M + " misses and " + F + " false alerts.";
+}
+
+/* =========================== the curve =========================== */
+const CV = { W:780, H:420, L:64, R:28, T:56, B:58, xMax:0.40, yLo:-1.1, yHi:0.28 };
+const cvX = v => CV.L + (v / CV.xMax) * (CV.W - CV.L - CV.R);
+const cvY = v => CV.T + ((CV.yHi - v) / (CV.yHi - CV.yLo)) * (CV.H - CV.T - CV.B);
 
 function drawCurve(){
   const svg = document.getElementById("curve");
-  const W = 780, Hh = 400, L = 62, R = 26, T = 46, B = 54;
-  const xMax = 0.40, yLo = -1.1, yHi = 0.26;
-  const X = v => L + (v / xMax) * (W - L - R);
-  const Y = v => T + ((yHi - v) / (yHi - yLo)) * (Hh - T - B);
   const [blo,bhi] = quotedBand();
-  const a = S.alpha, computed = WINDOWS[S.win].computed;
+  const computed = WINDOWS[S.win].computed;
+  const key = [S.win, S.adopt, S.resp].join("|");
 
-  while (svg.childNodes.length > 2) svg.removeChild(svg.lastChild);
-  const g = el("g", {});
+  /* Static layers are rebuilt only when the band itself moves. That keeps the
+     position marker a persistent element, so it can glide instead of blinking. */
+  if (svg.dataset.key !== key){
+    svg.dataset.key = key;
+    clear(svg);
+    svg.appendChild(el("title", {}, "Value of following the alert against your own cost ratio"));
+    svg.appendChild(defs("cv"));
+    const g = el("g", {});
 
-  /* the three decisions, labelled on the chart itself */
-  [[0, blo, "#37C2A8", "ACT EVERY CYCLE"],
-   [blo, bhi, "#E4467F", "THE SIGNAL PAYS"],
-   [bhi, xMax, "#7C97A3", "DON'T ACT"]].forEach(([from,to,col,label]) => {
-    const w = Math.max(0, X(to) - X(from));
-    g.appendChild(el("rect", { x:X(from), y:T, width:w, height:Hh-T-B, fill:col,
-      "fill-opacity": col === "#E4467F" ? .14 : .055 }));
-    if (w > 76){
-      g.appendChild(el("text", { x:(X(from)+X(to))/2, y:T-15, "text-anchor":"middle",
-        "font-family":"IBM Plex Mono,monospace", "font-size":10.5, "letter-spacing":1.2,
-        fill:col }, label));
+    g.appendChild(el("rect", { x:CV.L, y:CV.T, width:CV.W-CV.L-CV.R,
+      height:CV.H-CV.T-CV.B, fill:"#0E2530" }));
+
+    /* the three decisions */
+    const regions = [[0, blo, TEAL, "ACT EVERY CYCLE", "cheaper to act always"],
+                     [blo, bhi, PINK, "THE ALERT PAYS", "timing is worth money here"],
+                     [bhi, CV.xMax, SOFT, "DON'T ACT", "false alerts cost more than they save"]];
+    regions.forEach(([from,to,col,head,sub]) => {
+      const w = Math.max(0, cvX(to) - cvX(from));
+      if (w <= 0) return;
+      g.appendChild(el("rect", { x:cvX(from), y:CV.T, width:w, height:CV.H-CV.T-CV.B,
+        fill: col === PINK ? "url(#cv-pays)" : col, "fill-opacity": col === PINK ? 1 : .05 }));
+      if (w > 96){
+        const mid = (cvX(from) + cvX(to)) / 2;
+        g.appendChild(label(mid, CV.T-26, head, { "text-anchor":"middle", "font-size":10.5,
+          "letter-spacing":1.3, fill:col, "font-weight":600 }));
+        g.appendChild(label(mid, CV.T-13, sub, { "text-anchor":"middle", "font-size":9.5,
+          fill:SOFT }));
+      }
+    });
+    [blo,bhi].forEach(v => {
+      g.appendChild(el("line", { x1:cvX(v), y1:CV.T, x2:cvX(v), y2:CV.H-CV.B,
+        stroke:PINK, "stroke-width":1.2, "stroke-opacity":.55 }));
+      g.appendChild(label(cvX(v), CV.H-CV.B+32, pc(v), { "text-anchor":"middle",
+        "font-size":9.5, fill:PINK }));
+    });
+
+    /* grid */
+    for (let v = -1.0; v <= 0.2001; v += 0.2){
+      const y = cvY(v), zero = Math.abs(v) < 1e-9;
+      g.appendChild(el("line", { x1:CV.L, y1:y, x2:CV.W-CV.R, y2:y,
+        stroke: zero ? INK : LINE, "stroke-width": zero ? 1.3 : .7,
+        "stroke-opacity": zero ? .7 : 1 }));
+      g.appendChild(label(CV.L-11, y+3.5, v.toFixed(1), { "text-anchor":"end" }));
     }
-  });
-  [blo,bhi].forEach(v => g.appendChild(el("line", { x1:X(v), y1:T, x2:X(v), y2:Hh-B,
-    stroke:"#E4467F", "stroke-width":1, "stroke-opacity":.5 })));
-
-  /* grid and axes */
-  for (let v = -1.0; v <= 0.2001; v += 0.2){
-    const y = Y(v), zero = Math.abs(v) < 1e-9;
-    g.appendChild(el("line", { x1:L, y1:y, x2:W-R, y2:y,
-      stroke: zero ? "#DCE9EE" : "#1E3E4C", "stroke-width": zero ? 1.2 : .7 }));
-    g.appendChild(el("text", { x:L-10, y:y+3.5, "text-anchor":"end",
-      "font-family":"IBM Plex Mono,monospace", "font-size":10, fill:"#7C97A3" }, v.toFixed(1)));
-  }
-  for (let v = 0; v <= 0.4001; v += 0.05){
-    const x = X(v);
-    g.appendChild(el("line", { x1:x, y1:Hh-B, x2:x, y2:Hh-B+5, stroke:"#24485A" }));
-    g.appendChild(el("text", { x:x, y:Hh-B+19, "text-anchor":"middle",
-      "font-family":"IBM Plex Mono,monospace", "font-size":10, fill:"#7C97A3" },
-      Math.round(v*100)));
-  }
-  g.appendChild(el("text", { x:(L+W-R)/2, y:Hh-10, "text-anchor":"middle",
-    "font-family":"IBM Plex Mono,monospace", "font-size":9.5, "letter-spacing":1.5,
-    fill:"#7C97A3" }, "COST OF ACTING EARLY, % OF CRISIS-PRICE REPLACEMENT"));
-  g.appendChild(el("text", { x:16, y:T+2, "font-family":"IBM Plex Mono,monospace",
-    "font-size":9.5, "letter-spacing":1.5, fill:"#7C97A3",
-    transform:"rotate(-90 16 " + (T+2) + ")" }, "VALUE SCORE"));
-
-  /* the curve, with a soft halo so it reads on the dark ground */
-  if (computed){
-    let d = "";
-    for (let v = 0.012; v <= xMax; v += 0.0015){
-      const y = Math.max(yLo, Math.min(yHi, value(v)));
-      d += (d ? "L" : "M") + X(v).toFixed(1) + " " + Y(y).toFixed(1) + " ";
+    for (let v = 0; v <= 0.4001; v += 0.05){
+      g.appendChild(el("line", { x1:cvX(v), y1:CV.H-CV.B, x2:cvX(v), y2:CV.H-CV.B+5, stroke:EDGE }));
+      g.appendChild(label(cvX(v), CV.H-CV.B+19, Math.round(v*100), { "text-anchor":"middle" }));
     }
-    g.appendChild(el("path", { d, fill:"none", stroke:"#37C2A8", "stroke-width":4,
-      "stroke-opacity":.16, "stroke-linecap":"round" }));
-    g.appendChild(el("path", { d, fill:"none", stroke:"#37C2A8", "stroke-width":2.1,
-      "stroke-linecap":"round" }));
-    const peak = 0.1155;
-    g.appendChild(el("circle", { cx:X(peak), cy:Y(value(peak)), r:3, fill:"#37C2A8" }));
-  } else {
-    g.appendChild(el("text", { x:(L+W-R)/2, y:Y(-0.45), "text-anchor":"middle",
-      "font-family":"Spectral,Georgia,serif", "font-style":"italic", "font-size":15,
-      fill:"#7C97A3" },
-      "Reported band only for the " + S.win + "-month window — no curve claimed"));
+    g.appendChild(label((CV.L+CV.W-CV.R)/2, CV.H-8,
+      "WHAT EARLY ACTION COSTS YOU, % OF CRISIS PRICE", { "text-anchor":"middle",
+      "font-size":9.5, "letter-spacing":1.5 }));
+    g.appendChild(label(17, CV.T+2, "VALUE OF FOLLOWING THE ALERT",
+      { "font-size":9.5, "letter-spacing":1.5, transform:`rotate(-90 17 ${CV.T+2})` }));
+
+    if (computed){
+      let d = "", area = "";
+      for (let v = 0.012; v <= CV.xMax; v += 0.0012){
+        const y = Math.max(CV.yLo, Math.min(CV.yHi, value(v)));
+        d += (d ? "L" : "M") + cvX(v).toFixed(1) + " " + cvY(y).toFixed(1) + " ";
+      }
+      area = "M" + cvX(0.012).toFixed(1) + " " + cvY(0).toFixed(1) + " " + d.slice(1)
+           + "L" + cvX(CV.xMax).toFixed(1) + " " + cvY(0).toFixed(1) + " Z";
+      g.appendChild(el("path", { d:area, fill:"url(#cv-area)", "fill-opacity":.55 }));
+      g.appendChild(el("path", { d, fill:"none", stroke:TEAL, "stroke-width":2.4,
+        "stroke-linecap":"round", filter:"url(#cv-glow)" }));
+
+      const peak = 0.1155;
+      g.appendChild(el("circle", { cx:cvX(peak), cy:cvY(value(peak)), r:4.2, fill:"#0B1D26",
+        stroke:TEAL, "stroke-width":2 }));
+      g.appendChild(label(cvX(peak), cvY(value(peak))-13, "best case " + pc(peak),
+        { "text-anchor":"middle", "font-size":9.5, fill:TEAL }));
+    } else {
+      g.appendChild(el("text", { x:(CV.L+CV.W-CV.R)/2, y:cvY(-0.42), "text-anchor":"middle",
+        "font-family":"Spectral,Georgia,serif", "font-style":"italic", "font-size":15,
+        fill:SOFT }, "Reported band only for the " + S.win + "-month window"));
+    }
+    svg.appendChild(g);
+
+    /* hover ghost + capture surface, added once per rebuild */
+    const ghost = el("g", { id:"cvGhost", opacity:0 });
+    ghost.appendChild(el("line", { y1:CV.T, y2:CV.H-CV.B, stroke:INK, "stroke-width":1,
+      "stroke-dasharray":"2 3", "stroke-opacity":.5 }));
+    ghost.appendChild(el("circle", { r:3.2, fill:INK }));
+    ghost.appendChild(el("rect", { x:-40, y:-34, width:80, height:20, rx:2,
+      fill:"#0F2833", stroke:EDGE }));
+    ghost.appendChild(el("text", { y:-20, "text-anchor":"middle",
+      "font-family":"IBM Plex Mono,monospace", "font-size":10.5, fill:INK }));
+    svg.appendChild(ghost);
+
+    /* the persistent position marker */
+    const mk = el("g", { id:"cvMark", style:"transition:transform .16s ease-out" });
+    mk.appendChild(el("line", { y1:CV.T, y2:CV.H-CV.B, stroke:INK, "stroke-width":1.6,
+      "stroke-dasharray":"1 4" }));
+    mk.appendChild(el("rect", { x:-52, y:CV.T-46, width:104, height:24, rx:2,
+      fill:"#0F2833", stroke:INK, "stroke-opacity":.55 }));
+    mk.appendChild(el("text", { y:CV.T-30, "text-anchor":"middle",
+      "font-family":"IBM Plex Mono,monospace", "font-size":11.5, fill:INK, id:"cvMarkT" }));
+    mk.appendChild(el("circle", { cy:CV.T, r:4, fill:INK }));
+    svg.appendChild(mk);
+
+    const arrow = el("g", { id:"cvArrow", opacity:0 });
+    arrow.appendChild(el("path", { id:"cvArrowP", fill:"none", stroke:AMBER, "stroke-width":1.6 }));
+    arrow.appendChild(el("polygon", { id:"cvArrowH", fill:AMBER }));
+    arrow.appendChild(el("text", { id:"cvArrowT", "font-family":"IBM Plex Mono,monospace",
+      "font-size":10.5, fill:AMBER }));
+    svg.appendChild(arrow);
+
+    const hit = el("rect", { x:CV.L, y:CV.T, width:CV.W-CV.L-CV.R, height:CV.H-CV.T-CV.B,
+      fill:"transparent", style:"cursor:crosshair" });
+    hit.addEventListener("mousemove", ev => {
+      const r = svg.getBoundingClientRect();
+      const px = (ev.clientX - r.left) / r.width * CV.W;
+      const v = Math.max(0.005, Math.min(CV.xMax, (px - CV.L) / (CV.W-CV.L-CV.R) * CV.xMax));
+      const gh = document.getElementById("cvGhost");
+      const yy = computed ? cvY(Math.max(CV.yLo, Math.min(CV.yHi, value(v)))) : cvY(0);
+      gh.setAttribute("transform", "translate(" + cvX(v).toFixed(1) + ",0)");
+      gh.querySelector("circle").setAttribute("cy", yy.toFixed(1));
+      gh.querySelector("rect").setAttribute("y", (yy - 34).toFixed(1));
+      const t = gh.querySelector("text");
+      t.setAttribute("y", (yy - 20).toFixed(1));
+      t.textContent = pc(v) + (computed ? "  " + (value(v) >= 0 ? "+" : "")
+                                          + value(v).toFixed(2) : "");
+      gh.setAttribute("opacity", 1);
+    });
+    hit.addEventListener("mouseleave", () =>
+      document.getElementById("cvGhost").setAttribute("opacity", 0));
+    hit.addEventListener("click", ev => {
+      const r = svg.getBoundingClientRect();
+      const px = (ev.clientX - r.left) / r.width * CV.W;
+      const v = Math.max(0.01, Math.min(0.60, (px - CV.L) / (CV.W-CV.L-CV.R) * CV.xMax));
+      const inp = document.getElementById("alpha");
+      inp.value = (v * 100).toFixed(1);
+      inp.dispatchEvent(new Event("input"));
+    });
+    svg.appendChild(hit);
   }
 
-  /* the client's position */
-  const px = X(Math.min(a, xMax));
-  g.appendChild(el("line", { x1:px, y1:T, x2:px, y2:Hh-B, stroke:"#DCE9EE",
-    "stroke-width":1.4, "stroke-dasharray":"1 4" }));
-  g.appendChild(el("circle", { cx:px, cy:T, r:3.4, fill:"#DCE9EE" }));
-  const right = px > W - 170;
-  g.appendChild(el("text", { x:px + (right ? -9 : 9), y:T+16,
-    "text-anchor": right ? "end" : "start", "font-family":"IBM Plex Mono,monospace",
-    "font-size":11, fill:"#DCE9EE" }, pc(a) + " quoted"));
+  /* every call: move the marker and update its chip */
+  const a = S.alpha, computedNow = WINDOWS[S.win].computed;
+  const mk = document.getElementById("cvMark");
+  mk.setAttribute("transform", "translate(" + cvX(Math.min(a, CV.xMax)).toFixed(1) + ",0)");
+  document.getElementById("cvMarkT").textContent =
+    "you: " + pc(a) + (computedNow ? "   " + (value(a) >= 0 ? "+" : "") + value(a).toFixed(2) : "");
 
+  const arrow = document.getElementById("cvArrow");
   if (S.adopt > 0 && S.resp > 0){
-    const qx = X(Math.min(paid(), xMax));
-    g.appendChild(el("line", { x1:px, y1:T+30, x2:qx, y2:T+30, stroke:"#FFB020",
-      "stroke-width":1.5 }));
-    g.appendChild(el("polygon", {
-      points:qx + "," + (T+30) + " " + (qx-6) + "," + (T+26.5) + " " + (qx-6) + "," + (T+33.5),
-      fill:"#FFB020" }));
-    g.appendChild(el("text", { x:qx+9, y:T+34, "font-family":"IBM Plex Mono,monospace",
-      "font-size":10.5, fill:"#FFB020" }, pc(paid()) + " paid"));
+    const x0 = cvX(Math.min(a, CV.xMax)), x1 = cvX(Math.min(paid(), CV.xMax));
+    const y = CV.T + 8;
+    document.getElementById("cvArrowP").setAttribute("d",
+      `M${x0} ${y} C ${(x0+x1)/2} ${y-14}, ${(x0+x1)/2} ${y-14}, ${x1} ${y}`);
+    document.getElementById("cvArrowH").setAttribute("points",
+      `${x1},${y} ${x1-6},${y-4} ${x1-6},${y+4}`);
+    const t = document.getElementById("cvArrowT");
+    t.setAttribute("x", x1 + 9); t.setAttribute("y", y + 4);
+    t.textContent = "you actually pay " + pc(paid());
+    arrow.setAttribute("opacity", 1);
+  } else {
+    arrow.setAttribute("opacity", 0);
   }
 
-  svg.appendChild(g);
+  document.getElementById("curveCap").textContent = computedNow
+    ? "Why the band sits where it does. Above zero, following the alert beats both "
+      + "alternatives; the peak is the cost level where it helps most. Hover to read any "
+      + "point, click to set your own."
+    : "The " + S.win + "-month window has no month-level counts behind it, so only the "
+      + "reported band is shown. Switch to 6 months for the full curve.";
 }
 
-/* ---------- corridor cards ---------- */
+/* =========================== history =========================== */
+function drawHistory(){
+  const svg = document.getElementById("hist");
+  clear(svg);
+  svg.appendChild(el("title", {}, "Index value by month since 1985"));
+  const h = DATA && DATA.history;
+  if (!h || !h.months.length){
+    svg.appendChild(el("text", { x:390, y:170, "text-anchor":"middle",
+      "font-family":"Spectral,Georgia,serif", "font-style":"italic", "font-size":15,
+      fill:SOFT }, "History appears once readings.json is loaded"));
+    document.getElementById("histCap").textContent = "";
+    return;
+  }
+  svg.appendChild(defs("hs"));
+
+  const W=780, H=340, L=52, R=96, T=26, B=42;
+  const n = h.months.length;
+  const cap = Math.min(8, Math.max(...h.tar) * 1.06);
+  const X = i => L + (i / (n - 1)) * (W - L - R);
+  const Y = v => T + (1 - Math.min(v, cap) / cap) * (H - T - B);
+  const g = el("g", {});
+  g.appendChild(el("rect", { x:L, y:T, width:W-L-R, height:H-T-B, fill:"#0E2530" }));
+
+  /* band cuts, labelled down the right margin */
+  ((DATA.band_cuts) || []).forEach(([cut, name]) => {
+    if (cut <= 0 || cut > cap) return;
+    g.appendChild(el("line", { x1:L, y1:Y(cut), x2:W-R, y2:Y(cut), stroke:EDGE,
+      "stroke-width":.8, "stroke-dasharray":"3 4" }));
+    g.appendChild(label(W-R+7, Y(cut)+3.5, name, { "font-size":9 }));
+  });
+
+  /* alarm months as a rail along the base */
+  h.alarm.forEach((on, i) => {
+    if (on) g.appendChild(el("line", { x1:X(i), y1:H-B-4, x2:X(i), y2:H-B,
+      stroke:AMBER, "stroke-width":1.1, "stroke-opacity":.55 }));
+  });
+  g.appendChild(label(L, H-B+26, "amber ticks: months at or above the alert threshold",
+    { "font-size":9 }));
+
+  /* the series */
+  let d = "";
+  h.tar.forEach((v, i) => { d += (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1) + " "; });
+  g.appendChild(el("path", { d: "M" + X(0).toFixed(1) + " " + (H-B) + " " + d.slice(1)
+    + "L" + X(n-1).toFixed(1) + " " + (H-B) + " Z", fill:"url(#hs-hist)" }));
+  g.appendChild(el("path", { d, fill:"none", stroke:TEAL, "stroke-width":1.5,
+    "stroke-opacity":.95 }));
+
+  /* onsets for the selected chokepoint — this is what the selector changes */
+  const idx = {}; h.months.forEach((m, i) => { idx[m] = i; });
+  const onsets = (DATA.onsets && DATA.onsets[CX]) || [];
+  onsets.forEach(m => {
+    const i = idx[m]; if (i === undefined) return;
+    g.appendChild(el("line", { x1:X(i), y1:T, x2:X(i), y2:H-B, stroke:PINK,
+      "stroke-width":1.3, "stroke-dasharray":"4 3", "stroke-opacity":.85 }));
+    g.appendChild(el("polygon", { points:`${X(i)},${T} ${X(i)-4},${T-7} ${X(i)+4},${T-7}`,
+      fill:PINK }));
+    g.appendChild(label(X(i), T-11, m, { "text-anchor":"middle", "font-size":8.5, fill:PINK }));
+  });
+
+  /* years and the current month */
+  h.months.forEach((m, i) => {
+    if (!m.endsWith("-01") || (+m.slice(0,4)) % 5) return;
+    g.appendChild(el("line", { x1:X(i), y1:H-B, x2:X(i), y2:H-B+4, stroke:EDGE }));
+    g.appendChild(label(X(i), H-B+15, m.slice(0,4), { "text-anchor":"middle", "font-size":9.5 }));
+  });
+  const last = n - 1;
+  g.appendChild(el("circle", { cx:X(last), cy:Y(h.tar[last]), r:4, fill:"#0B1D26",
+    stroke:INK, "stroke-width":2 }));
+  g.appendChild(label(X(last)+7, Y(h.tar[last])+3.5, h.tar[last], { fill:INK, "font-size":10.5 }));
+  svg.appendChild(g);
+
+  const alarms = h.alarm.filter(Boolean).length;
+  document.getElementById("histCap").textContent =
+    `${n} months, ${h.months[0]} to ${h.months[n-1]}. ${alarms} were at or above the alert `
+    + `threshold. Pink markers are past disruptions at ${CX} — switch chokepoint to compare. `
+    + `Every threshold is built only from months before the one it judges.`;
+}
+
+/* =========================== distribution =========================== */
+function drawDist(){
+  const svg = document.getElementById("dist");
+  clear(svg);
+  svg.appendChild(el("title", {}, "Where this month sits among all months since 1985"));
+  const h = DATA && DATA.history;
+  if (!h || !h.tar.length){
+    svg.appendChild(el("text", { x:390, y:110, "text-anchor":"middle",
+      "font-family":"Spectral,Georgia,serif", "font-style":"italic", "font-size":15,
+      fill:SOFT }, "Distribution appears once readings.json is loaded"));
+    document.getElementById("distCap").textContent = "";
+    return;
+  }
+  svg.appendChild(defs("ds"));
+
+  const W=780, H=220, L=52, R=28, T=30, B=44, BINS=44;
+  const vals = h.tar, now = vals[vals.length - 1];
+  const cap = Math.min(8, Math.max(...vals) * 1.02);
+  const counts = new Array(BINS).fill(0);
+  vals.forEach(v => { counts[Math.min(BINS-1, Math.floor(v / cap * BINS))]++; });
+  const peak = Math.max(...counts);
+  const X = v => L + (Math.min(v, cap) / cap) * (W - L - R);
+  const bw = (W - L - R) / BINS;
+  const g = el("g", {});
+  g.appendChild(el("rect", { x:L, y:T, width:W-L-R, height:H-T-B, fill:"#0E2530" }));
+
+  counts.forEach((c, i) => {
+    if (!c) return;
+    const hgt = (c / peak) * (H - T - B - 6);
+    const mid = (i + .5) / BINS * cap;
+    g.appendChild(el("rect", { x:L + i*bw + .6, y:H-B-hgt, width:Math.max(1, bw-1.2),
+      height:hgt, fill: mid >= now - cap/BINS/2 && mid <= now + cap/BINS/2 ? PINK : TEAL,
+      "fill-opacity": mid <= now ? .55 : .2 }));
+  });
+
+  ((DATA.band_cuts) || []).forEach(([cut, name]) => {
+    if (cut <= 0 || cut > cap) return;
+    g.appendChild(el("line", { x1:X(cut), y1:T, x2:X(cut), y2:H-B, stroke:EDGE,
+      "stroke-width":.8, "stroke-dasharray":"3 4" }));
+    g.appendChild(label(X(cut), T-6, name.split(" ")[0], { "text-anchor":"middle",
+      "font-size":8.5 }));
+  });
+
+  const below = vals.filter(v => v <= now).length;
+  const pctl = Math.round(below / vals.length * 100);
+  g.appendChild(el("line", { x1:X(now), y1:T, x2:X(now), y2:H-B+6, stroke:PINK,
+    "stroke-width":2, filter:"url(#ds-glow)" }));
+  g.appendChild(el("rect", { x:X(now)-58, y:T-24, width:116, height:20, rx:2,
+    fill:"#0F2833", stroke:PINK, "stroke-opacity":.6 }));
+  g.appendChild(label(X(now), T-10, "this month  " + now, { "text-anchor":"middle",
+    "font-size":10.5, fill:PINK }));
+
+  for (let v = 0; v <= cap; v += 1){
+    g.appendChild(el("line", { x1:X(v), y1:H-B, x2:X(v), y2:H-B+4, stroke:EDGE }));
+    g.appendChild(label(X(v), H-B+16, v, { "text-anchor":"middle" }));
+  }
+  g.appendChild(label((L+W-R)/2, H-8, "INDEX VALUE", { "text-anchor":"middle",
+    "font-size":9.5, "letter-spacing":1.5 }));
+  g.appendChild(label(L-10, T+10, "months", { "text-anchor":"end", "font-size":9 }));
+  svg.appendChild(g);
+
+  document.getElementById("distCap").textContent =
+    `This month is higher than ${pctl}% of the ${vals.length} months since ${h.months[0]}. `
+    + `Bars left of the marker are months at or below the current level.`;
+}
+
+/* ---------- chokepoint cards ---------- */
+function spark(vals){
+  if (!vals || vals.length < 4) return "";
+  const w = 232, h = 34, lo = Math.min(...vals), hi = Math.max(...vals);
+  const rng = (hi - lo) || 1;
+  const X = i => (i / (vals.length - 1)) * w;
+  const Y = v => h - 3 - ((v - lo) / rng) * (h - 8);
+  const d = vals.map((v, i) => (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1)).join(" ");
+  const last = vals[vals.length - 1], rising = last >= vals[0];
+  const col = rising ? "#FF5C9E" : "#3FD9BC";
+  return '<svg viewBox="0 0 ' + w + ' ' + h + '" style="width:100%;height:34px;display:block;'
+    + 'margin-top:var(--s3)" aria-hidden="true">'
+    + '<path d="' + d + " L" + w + " " + h + " L0 " + h + ' Z" fill="' + col + '" fill-opacity=".10"/>'
+    + '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="1.4"/>'
+    + '<circle cx="' + X(vals.length-1).toFixed(1) + '" cy="' + Y(last).toFixed(1)
+    + '" r="2.6" fill="' + col + '"/></svg>';
+}
+
 function renderBoard(data){
   const by = {};
   if (data) (data.readings || []).forEach(r => { by[r.corridor] = r; });
+  const shares = Object.values(by).map(r => r.share).filter(v => v != null);
+  const maxShare = shares.length ? Math.max(...shares) : 1;
 
   document.getElementById("board").innerHTML = CORRIDORS.map(function(c){
     const name = c[0], onsets = c[1], basis = c[2], r = by[name];
+    const sel = name === CX;
+    const open = '<div class="card' + (r && r.regime === "in episode" ? " ep" : "")
+      + '" data-cx="' + esc(name) + '" style="cursor:pointer'
+      + (sel ? ";outline:2px solid var(--sound);outline-offset:-1px" : "") + '">';
+
     if (!r){
-      return '<div class="card"><div class="name">' + esc(name) + '</div>'
+      return open + '<div class="name">' + esc(name) + '</div>'
         + '<div class="meta">' + esc(onsets) + ' \u00b7 ' + esc(basis) + '</div>'
         + '<div style="margin-top:var(--s3)"><span class="badge none">awaiting ingest</span></div></div>';
     }
+
     const ep = r.regime === "in episode";
-    const w = Math.max(0, Math.min(100, (r.tar / GAUGE_MAX) * 100));
-    const cuts = BANDS.slice(1).map(b =>
-      '<i class="cut" style="left:' + (b[0] / GAUGE_MAX * 100).toFixed(1) + '%"></i>').join("");
-    return '<div class="card' + (ep ? " ep" : "") + '">'
+    let body = '';
+
+    if (r.share == null){
+      body = '<div class="meta" style="margin-top:var(--s4)">No attention share &mdash; the '
+        + 'release carries none of this chokepoint\u2019s flanking states, so nothing '
+        + 'chokepoint-specific can be measured here.</div>';
+    } else {
+      const ratio = r.share_avg ? r.share / r.share_avg : 1;
+      const up = ratio >= 1.02, down = ratio <= 0.98;
+      const arrow = up ? "\u25b2" : down ? "\u25bc" : "\u2013";
+      const col = up ? "var(--caution)" : down ? "var(--sound)" : "var(--ink-soft)";
+      const w = Math.max(2, (r.share / maxShare) * 100);
+      const avgPos = r.share_avg ? Math.min(100, (r.share_avg / maxShare) * 100) : null;
+      body =
+        '<div style="display:flex;align-items:baseline;gap:9px;margin-top:var(--s4)">'
+        + '<span style="font:500 27px/1 var(--mono);letter-spacing:-.02em">' + r.share.toFixed(1)
+        + '<span style="font-size:14px;color:var(--ink-faint)">%</span></span>'
+        + '<span style="font:11.5px/1 var(--mono);color:' + col + '">' + arrow + " "
+        + Math.abs(Math.round((ratio - 1) * 100)) + '% vs its average</span></div>'
+        + '<div class="meta">of world risk coverage sits on its flanking states</div>'
+        + '<div class="gauge"><div class="track"><i class="fill' + (up ? " hot" : "")
+        + '" style="width:' + w.toFixed(1) + '%"></i>'
+        + (avgPos != null ? '<i class="cut" style="left:' + avgPos.toFixed(1)
+            + '%;background:var(--ink-soft)"></i>' : "")
+        + '</div><div class="scale"><span>0</span><span>tick = long-run average</span>'
+        + '<span>' + maxShare.toFixed(0) + '%</span></div></div>'
+        + spark(r.share_history);
+    }
+
+    return open
       + '<div class="name">' + esc(name) + '</div>'
       + '<div class="meta">' + esc(onsets) + ' \u00b7 ' + esc(basis) + '</div>'
-      + '<div style="margin-top:var(--s3)"><span class="badge ' + (ep ? "hot" : "ok") + '">'
-      + esc(r.band) + '</span>' + (ep ? ' <span class="badge hot">concurrent</span>' : "") + '</div>'
-      + '<div class="gauge"><div class="track"><i class="fill' + (ep ? " hot" : "")
-      + '" style="width:' + w.toFixed(1) + '%"></i>' + cuts + '</div>'
-      + '<div class="scale"><span>0</span><span>TAR ' + r.tar + '</span><span>'
-      + GAUGE_MAX.toFixed(1) + '</span></div></div>'
-      + '<div class="meta" style="margin-top:var(--s2)">'
-      + (ep ? "no lead time — " + r.months_since_onset + " months after the "
-              + esc(r.onset) + " onset"
-            : esc(r.horizon || ""))
-      + (r.salience_z === null ? " \u00b7 no salience term"
-                               : " \u00b7 salience z " + r.salience_z)
-      + '</div></div>';
+      + '<div style="margin-top:var(--s3)">'
+      + (ep ? '<span class="badge hot">disrupted since ' + esc(r.onset) + '</span>'
+            : '<span class="badge ok">open</span>')
+      + '</div>' + body + '</div>';
   }).join("");
+
+  document.querySelectorAll("#board .card[data-cx]").forEach(c => {
+    c.addEventListener("click", () => {
+      CX = c.dataset.cx;
+      document.getElementById("corridor").value = CX;
+      paint();
+      renderBoard(DATA);
+      document.getElementById("cxPanel").scrollIntoView({ behavior:"smooth", block:"center" });
+    });
+  });
 
   const note = document.getElementById("boardNote");
   if (data){
     const ep = data.corridors_in_episode || [];
     note.className = ep.length ? "note hot" : "note";
-    note.textContent = ep.length ? data.regime_note
-      : "As of " + data.as_of + " \u00b7 " + data.specification
-        + " \u00b7 no corridor inside the post-onset window.";
+    note.innerHTML = ep.length
+      ? esc(data.regime_note)
+      : "As of " + esc(data.as_of) + " \u00b7 no chokepoint is inside a disruption window.";
   } else {
     note.className = "note";
     note.textContent = "No readings loaded. Run tar_ingest.py, then serve this page over http "
@@ -648,6 +1372,7 @@ function renderBoard(data){
 function renderLog(){
   const wrap = document.getElementById("logWrap");
   document.getElementById("csv").disabled = LOG.length === 0;
+  document.getElementById("clear").disabled = LOG.length === 0;
   if (!LOG.length){
     wrap.innerHTML = '<p class="empty">Nothing recorded yet. Set a client\u2019s numbers above '
       + 'and record the call.</p>';
@@ -671,6 +1396,7 @@ document.getElementById("log").addEventListener("click", () => {
     win: S.win, quoted: pc(S.alpha), paid: pc(paid()),
     advice: document.getElementById("vCall").textContent
   });
+  saveLog();
   renderLog();
 });
 
@@ -684,8 +1410,16 @@ document.getElementById("csv").addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
+document.getElementById("clear").addEventListener("click", () => {
+  if (!LOG.length) return;
+  if (!confirm("Delete all " + LOG.length + " recorded decisions? Export first if you "
+               + "need them.")) return;
+  LOG.length = 0; saveLog(); renderLog();
+});
+
 /* ---------- wiring ---------- */
-const paint = () => { renderVerdict(); drawCurve(); };
+const paint = () => { renderCx(); renderVerdict(); drawDial(); drawBars();
+                      drawCurve(); drawHistory(); drawDist(); };
 
 document.getElementById("alpha").addEventListener("input", e => {
   S.alpha = +e.target.value / 100;
@@ -699,6 +1433,11 @@ document.getElementById("adopt").addEventListener("input", e => {
 });
 document.getElementById("resp").addEventListener("change", e => {
   S.resp = +e.target.value; paint();
+});
+document.getElementById("corridor").addEventListener("change", e => {
+  CX = e.target.value;
+  paint();
+  renderBoard(DATA);
 });
 document.querySelectorAll("#window button").forEach(b => {
   b.addEventListener("click", () => {
@@ -719,6 +1458,8 @@ paint();
 
 fetch("readings.json").then(r => r.ok ? r.json() : null).then(d => {
   if (!d) throw new Error("no readings.json");
+  DATA = d;
+  paint();                      // the charts and the chokepoint block need the data
   renderBoard(d);
   const first = (d.readings || [])[0] || {};
   const ep = d.corridors_in_episode || [];
