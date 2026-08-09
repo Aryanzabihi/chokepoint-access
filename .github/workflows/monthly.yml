@@ -1,0 +1,61 @@
+name: monthly reading
+
+on:
+  schedule:
+    # 09:00 UTC on the 5th. The release lands in the first days of the month;
+    # the 5th leaves slack without waiting a fortnight.
+    - cron: "0 9 5 * *"
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: write           # to commit record.jsonl and the rendered pages
+
+concurrency:
+  group: monthly-reading    # never two runs writing the record at once
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Fetch, ingest, reconcile, publish, verify. Any failure stops the job
+      # and nothing is committed — the stale-vintage guard means a bad or
+      # missing download cannot produce a published reading.
+      - name: Run the monthly pipeline
+        working-directory: src
+        run: python run_month.py --fetch --if-new
+
+      - name: Assemble the public site
+        run: |
+          mkdir -p docs
+          cp src/track-record.html     docs/index.html
+          cp src/threshold-engine.html  docs/
+          cp src/map.html               docs/
+          cp src/site.css               docs/
+          cp src/readings.json          docs/
+          cp src/record.jsonl           docs/
+          cp src/warrisk_jwc.csv        docs/ 2>/dev/null || true
+          # a page that renders without readings.json is a page that lies by omission
+          test -s docs/index.html && test -s docs/readings.json \
+            && test -s docs/map.html && test -s docs/site.css
+
+      - name: Commit if anything changed
+        run: |
+          git config user.name  "tar-monitor[bot]"
+          git config user.email "actions@github.com"
+          git add src/record.jsonl src/readings.json docs
+          if git diff --cached --quiet; then
+            echo "no change this run"
+          else
+            git commit -m "reading: $(python -c "import json;print(json.load(open('src/readings.json'))['as_of'])")"
+            git push
+          fi

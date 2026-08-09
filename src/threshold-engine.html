@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>War risk: act now or wait? | Chokepoint Access</title>
+<meta name="description" content="Enter what early action costs you and see whether this month's chokepoint war risk signal is worth acting on. Covers Hormuz, Bab-el-Mandeb, Suez, Malacca and the Black Sea.">
+<meta name="robots" content="index,follow">
+<link rel="canonical" href="threshold-engine.html">
+<meta property="og:type" content="website">
+<meta property="og:title" content="War risk: act now or wait?">
+<meta property="og:description" content="A cost-based answer on whether to act on a maritime chokepoint war risk signal — including the months when the answer is no.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style data-inlined="site.css" data-css-hash="4084d117ea3d">
+/* ===========================================================================
+   Chokepoint access — shared design system.
+
+   Two surfaces, deliberately: light paper for chrome and reading, dark chart
+   canvas for anything that is an instrument reading. The split is the whole
+   visual argument — prose is prose, measurements are measurements.
+
+   Linked by threshold-engine.html, map.html and the generated record page.
+   =========================================================================== */
+
+:root{
+  /* paper surface */
+  --water:#E9EFF1; --water-deep:#DCE6E9; --paper:#F6F9FA;
+  --ink:#10222E; --ink-soft:#4A6070; --ink-faint:#7C8F9B;
+  --rule:#B4C3C8; --rule-soft:#D3DEE2; --land:#DBCDB2;
+
+  /* instrument surface */
+  --sea:#0B1D26; --sea-2:#0F2833; --sea-line:#1E3E4C; --sea-edge:#24485A;
+  --sea-ink:#DCE9EE; --sea-soft:#7C97A3;
+
+  /* signal */
+  --caution:#C0157A; --caution-lit:#E4467F;
+  --sound:#1F5F6B;   --sound-lit:#37C2A8;
+  --amber:#B87400;   --amber-lit:#FFB020;
+
+  --s1:4px; --s2:8px; --s3:12px; --s4:18px; --s5:26px; --s6:38px;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --serif:Spectral,Georgia,"Times New Roman",serif;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--water);color:var(--ink);
+  font:15px/1.55 var(--sans);
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:var(--s5) 20px var(--s6)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+::selection{background:var(--caution);color:#fff}
+
+/* ---- skip link, focus ---- */
+.skip{position:absolute;left:-9999px}
+.skip:focus{left:var(--s3);top:var(--s3);z-index:9999;background:var(--ink);
+  color:var(--paper);padding:var(--s2) var(--s3)}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,
+[tabindex]:focus-visible{outline:2px solid var(--caution);outline-offset:2px}
+
+/* ---- navigation ---- */
+.nav{display:flex;gap:var(--s4);align-items:baseline;flex-wrap:wrap;
+  padding-bottom:var(--s4);margin-bottom:var(--s4);
+  border-bottom:1px solid var(--rule);
+  font:500 11.5px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase}
+.nav a{color:var(--ink-soft);text-decoration:none;padding-bottom:3px;
+  border-bottom:2px solid transparent;transition:color .12s,border-color .12s}
+.nav a:hover{color:var(--ink);border-bottom-color:var(--rule)}
+.nav .here{color:var(--ink);border-bottom:2px solid var(--caution);padding-bottom:3px}
+.nav .spacer{flex:1}
+.nav .stamp{color:var(--ink-faint);letter-spacing:.06em;text-transform:none}
+
+/* ---- masthead ---- */
+.eyebrow{font:11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-soft)}
+h1{font:600 clamp(27px,4.6vw,42px)/1.06 var(--serif);letter-spacing:-.016em;
+  margin:var(--s3) 0 var(--s3);max-width:26ch}
+.thesis{font:italic 400 clamp(15px,2vw,18.5px)/1.5 var(--serif);
+  color:var(--ink-soft);max-width:64ch;margin:0}
+.masthead{padding-bottom:var(--s5)}
+
+/* ---- status strip: the live reading, always above the fold ---- */
+.status{display:flex;flex-wrap:wrap;align-items:stretch;
+  background:var(--sea);border:1px solid var(--ink);color:var(--sea-ink)}
+.status .cell{padding:var(--s3) var(--s4);border-right:1px solid var(--sea-line);
+  min-width:132px;flex:1 1 auto}
+.status .cell:last-child{border-right:0}
+.status .k{font:10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--sea-soft)}
+.status .v{font:500 18px/1.2 var(--mono);margin-top:6px}
+.status .v.big{font:600 21px/1.15 var(--serif);letter-spacing:-.01em}
+.status .v.hot{color:var(--caution-lit)}
+.status .v.ok{color:var(--sound-lit)}
+.status .v.dim{color:var(--sea-soft)}
+
+/* ---- panels ---- */
+.panel{background:var(--paper);border:1px solid var(--rule);padding:var(--s4);
+  margin-top:var(--s5)}
+.panel > h2{font:600 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-soft);margin:0 0 var(--s4);padding-bottom:var(--s2);
+  border-bottom:1px solid var(--rule)}
+.panel.tight{padding:var(--s3) var(--s4)}
+.grid{display:grid;gap:var(--s5);align-items:start}
+@media (min-width:900px){.grid.split{grid-template-columns:312px 1fr}}
+
+/* ---- form controls ---- */
+label{display:block;font:500 12.5px/1.4 var(--sans);margin-bottom:5px}
+.field{margin-bottom:var(--s4)}
+.field:last-child{margin-bottom:0}
+.hint{font:11.5px/1.42 var(--sans);color:var(--ink-soft);margin:5px 0 0}
+input[type=text],input[type=number],select{
+  width:100%;padding:9px 10px;border:1px solid var(--rule);background:#fff;
+  color:var(--ink);font:14px/1.2 var(--mono);border-radius:0}
+input[type=text]:hover,select:hover{border-color:var(--ink-faint)}
+input[type=range]{width:100%;margin:var(--s2) 0 0;accent-color:var(--caution);height:22px}
+.readout{font:500 22px/1 var(--mono);letter-spacing:-.01em}
+.readout .unit{font:400 13px/1 var(--sans);color:var(--ink-soft);margin-left:2px}
+
+.seg{display:flex;border:1px solid var(--rule);background:#fff}
+.seg button{flex:1;padding:9px 8px;border:0;background:transparent;cursor:pointer;
+  font:12.5px/1 var(--mono);color:var(--ink-soft);transition:background .12s,color .12s}
+.seg button + button{border-left:1px solid var(--rule)}
+.seg button:hover{background:var(--water-deep)}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
+.seg.wide button{flex:0 0 auto;padding:9px 14px}
+
+.btn{border:1px solid var(--ink);background:var(--ink);color:var(--paper);
+  padding:10px 16px;cursor:pointer;font:11.5px/1 var(--mono);letter-spacing:.09em;
+  text-transform:uppercase;transition:opacity .12s}
+.btn:hover{opacity:.85}
+.btn.ghost{background:transparent;color:var(--ink)}
+.btn.ghost:hover{background:var(--water-deep);opacity:1}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}
+
+/* ---- verdict ---- */
+.verdict{background:#fff;border:1px solid var(--rule);border-left-width:5px;
+  padding:var(--s4) var(--s4) var(--s4) var(--s5)}
+.verdict .tag{font:10.5px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+  color:var(--ink-soft)}
+.verdict .call{font:600 clamp(20px,3.2vw,28px)/1.16 var(--serif);margin:var(--s2) 0 var(--s2)}
+.verdict p{margin:0;max-width:64ch;color:var(--ink-soft);font-size:14px}
+.verdict p strong{color:var(--ink);font-weight:500}
+.verdict.pos{border-left-color:var(--sound)} .verdict.pos .call{color:var(--sound)}
+.verdict.neg{border-left-color:var(--caution)} .verdict.neg .call{color:var(--caution)}
+.verdict.warn{border-left-color:var(--amber)} .verdict.warn .call{color:var(--amber)}
+
+/* ---- instrument canvas ---- */
+figure{margin:0}
+.canvas{background:var(--sea);border:1px solid var(--ink)}
+.canvas svg{display:block;width:100%;height:auto}
+figcaption{font:11.5px/1.45 var(--sans);color:var(--ink-soft);margin-top:var(--s3);
+  max-width:74ch}
+
+/* ---- cards + band gauge ---- */
+.cards{display:grid;gap:var(--s3);
+  grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.card{background:#fff;border:1px solid var(--rule);padding:var(--s3) var(--s4) var(--s4)}
+.card .name{font:600 14.5px/1.25 var(--serif)}
+.card .meta{font:11px/1.4 var(--mono);color:var(--ink-soft);margin-top:3px}
+.card.ep{border-color:var(--caution)}
+.gauge{margin-top:var(--s3)}
+.gauge .track{position:relative;height:8px;background:var(--water-deep);
+  border:1px solid var(--rule-soft)}
+.gauge .fill{position:absolute;inset:0 auto 0 0;background:var(--sound)}
+.gauge .fill.hot{background:var(--caution)}
+.gauge .cut{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--ink-faint)}
+.gauge .scale{display:flex;justify-content:space-between;
+  font:9.5px/1 var(--mono);color:var(--ink-faint);margin-top:5px}
+
+/* ---- badges ---- */
+.badge{display:inline-block;font:10px/1.6 var(--mono);letter-spacing:.09em;
+  text-transform:uppercase;padding:2px 7px;border:1px solid var(--rule);
+  color:var(--ink-soft);white-space:nowrap}
+.badge.hot{border-color:var(--caution);color:var(--caution)}
+.badge.ok{border-color:var(--sound);color:var(--sound)}
+.badge.none{background:var(--water-deep)}
+
+/* ---- tables ---- */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--rule-soft)}
+thead th{font:600 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-soft);border-bottom:1px solid var(--rule)}
+tbody tr:hover{background:var(--water)}
+td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+
+/* ---- stats ---- */
+.stats{display:flex;flex-wrap:wrap;gap:var(--s5) var(--s6);
+  padding:var(--s4) 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+.stats .stat b{display:block;font:500 24px/1 var(--mono);letter-spacing:-.01em}
+.stats .stat span{display:block;font:11.5px/1.35 var(--sans);color:var(--ink-soft);
+  max-width:24ch;margin-top:5px}
+
+/* ---- notes, empty states ---- */
+.note{font:12.5px/1.5 var(--sans);color:var(--ink-soft);
+  border-left:3px solid var(--land);padding-left:var(--s3);margin:var(--s4) 0 0;
+  max-width:78ch}
+.note.hot{border-left-color:var(--caution);color:var(--caution)}
+.note strong{color:var(--ink);font-weight:600}
+.empty{font:italic 400 14px/1.5 var(--serif);color:var(--ink-soft);padding:var(--s3) 0;margin:0}
+
+/* ---- legend ---- */
+.legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));
+  gap:10px var(--s5);font-size:13px}
+.legend span{display:flex;gap:9px;align-items:center}
+.legend .sw{width:20px;height:12px;flex:0 0 20px;border-radius:2px}
+.legend .dot{width:11px;height:11px;border-radius:50%;flex:0 0 11px}
+.legend .key{width:22px;flex:0 0 22px;border-top-width:3px}
+
+/* ---- footer ---- */
+.foot{margin-top:var(--s6);padding-top:var(--s4);border-top:1px solid var(--rule);
+  font:11.5px/1.6 var(--mono);color:var(--ink-faint);
+  display:flex;gap:var(--s4);flex-wrap:wrap}
+.foot a{color:var(--ink-soft);text-decoration:none}
+.foot a:hover{color:var(--ink)}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;
+    animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+@media print{
+  body{background:#fff}
+  .nav,.seg,.btn,.row{display:none}
+  .panel,.verdict,.card{border-color:#999;background:#fff}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#verdict">Skip to the verdict</a>
+<div class="wrap">
+
+<nav class="nav">
+  <span class="here">Act or wait</span>
+  <a href="map.html">Zone map</a>
+  <a href="index.html">Track record</a>
+  <span class="spacer"></span>
+  <span class="stamp" id="stamp">no readings loaded</span>
+</nav>
+
+<header class="masthead">
+  <div class="eyebrow">Maritime war risk &middot; act-or-wait decision tool</div>
+  <h1>Act now, or wait? Answered with your own numbers.</h1>
+  <p class="thesis">Most war risk alerts do not justify spending money. Enter what acting
+  early costs you, and this tells you whether the current signal is worth acting on &mdash;
+  and says so plainly when it is not.</p>
+</header>
+
+<div class="status">
+  <div class="cell"><div class="k">Risk level now</div><div class="v big dim" id="sBand">no readings</div></div>
+  <div class="cell"><div class="k">Month</div><div class="v" id="sMonth">&mdash;</div></div>
+  <div class="cell"><div class="k">Index value</div><div class="v" id="sTar">&mdash;</div></div>
+  <div class="cell"><div class="k">Alert threshold</div><div class="v" id="sCut">&mdash;</div></div>
+  <div class="cell"><div class="k">Active disruption</div><div class="v" id="sEp">&mdash;</div></div>
+</div>
+
+<div class="grid split" style="margin-top:var(--s5)">
+
+  <form class="panel" onsubmit="return false" style="margin-top:0">
+    <h2>Your position</h2>
+
+    <div class="field">
+      <label for="client">Client or account name</label>
+      <input type="text" id="client" placeholder="e.g. Adriatic Bulk Ltd" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label for="corridor">Chokepoint</label>
+      <select id="corridor"></select>
+    </div>
+
+    <div class="field">
+      <label id="winLabel">How far ahead you can commit</label>
+      <div class="seg" id="window" role="group" aria-labelledby="winLabel">
+        <button type="button" data-w="3">3 mo</button>
+        <button type="button" data-w="6" aria-pressed="true">6 mo</button>
+        <button type="button" data-w="12">12 mo</button>
+      </div>
+      <p class="hint">Not how far ahead you plan &mdash; how far ahead you can still
+      change your mind without losing the money.</p>
+    </div>
+
+    <div class="field">
+      <label for="alpha">What early action costs you, against crisis prices</label>
+      <div class="readout"><span id="alphaOut">12.0</span><span class="unit">%</span></div>
+      <input type="range" id="alpha" min="1" max="60" step="0.5" value="12" aria-describedby="alphaHint">
+      <p class="hint" id="alphaHint">Today's quote to extend cover, book an alternative or
+      hold a hedge, divided by what the same thing costs once the route is closing. If cover
+      is $40k now and $400k mid-crisis, that is 10%.</p>
+    </div>
+
+    <div class="field">
+      <label for="adopt">How many others are acting on the same signal</label>
+      <div class="readout"><span id="adoptOut">0</span><span class="unit">%</span></div>
+      <input type="range" id="adopt" min="0" max="100" step="5" value="0">
+    </div>
+
+    <div class="field">
+      <label for="resp">How fast prices rise when everyone moves at once</label>
+      <select id="resp">
+        <option value="0">No response</option>
+        <option value="1" selected>Unit response</option>
+        <option value="2.5">Strong response</option>
+      </select>
+      <p class="hint">When the market piles into the same trade, the quote you were given
+      is not the price you pay. This shows what that does to your position.</p>
+    </div>
+  </form>
+
+  <div>
+    <div class="verdict" id="verdict">
+      <div class="tag" id="vTag">Verdict</div>
+      <div class="call" id="vCall">&mdash;</div>
+      <p id="vBody"></p>
+    </div>
+
+    <figure style="margin-top:var(--s5)">
+      <div class="canvas">
+        <svg id="curve" viewBox="0 0 780 400" role="img" aria-labelledby="curveTitle curveDesc">
+          <title id="curveTitle">Value of following the alarm against the client's own cost ratio</title>
+          <desc id="curveDesc">Three regions: below the band acting every cycle is cheaper,
+          inside the band the signal pays, above it never acting is cheaper.</desc>
+        </svg>
+      </div>
+      <figcaption id="curveCap"></figcaption>
+    </figure>
+
+    <div class="row" style="margin-top:var(--s4)">
+      <button class="btn" id="log">Record this advice</button>
+      <button class="btn ghost" id="csv" disabled>Export log (CSV)</button>
+    </div>
+    <p class="note">Keep a record of what you advised and why. Eighteen months later, this
+    is what shows a client, a board or an underwriter that the call was reasoned rather than
+    guessed. Held in this page only for now &mdash; export it before you close the tab.</p>
+  </div>
+</div>
+
+<section class="panel">
+  <h2>Decision log</h2>
+  <div id="logWrap"></div>
+</section>
+
+<section class="panel">
+  <h2>Chokepoint status</h2>
+  <div class="cards" id="board"></div>
+  <p class="note" id="boardNote"></p>
+  <p class="note"><strong>Read this before using the per-chokepoint view.</strong> The signal
+  is global. It tells you that escalation risk is rising somewhere, not which route will be
+  hit. Per-chokepoint figures are indicative only and are not forecasts for that route.</p>
+</section>
+
+<section class="panel">
+  <h2>Our track record, misses included</h2>
+  <div class="stats">
+    <div class="stat"><b>11</b><span>alerts raised, on thresholds set only from past data</span></div>
+    <div class="stat"><b>3</b><span>followed by a real disruption</span></div>
+    <div class="stat"><b>1 in 3</b><span>hit rate &mdash; the number to plan against</span></div>
+    <div class="stat"><b>100&times;</b><span>more likely than a month picked at random</span></div>
+  </div>
+  <div class="scroll" style="margin-top:var(--s4)">
+  <table>
+    <tbody>
+      <tr><td>Hit rate when the alert holds for four months</td><td class="m">1 in 3</td></tr>
+      <tr><td>Correct calls / missed disruptions / false alerts</td><td class="m">15 / 41 / 70</td></tr>
+      <tr><td>Accuracy three months ahead of a disruption</td><td class="m">0.74 out of 1.00</td></tr>
+      <tr><td>Same test using raw news volume instead</td><td class="m">0.67</td></tr>
+      <tr><td>Base rate: any given month, any given route</td><td class="m">0.24%</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note"><strong>What we will not claim.</strong> This does not predict ship
+  rerouting, cannot tell you whether a given escalation will turn into a closure or fade,
+  and does not identify the route. The largest reading in forty years was followed by
+  nothing. If a competing service advertises 70&ndash;100% accuracy, ask whether the
+  threshold was chosen before or after the outcomes were known &mdash; choosing it
+  afterwards roughly triples the apparent hit rate.</p>
+</section>
+
+<footer class="foot">
+  <span>Chokepoint Access &mdash; maritime war risk timing</span>
+  <a href="map.html">Zone map</a>
+  <a href="index.html">Track record</a>
+  <span class="spacer"></span>
+  <span id="footStamp"></span>
+</footer>
+
+</div>
+
+<script>
+"use strict";
+
+/* frozen evaluation counts, six-month action window */
+const H = 15, M = 41, F = 70, N = 484;
+
+const WINDOWS = {
+  3:  { band:[0.04,0.09], computed:false },
+  6:  { band:[0.11,0.17], computed:true  },
+  12: { band:[0.16,0.30], computed:false }
+};
+
+/* Table S1 band floors, used by the corridor gauges */
+const BANDS = [
+  [0.00,"Routine"], [0.99,"Elevated tension"], [1.42,"Procurement Watch"],
+  [1.98,"High-risk escalation"], [2.87,"Critical transition"], [5.12,"Crisis regime"]
+];
+const GAUGE_MAX = 6.0;
+
+const CORRIDORS = [
+  ["Strait of Hormuz","4 onsets","GCC coverage (proxy)"],
+  ["Bab-el-Mandeb","1 onset","Saudi and Egyptian coverage (proxy)"],
+  ["Adriatic","2 onsets","Italian, Turkish, Hungarian coverage (proxy)"],
+  ["Turkish Straits / Black Sea","1 onset","Directly covered"],
+  ["Suez Canal","no onsets","Directly covered"],
+  ["Strait of Malacca","no onsets","Directly covered"],
+  ["Taiwan Strait","no onsets","Directly covered"]
+];
+
+const S = { win:6, alpha:0.12, adopt:0, resp:1 };
+const LOG = [];
+const pc = x => (x*100).toFixed(1) + "%";
+const esc = s => String(s).replace(/[&<>"]/g, c =>
+  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+/* ---------- cost-loss ---------- */
+function value(a){
+  const forecast = (H + F) * a + M;
+  const naive = Math.min(N * a, H + M);
+  return (naive - forecast) / (naive - (H + M) * a);
+}
+const paid = () => S.alpha * (1 + S.resp * (S.adopt / 100));
+
+function computedBand(){
+  let lo = null, hi = null;
+  for (let x = 0.005; x <= 0.60; x += 0.0005){
+    if (value(x) > 0){ if (lo === null) lo = x; hi = x; }
+  }
+  return [lo, hi];
+}
+const activeBand = () => WINDOWS[S.win].computed ? computedBand() : WINDOWS[S.win].band;
+function quotedBand(){
+  const [lo,hi] = activeBand(), k = 1 + S.resp * (S.adopt / 100);
+  return [lo / k, hi / k];
+}
+
+/* ---------- verdict ---------- */
+function renderVerdict(){
+  const [lo,hi] = quotedBand(), a = S.alpha, p = paid();
+  const inside = a >= lo && a <= hi;
+  document.getElementById("verdict").className =
+    "verdict " + (inside ? "pos" : (a < lo ? "warn" : "neg"));
+
+  document.getElementById("vTag").textContent =
+    S.win + "-month window \u00b7 quoted " + pc(a) +
+    (S.adopt > 0 ? " \u00b7 paid " + pc(p) + " after crowding" : "");
+
+  const call = document.getElementById("vCall");
+  const body = document.getElementById("vBody");
+  const bandTxt = "<strong>" + pc(lo) + " to " + pc(hi) + "</strong>";
+
+  if (inside){
+    call.textContent = "Following the alarm pays for this client.";
+    body.innerHTML = "At a " + S.win + "-month window the alarm carries positive value where "
+      + "acting early costs " + bandTxt + " of crisis-price replacement. This client is inside "
+      + "that range. One alarm in three precedes a disruption, so what is justified is "
+      + "reversible: checking alternates, extending hedge tenors, limited forward booking. "
+      + "Not irreversible commitment.";
+  } else if (a < lo){
+    call.textContent = "Don't wait for the alarm — act every cycle.";
+    body.innerHTML = "Acting early is so cheap relative to what a closure costs this client "
+      + "that always acting beats following any signal. The alarm only adds value between "
+      + bandTxt + ". Below it, the signal is an argument for standing policy, not for timing.";
+  } else {
+    call.textContent = "Don't act on the alarm.";
+    body.innerHTML = "Above " + pc(hi) + ", never acting beats following the alarm: 70 false "
+      + "alarms at month level cost this client more than the 41 missed onsets save. The band "
+      + "is " + bandTxt + ". Selling them a subscription that drives spend here would lose them "
+      + "money."
+      + (S.adopt > 0 ? " Crowding is part of why — their quoted " + pc(a) + " becomes "
+                       + pc(p) + " paid." : "");
+  }
+
+  document.getElementById("curveCap").textContent = WINDOWS[S.win].computed
+    ? "Value score is the share of perfect-foresight savings captured, against the better of "
+      + "acting always and never acting. Counts are fixed at 15 hits, 41 misses and 70 false "
+      + "alarms; the cost ratio changes only how they are priced."
+    : "The " + S.win + "-month window has no month-level counts in the frozen registry, so the "
+      + "band is the reported bound rather than a computed curve. The six-month window draws "
+      + "the full curve.";
+}
+
+/* ---------- chart ---------- */
+const SVGNS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, text){
+  const n = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function drawCurve(){
+  const svg = document.getElementById("curve");
+  const W = 780, Hh = 400, L = 62, R = 26, T = 46, B = 54;
+  const xMax = 0.40, yLo = -1.1, yHi = 0.26;
+  const X = v => L + (v / xMax) * (W - L - R);
+  const Y = v => T + ((yHi - v) / (yHi - yLo)) * (Hh - T - B);
+  const [blo,bhi] = quotedBand();
+  const a = S.alpha, computed = WINDOWS[S.win].computed;
+
+  while (svg.childNodes.length > 2) svg.removeChild(svg.lastChild);
+  const g = el("g", {});
+
+  /* the three decisions, labelled on the chart itself */
+  [[0, blo, "#37C2A8", "ACT EVERY CYCLE"],
+   [blo, bhi, "#E4467F", "THE SIGNAL PAYS"],
+   [bhi, xMax, "#7C97A3", "DON'T ACT"]].forEach(([from,to,col,label]) => {
+    const w = Math.max(0, X(to) - X(from));
+    g.appendChild(el("rect", { x:X(from), y:T, width:w, height:Hh-T-B, fill:col,
+      "fill-opacity": col === "#E4467F" ? .14 : .055 }));
+    if (w > 76){
+      g.appendChild(el("text", { x:(X(from)+X(to))/2, y:T-15, "text-anchor":"middle",
+        "font-family":"IBM Plex Mono,monospace", "font-size":10.5, "letter-spacing":1.2,
+        fill:col }, label));
+    }
+  });
+  [blo,bhi].forEach(v => g.appendChild(el("line", { x1:X(v), y1:T, x2:X(v), y2:Hh-B,
+    stroke:"#E4467F", "stroke-width":1, "stroke-opacity":.5 })));
+
+  /* grid and axes */
+  for (let v = -1.0; v <= 0.2001; v += 0.2){
+    const y = Y(v), zero = Math.abs(v) < 1e-9;
+    g.appendChild(el("line", { x1:L, y1:y, x2:W-R, y2:y,
+      stroke: zero ? "#DCE9EE" : "#1E3E4C", "stroke-width": zero ? 1.2 : .7 }));
+    g.appendChild(el("text", { x:L-10, y:y+3.5, "text-anchor":"end",
+      "font-family":"IBM Plex Mono,monospace", "font-size":10, fill:"#7C97A3" }, v.toFixed(1)));
+  }
+  for (let v = 0; v <= 0.4001; v += 0.05){
+    const x = X(v);
+    g.appendChild(el("line", { x1:x, y1:Hh-B, x2:x, y2:Hh-B+5, stroke:"#24485A" }));
+    g.appendChild(el("text", { x:x, y:Hh-B+19, "text-anchor":"middle",
+      "font-family":"IBM Plex Mono,monospace", "font-size":10, fill:"#7C97A3" },
+      Math.round(v*100)));
+  }
+  g.appendChild(el("text", { x:(L+W-R)/2, y:Hh-10, "text-anchor":"middle",
+    "font-family":"IBM Plex Mono,monospace", "font-size":9.5, "letter-spacing":1.5,
+    fill:"#7C97A3" }, "COST OF ACTING EARLY, % OF CRISIS-PRICE REPLACEMENT"));
+  g.appendChild(el("text", { x:16, y:T+2, "font-family":"IBM Plex Mono,monospace",
+    "font-size":9.5, "letter-spacing":1.5, fill:"#7C97A3",
+    transform:"rotate(-90 16 " + (T+2) + ")" }, "VALUE SCORE"));
+
+  /* the curve, with a soft halo so it reads on the dark ground */
+  if (computed){
+    let d = "";
+    for (let v = 0.012; v <= xMax; v += 0.0015){
+      const y = Math.max(yLo, Math.min(yHi, value(v)));
+      d += (d ? "L" : "M") + X(v).toFixed(1) + " " + Y(y).toFixed(1) + " ";
+    }
+    g.appendChild(el("path", { d, fill:"none", stroke:"#37C2A8", "stroke-width":4,
+      "stroke-opacity":.16, "stroke-linecap":"round" }));
+    g.appendChild(el("path", { d, fill:"none", stroke:"#37C2A8", "stroke-width":2.1,
+      "stroke-linecap":"round" }));
+    const peak = 0.1155;
+    g.appendChild(el("circle", { cx:X(peak), cy:Y(value(peak)), r:3, fill:"#37C2A8" }));
+  } else {
+    g.appendChild(el("text", { x:(L+W-R)/2, y:Y(-0.45), "text-anchor":"middle",
+      "font-family":"Spectral,Georgia,serif", "font-style":"italic", "font-size":15,
+      fill:"#7C97A3" },
+      "Reported band only for the " + S.win + "-month window — no curve claimed"));
+  }
+
+  /* the client's position */
+  const px = X(Math.min(a, xMax));
+  g.appendChild(el("line", { x1:px, y1:T, x2:px, y2:Hh-B, stroke:"#DCE9EE",
+    "stroke-width":1.4, "stroke-dasharray":"1 4" }));
+  g.appendChild(el("circle", { cx:px, cy:T, r:3.4, fill:"#DCE9EE" }));
+  const right = px > W - 170;
+  g.appendChild(el("text", { x:px + (right ? -9 : 9), y:T+16,
+    "text-anchor": right ? "end" : "start", "font-family":"IBM Plex Mono,monospace",
+    "font-size":11, fill:"#DCE9EE" }, pc(a) + " quoted"));
+
+  if (S.adopt > 0 && S.resp > 0){
+    const qx = X(Math.min(paid(), xMax));
+    g.appendChild(el("line", { x1:px, y1:T+30, x2:qx, y2:T+30, stroke:"#FFB020",
+      "stroke-width":1.5 }));
+    g.appendChild(el("polygon", {
+      points:qx + "," + (T+30) + " " + (qx-6) + "," + (T+26.5) + " " + (qx-6) + "," + (T+33.5),
+      fill:"#FFB020" }));
+    g.appendChild(el("text", { x:qx+9, y:T+34, "font-family":"IBM Plex Mono,monospace",
+      "font-size":10.5, fill:"#FFB020" }, pc(paid()) + " paid"));
+  }
+
+  svg.appendChild(g);
+}
+
+/* ---------- corridor cards ---------- */
+function renderBoard(data){
+  const by = {};
+  if (data) (data.readings || []).forEach(r => { by[r.corridor] = r; });
+
+  document.getElementById("board").innerHTML = CORRIDORS.map(function(c){
+    const name = c[0], onsets = c[1], basis = c[2], r = by[name];
+    if (!r){
+      return '<div class="card"><div class="name">' + esc(name) + '</div>'
+        + '<div class="meta">' + esc(onsets) + ' \u00b7 ' + esc(basis) + '</div>'
+        + '<div style="margin-top:var(--s3)"><span class="badge none">awaiting ingest</span></div></div>';
+    }
+    const ep = r.regime === "in episode";
+    const w = Math.max(0, Math.min(100, (r.tar / GAUGE_MAX) * 100));
+    const cuts = BANDS.slice(1).map(b =>
+      '<i class="cut" style="left:' + (b[0] / GAUGE_MAX * 100).toFixed(1) + '%"></i>').join("");
+    return '<div class="card' + (ep ? " ep" : "") + '">'
+      + '<div class="name">' + esc(name) + '</div>'
+      + '<div class="meta">' + esc(onsets) + ' \u00b7 ' + esc(basis) + '</div>'
+      + '<div style="margin-top:var(--s3)"><span class="badge ' + (ep ? "hot" : "ok") + '">'
+      + esc(r.band) + '</span>' + (ep ? ' <span class="badge hot">concurrent</span>' : "") + '</div>'
+      + '<div class="gauge"><div class="track"><i class="fill' + (ep ? " hot" : "")
+      + '" style="width:' + w.toFixed(1) + '%"></i>' + cuts + '</div>'
+      + '<div class="scale"><span>0</span><span>TAR ' + r.tar + '</span><span>'
+      + GAUGE_MAX.toFixed(1) + '</span></div></div>'
+      + '<div class="meta" style="margin-top:var(--s2)">'
+      + (ep ? "no lead time — " + r.months_since_onset + " months after the "
+              + esc(r.onset) + " onset"
+            : esc(r.horizon || ""))
+      + (r.salience_z === null ? " \u00b7 no salience term"
+                               : " \u00b7 salience z " + r.salience_z)
+      + '</div></div>';
+  }).join("");
+
+  const note = document.getElementById("boardNote");
+  if (data){
+    const ep = data.corridors_in_episode || [];
+    note.className = ep.length ? "note hot" : "note";
+    note.textContent = ep.length ? data.regime_note
+      : "As of " + data.as_of + " \u00b7 " + data.specification
+        + " \u00b7 no corridor inside the post-onset window.";
+  } else {
+    note.className = "note";
+    note.textContent = "No readings loaded. Run tar_ingest.py, then serve this page over http "
+      + "with readings.json alongside it.";
+  }
+}
+
+/* ---------- log ---------- */
+function renderLog(){
+  const wrap = document.getElementById("logWrap");
+  document.getElementById("csv").disabled = LOG.length === 0;
+  if (!LOG.length){
+    wrap.innerHTML = '<p class="empty">Nothing recorded yet. Set a client\u2019s numbers above '
+      + 'and record the call.</p>';
+    return;
+  }
+  wrap.innerHTML = '<div class="scroll"><table><thead><tr><th>Recorded</th><th>Client</th>'
+    + '<th>Corridor</th><th class="m">Window</th><th class="m">Quoted</th>'
+    + '<th class="m">Paid</th><th>Advice</th></tr></thead><tbody>'
+    + LOG.slice().reverse().map(r => '<tr><td class="m">' + r.at + '</td><td>'
+        + esc(r.client) + '</td><td>' + esc(r.corridor) + '</td><td class="m">' + r.win
+        + ' mo</td><td class="m">' + r.quoted + '</td><td class="m">' + r.paid + '</td><td>'
+        + esc(r.advice) + '</td></tr>').join("")
+    + '</tbody></table></div>';
+}
+
+document.getElementById("log").addEventListener("click", () => {
+  LOG.push({
+    at: new Date().toISOString().slice(0,16).replace("T"," "),
+    client: document.getElementById("client").value.trim() || "(unnamed)",
+    corridor: document.getElementById("corridor").value,
+    win: S.win, quoted: pc(S.alpha), paid: pc(paid()),
+    advice: document.getElementById("vCall").textContent
+  });
+  renderLog();
+});
+
+document.getElementById("csv").addEventListener("click", () => {
+  if (!LOG.length) return;
+  const head = "recorded,client,corridor,window_months,quoted_cost_ratio,paid_cost_ratio,advice";
+  const rows = LOG.map(r => [r.at,r.client,r.corridor,r.win,r.quoted,r.paid,r.advice]
+    .map(v => '"' + String(v).replace(/"/g,'""') + '"').join(","));
+  const url = URL.createObjectURL(new Blob([head + "\n" + rows.join("\n")], { type:"text/csv" }));
+  Object.assign(document.createElement("a"), { href:url, download:"advice-log.csv" }).click();
+  URL.revokeObjectURL(url);
+});
+
+/* ---------- wiring ---------- */
+const paint = () => { renderVerdict(); drawCurve(); };
+
+document.getElementById("alpha").addEventListener("input", e => {
+  S.alpha = +e.target.value / 100;
+  document.getElementById("alphaOut").textContent = (+e.target.value).toFixed(1);
+  paint();
+});
+document.getElementById("adopt").addEventListener("input", e => {
+  S.adopt = +e.target.value;
+  document.getElementById("adoptOut").textContent = e.target.value;
+  paint();
+});
+document.getElementById("resp").addEventListener("change", e => {
+  S.resp = +e.target.value; paint();
+});
+document.querySelectorAll("#window button").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#window button")
+      .forEach(x => x.setAttribute("aria-pressed","false"));
+    b.setAttribute("aria-pressed","true");
+    S.win = +b.dataset.w;
+    paint();
+  });
+});
+
+/* ---------- boot ---------- */
+document.getElementById("corridor").innerHTML =
+  CORRIDORS.map(c => "<option>" + esc(c[0]) + "</option>").join("");
+renderBoard(null);
+renderLog();
+paint();
+
+fetch("readings.json").then(r => r.ok ? r.json() : null).then(d => {
+  if (!d) throw new Error("no readings.json");
+  renderBoard(d);
+  const first = (d.readings || [])[0] || {};
+  const ep = d.corridors_in_episode || [];
+  const band = document.getElementById("sBand");
+  band.textContent = first.band || "—";
+  band.className = "v big " + (ep.length ? "hot" : "ok");
+  document.getElementById("sMonth").textContent = d.as_of || "—";
+  document.getElementById("sTar").textContent = first.tar != null ? first.tar : "—";
+  document.getElementById("sCut").textContent =
+    d.recursive_cut != null ? d.recursive_cut : "—";
+  const epc = document.getElementById("sEp");
+  epc.textContent = ep.length ? ep.join(", ") : "none";
+  epc.className = "v" + (ep.length ? " hot" : " ok");
+  const stamp = "readings as of " + d.as_of;
+  document.getElementById("stamp").textContent = stamp;
+  document.getElementById("footStamp").textContent = stamp;
+}).catch(() => {
+  document.getElementById("stamp").textContent = "no readings — serve over http";
+  document.getElementById("footStamp").textContent = "no readings loaded";
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+# ---- client and commercial material: never commit ----
+client_spend*.csv
+brief*.html
+standdown*.html
+attestation*.html
+
+# ---- third-party copyright: the facts are ours, the documents are not ----
+*.docx
+*.pdf
+
+# ---- the paper's own outputs stay local while it is under review ----
+/final_output/
+/output/
+*_Manuscript*.docx
+
+# ---- the vintage is fetched by the workflow, never redistributed from here ----
+/data/
+
+# ---- generated in src/ and regenerated into docs/ by the workflow.
+#      These paths are ANCHORED with a leading slash on purpose: unanchored,
+#      they would also match docs/readings.json, which the published pages
+#      fetch — git add would skip it silently and the live site would show
+#      no readings with no error anywhere. ----
+/src/readings.json
+/src/track-record.html
+/src/index.html
+/src/outputs/
+*.part
+
+# ---- keep: these ARE the asset ----
+!/src/record.jsonl
+!/src/outcomes.csv
+!/src/warrisk_jwc.csv
+!/src/jwc_snapshots.csv
+!/src/tar_reference.json
+
+# ---- everything under docs/ is the published site; nothing here is ignored ----
+!/docs/
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
