@@ -179,12 +179,24 @@ def episodes(alarm: pd.Series, gap: int = EPISODE_GAP) -> list[tuple]:
 # --------------------------------------------------------------------------
 
 def salience(df: pd.DataFrame, codes: list[str]) -> pd.Series | None:
-    """Share of flanking-country risk in total country-level risk, z-scored
-    on an expanding window.
+    """Legacy accessor: the expanding z-score of the flanking-country share."""
+    parts = salience_parts(df, codes)
+    return None if parts is None else parts[1]
 
-    Returns None when the release carries none of the requested countries,
-    which is the honest outcome for corridors whose escalating states are
-    unpublished and whose proxies are also absent.
+
+def salience_parts(df: pd.DataFrame, codes: list[str]):
+    """Returns (share, z) where share is the fraction of total country-level
+    risk coverage sitting on this corridor's flanking states, and z is that
+    share standardised on an expanding window.
+
+    The share is the quantity worth showing: it differs by corridor, it is
+    bounded and readable, and it is the actual input to attribution. The global
+    indicator is one number for the whole world — printing it once per corridor
+    tells the reader nothing they did not already know.
+
+    Returns None when the release carries none of the requested countries, which
+    is the honest outcome for corridors whose escalating states are unpublished
+    and whose proxies are also absent.
     """
     cols = [c for c in df.columns
             if any(c.upper().endswith(k) or c.upper() == f"GPRC_{k}" for k in codes)]
@@ -196,7 +208,7 @@ def salience(df: pd.DataFrame, codes: list[str]) -> pd.Series | None:
     frac = df[cols].sum(axis=1) / total.replace(0, np.nan)
     mean = frac.expanding(min_periods=BURN_IN).mean()
     sd = frac.expanding(min_periods=BURN_IN).std()
-    return (frac - mean) / sd
+    return frac, (frac - mean) / sd
 
 
 # --------------------------------------------------------------------------
@@ -235,6 +247,9 @@ class Reading:
     threat_share: float | None
     onset: str | None
     months_since_onset: int | None
+    share: float | None
+    share_avg: float | None
+    share_history: list[float] | None
     salience_z: float | None
     attribution: str
     months_since_trigger: int | None
@@ -368,8 +383,19 @@ def build_readings(df: pd.DataFrame) -> dict:
 
     readings = []
     for name, meta in CORRIDORS.items():
-        sal = salience(df, meta["codes"])
+        parts = salience_parts(df, meta["codes"])
+        sal = None if parts is None else parts[1]
         sal_now = None if sal is None or pd.isna(sal.iloc[-1]) else round(float(sal.iloc[-1]), 3)
+
+        share = share_avg = None
+        share_hist = None
+        if parts is not None:
+            frac = parts[0].dropna()
+            if len(frac):
+                share = round(float(frac.iloc[-1]) * 100, 2)
+                share_avg = round(float(frac.expanding(min_periods=BURN_IN)
+                                        .mean().iloc[-1]) * 100, 2)
+                share_hist = [round(float(v) * 100, 2) for v in frac.iloc[-60:]]
         band, pct, hz = assign_band(tar_now)
         reg, onset, since = regime(name, last)
         caveats = ["Band is a global reading. It does not indicate which theatre is moving."]
@@ -381,11 +407,16 @@ def build_readings(df: pd.DataFrame) -> dict:
         if meta["proxy"]:
             caveats.append("Proxy attribution: " + meta["note"] + ".")
         if sal is None:
-            caveats.append("No salience term: release carries none of this corridor's flanking countries.")
+            caveats.append("No attention share: the release carries none of this "
+                           "corridor's flanking countries.")
+        elif share is not None and share_avg:
+            caveats.append(f"Flanking states carry {share:.1f}% of global country-level "
+                           f"risk coverage this month, against a long-run {share_avg:.1f}%.")
         readings.append(asdict(Reading(
             corridor=name, regime=reg, band=band, percentile_range=pct, horizon=hz,
             tar=round(tar_now, 3), threat_share=round(share_now, 4),
             onset=onset, months_since_onset=since,
+            share=share, share_avg=share_avg, share_history=share_hist,
             salience_z=sal_now,
             attribution=("proxy" if meta["proxy"] else "direct"),
             months_since_trigger=trig, validated=False, caveats=caveats,
@@ -579,6 +610,27 @@ def selftest() -> int:
             assert al is False, f"alarm set before a cut existed at {h['months'][i]}"
     assert out["band_cuts"][0][0] == 0.0 and len(out["band_cuts"]) == len(BANDS)
     assert "Strait of Hormuz" in out["onsets"]
+
+    # 11. The per-corridor quantity must actually vary, or the board is still
+    #     printing one number seven times.
+    shares = [r["share"] for r in out["readings"]]
+    assert all(x is None for x in shares), "synthetic run has no country columns"
+
+    rng2 = np.random.default_rng(4)
+    df2 = pd.DataFrame({"GPRT": threat, "GPRA": act})
+    for code, scale in (("GPRC_SAU", 3.0), ("GPRC_EGY", 2.0), ("GPRC_TUR", 2.5),
+                        ("GPRC_ITA", 1.5), ("GPRC_CHN", 4.0), ("GPRC_RUS", 3.5),
+                        ("GPRC_MYS", 1.0), ("GPRC_TWN", 1.2)):
+        df2[code] = np.abs(rng2.lognormal(scale, 0.4, n))
+    df2.attrs["threat_col"], df2.attrs["act_col"] = "GPRT", "GPRA"
+    out2 = build_readings(df2)
+    got = {r["corridor"]: r["share"] for r in out2["readings"] if r["share"] is not None}
+    assert len(got) >= 4, got
+    assert len(set(got.values())) == len(got), f"shares are not distinct: {got}"
+    for r in out2["readings"]:
+        if r["share"] is not None:
+            assert 0 <= r["share"] <= 100
+            assert r["share_history"] and len(r["share_history"]) <= 60
 
     print("all checks passed")
     print(f"  synthetic TAR now       {out['readings'][0]['tar']}")
