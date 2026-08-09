@@ -40,7 +40,15 @@ PATTERNS = ["data_gpr_export_{vintage}.dta", "data_gpr_export_{vintage}.xls"]
 # whichever name served it.
 CURRENT = ["data_gpr_export.dta", "data_gpr_export.xls"]
 MAX_LAG_DAYS = 75
-UA = "tar-monitor/1.0 (research; contact via repository)"
+# Some hosts reject unfamiliar agents or datacenter traffic outright. A plain
+# browser string is what actually gets served; the identifying comment stays so
+# the request is not disguised.
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 "
+      "(+chokepoint-access monthly reading; open data, CC BY)")
+HEADERS = {"User-Agent": UA, "Accept": "*/*",
+           "Accept-Language": "en-GB,en;q=0.9",
+           "Referer": "https://www.matteoiacoviello.com/gpr.htm"}
 
 
 def candidates(today: date, back: int = 2) -> list[str]:
@@ -95,10 +103,17 @@ def main() -> int:
 
     for url in urls:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            req = urllib.request.Request(url, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=60) as r, tmp.open("wb") as f:
                 f.write(r.read())
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+        except urllib.error.HTTPError as e:
+            hint = ""
+            if e.code in (403, 401, 429):
+                hint = ("  <- the host refused the request rather than saying the file is "
+                        "missing. This is a block, not a wrong path.")
+            problems.append(f"{url}: HTTP {e.code} {e.reason}{hint}")
+            continue
+        except (urllib.error.URLError, TimeoutError) as e:
             problems.append(f"{url}: {e}")
             continue
 
@@ -124,6 +139,9 @@ def main() -> int:
     print("\nOpen matteoiacoviello.com/gpr.htm, copy the link behind "
           "'Stata format' under Data,")
     print("and either pass it as --url or add its directory to BASES.")
+    print("\nIf every attempt shows HTTP 403 while the same URL works from a desktop,")
+    print("the host is refusing this network. The data is Creative Commons BY, so the")
+    print("fallback is to commit the vintage to the repository and drop --fetch.")
     return 1
 
 

@@ -27,7 +27,8 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Fetch, ingest, reconcile, publish, verify. Any failure stops the job
+      # Fetch, ingest, check the construction against the pinned fingerprint,
+      # publish, inline styles, verify. Any failure stops the job
       # and nothing is committed — the stale-vintage guard means a bad or
       # missing download cannot produce a published reading.
       - name: Run the monthly pipeline
@@ -52,7 +53,10 @@ jobs:
         run: |
           git config user.name  "tar-monitor[bot]"
           git config user.email "actions@github.com"
-          git add src/record.jsonl src/readings.json docs
+          # src/readings.json is deliberately ignored — the tracked copy is
+          # docs/readings.json, which the published pages fetch. Naming an
+          # ignored path here makes git exit 1 and fails the whole run.
+          git add src/record.jsonl docs
           if git diff --cached --quiet; then
             echo "no change this run"
           else
