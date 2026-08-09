@@ -1,0 +1,145 @@
+{
+  "as_of": "2026-07-01",
+  "corridors_in_episode": [
+    "Strait of Hormuz"
+  ],
+  "regime_note": "One or more corridors are inside the post-onset window, so an elevated global reading is partly a description of those episodes. Do not read it as anticipation elsewhere.",
+  "specification": "compound TAR, real-time expanding-mean normaliser, 12-month burn-in",
+  "primary_trigger": "Procurement Watch",
+  "recursive_cut": 1.42,
+  "alarm_now": true,
+  "episodes_to_date": 29,
+  "readings": [
+    {
+      "corridor": "Strait of Hormuz",
+      "regime": "in episode",
+      "band": "Procurement Watch",
+      "percentile_range": "P70-P85",
+      "horizon": null,
+      "tar": 1.68,
+      "threat_share": 0.509,
+      "onset": "2026-02",
+      "months_since_onset": 5,
+      "salience_z": 2.642,
+      "attribution": "proxy",
+      "months_since_trigger": 0,
+      "validated": false,
+      "caveats": [
+        "Concurrent, not anticipatory: 5 months after the 2026-02 onset. The band describes an ongoing disruption; no lead time is implied.",
+        "Band is a global reading. It does not indicate which theatre is moving.",
+        "Proxy attribution: Iran unpublished; GCC coverage substituted."
+      ]
+    },
+    {
+      "corridor": "Bab-el-Mandeb",
+      "regime": "at risk",
+      "band": "Procurement Watch",
+      "percentile_range": "P70-P85",
+      "horizon": "60-90 days",
+      "tar": 1.68,
+      "threat_share": 0.509,
+      "onset": null,
+      "months_since_onset": null,
+      "salience_z": 1.769,
+      "attribution": "proxy",
+      "months_since_trigger": 0,
+      "validated": false,
+      "caveats": [
+        "Band is a global reading. It does not indicate which theatre is moving.",
+        "Proxy attribution: Yemen unpublished; Saudi and Egyptian coverage substituted."
+      ]
+    },
+    {
+      "corridor": "Adriatic",
+      "regime": "at risk",
+      "band": "Procurement Watch",
+      "percentile_range": "P70-P85",
+      "horizon": "60-90 days",
+      "tar": 1.68,
+      "threat_share": 0.509,
+      "onset": null,
+      "months_since_onset": null,
+      "salience_z": -0.029,
+      "attribution": "proxy",
+      "months_since_trigger": 0,
+      "validated": false,
+      "caveats": [
+        "Band is a global reading. It does not indicate which theatre is moving.",
+        "Proxy attribution: Balkan states unpublished; regional coverage substituted."
+      ]
+    },
+    {
+      "corridor": "Turkish Straits / Black Sea",
+      "regime": "at risk",
+      "band": "Procurement Watch",
+      "percentile_range": "P70-P85",
+      "horizon": "60-90 days",
+      "tar": 1.68,
+      "threat_share": 0.509,
+      "onset": null,
+      "months_since_onset": null,
+      "salience_z": 0.66,
+      "attribution": "direct",
+      "months_since_trigger": 0,
+      "validated": false,
+      "caveats": [
+        "Band is a global reading. It does not indicate which theatre is moving."
+      ]
+    },
+    {
+      "corridor": "Suez Canal",
+      "regime": "at risk",
+      "band": "Procurement Watch",
+      "percentile_range": "P70-P85",
+      "horizon": "60-90 days",
+      "tar": 1.68,
+      "threat_share": 0.509,
+      "onset": null,
+      "months_since_onset": null,
+      "salience_z": 0.031,
+      "attribution": "direct",
+      "months_since_trigger": 0,
+      "validated": false,
+      "caveats": [
+        "Band is a global reading. It does not indicate which theatre is moving."
+      ]
+    },
+    {
+      "corridor": "Strait of Malacca",
+      "regime": "at risk",
+      "band": "Procurement Watch",
+      "percentile_range": "P70-P85",
+      "horizon": "60-90 days",
+      "tar": 1.68,
+      "threat_share": 0.509,
+      "onset": null,
+      "months_since_onset": null,
+      "salience_z": -0.276,
+      "attribution": "direct",
+      "months_since_trigger": 0,
+      "validated": false,
+      "caveats": [
+        "Band is a global reading. It does not indicate which theatre is moving."
+      ]
+    },
+    {
+      "corridor": "Taiwan Strait",
+      "regime": "at risk",
+      "band": "Procurement Watch",
+      "percentile_range": "P70-P85",
+      "horizon": "60-90 days",
+      "tar": 1.68,
+      "threat_share": 0.509,
+      "onset": null,
+      "months_since_onset": null,
+      "salience_z": 0.354,
+      "attribution": "direct",
+      "months_since_trigger": 0,
+      "validated": false,
+      "caveats": [
+        "Band is a global reading. It does not indicate which theatre is moving."
+      ]
+    }
+  ],
+  "warning": "Corridor level is a demonstrated architecture, not a validated instrument. Do not present these as corridor forecasts."
+}
