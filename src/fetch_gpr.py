@@ -22,19 +22,34 @@ from pathlib import Path
 
 import pandas as pd
 
-BASE = "https://www.matteoiacoviello.com/gpr_files"
-# The site has used both extensions; try in order of what it publishes now.
+# The publisher's page names vintages data_gpr_export_YYYYMM.{dta,xls}, but the
+# directory has moved before now, so try the known locations rather than assuming
+# one. Pass --url to skip all guessing.
+BASES = [
+    "https://www.matteoiacoviello.com/gpr_files",
+    "https://www.matteoiacoviello.com",
+    "https://www.matteoiacoviello.com/gpr_files/vintages",
+    "https://www.matteoiacoviello.com/gpr_files/data",
+]
 PATTERNS = ["data_gpr_export_{vintage}.dta", "data_gpr_export_{vintage}.xls"]
+# Confirmed Aug 2026: the undated names ARE the live current file on this site
+# (the frozen replication export lives on the AEA repository, not here), and the
+# dated vintage names are archived elsewhere. So try undated first — it is what
+# resolves — and keep the dated names as a fallback in case that changes. The
+# freshness check below is what protects against ever ingesting a stale file,
+# whichever name served it.
+CURRENT = ["data_gpr_export.dta", "data_gpr_export.xls"]
 MAX_LAG_DAYS = 75
 UA = "tar-monitor/1.0 (research; contact via repository)"
 
 
 def candidates(today: date, back: int = 2) -> list[str]:
-    out = []
+    out = [f"{base}/{f}" for base in BASES for f in CURRENT]
     y, m = today.year, today.month
     for _ in range(back + 1):
-        for p in PATTERNS:
-            out.append(f"{BASE}/{p.format(vintage=f'{y}{m:02d}')}")
+        for base in BASES:
+            for p in PATTERNS:
+                out.append(f"{base}/{p.format(vintage=f'{y}{m:02d}')}")
         m -= 1
         if m == 0:
             y, m = y - 1, 12
@@ -64,10 +79,11 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--url", help="exact file URL, skipping all path guessing")
     p.add_argument("--dry-run", action="store_true")
     a = p.parse_args()
 
-    urls = candidates(date.today())
+    urls = [a.url] if a.url else candidates(date.today())
     if a.dry_run:
         for u in urls:
             print(u)
@@ -83,7 +99,7 @@ def main() -> int:
             with urllib.request.urlopen(req, timeout=60) as r, tmp.open("wb") as f:
                 f.write(r.read())
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
-            problems.append(f"{url.rsplit('/', 1)[-1]}: {e}")
+            problems.append(f"{url}: {e}")
             continue
 
         suffix = ".dta" if url.endswith(".dta") else ".xls"
@@ -93,20 +109,21 @@ def main() -> int:
         try:
             last = check(typed)
         except Exception as e:
-            problems.append(f"{url.rsplit('/', 1)[-1]}: downloaded but unusable — {e}")
+            problems.append(f"{url}: downloaded but unusable — {e}")
             typed.unlink(missing_ok=True)
             continue
 
         if typed != a.out:
             typed.replace(a.out)
-        print(f"fetched {url.rsplit('/', 1)[-1]} -> {a.out}  series ends {last}")
+        print(f"fetched {url}\n  -> {a.out}  series ends {last}")
         return 0
 
-    print("could not fetch a current vintage. Tried:")
+    print(f"could not fetch a current vintage. Tried {len(urls)} URL(s):")
     for pr in problems:
         print("  " + pr)
-    print("\nThe filename pattern may have changed. Check "
-          "matteoiacoviello.com/gpr.htm and update PATTERNS.")
+    print("\nOpen matteoiacoviello.com/gpr.htm, copy the link behind "
+          "'Stata format' under Data,")
+    print("and either pass it as --url or add its directory to BASES.")
     return 1
 
 
