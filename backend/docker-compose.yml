@@ -1,0 +1,18 @@
+# Local Postgres only — for running the backend against something real
+# before any Render account exists. `docker compose up -d`, then point
+# DATABASE_URL (see .env.example) at it.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chokepoint
+      POSTGRES_PASSWORD: chokepoint
+      POSTGRES_DB: chokepoint
+    ports:
+      - "5432:5432"
+    volumes:
+      - chokepoint-db-data:/var/lib/postgresql/data
+
+volumes:
+  chokepoint-db-data:

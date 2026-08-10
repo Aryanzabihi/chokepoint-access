@@ -1,0 +1,58 @@
+# Render blueprint. On Render: New -> Blueprint -> point at this repo, and
+# it reads this file to create the database, the web service, and the cron
+# job together, wired to each other.
+#
+# Two secrets it cannot generate for you and that must be set by hand in the
+# Render dashboard after the blueprint runs (sync: false means "prompt me,
+# don't put a default here"):
+#   RESEND_API_KEY  — from resend.com, once you have an account. Alerts log
+#                      instead of sending until this is set (see app/email.py).
+#   EMAIL_FROM       — the address alerts are sent from.
+
+databases:
+  - name: chokepoint-db
+    plan: free
+    postgresMajorVersion: 16
+
+services:
+  - type: web
+    name: chokepoint-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt && alembic upgrade head"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: chokepoint-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+  - type: cron
+    name: chokepoint-alerts
+    runtime: python
+    plan: free
+    rootDir: backend
+    # 09:00 UTC on the 6th — a day after the existing GitHub Actions monthly
+    # reading workflow (the 5th), so this month's reading has had a chance
+    # to already be published before alerts check it.
+    schedule: "0 9 6 * *"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python -m app.alerts"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: chokepoint-db
+          property: connectionString
+      - key: SESSION_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false

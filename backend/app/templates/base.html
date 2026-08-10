@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Chokepoint Access — client portfolio{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div class="wrap">
+<nav class="nav">
+  <a href="/clients" class="{{ 'here' if active == 'clients' else '' }}">Portfolio</a>
+  <a href="/account/api-keys" class="{{ 'here' if active == 'api-keys' else '' }}">API keys</a>
+  <a href="/../threshold-engine.html">Act or wait</a>
+  <span class="spacer"></span>
+  {% if user %}
+    <span class="stamp">{{ user.email }}</span>
+    <form method="post" action="/logout" style="display:inline;margin:0">
+      <button class="btn ghost" type="submit" style="padding:4px 10px">Log out</button>
+    </form>
+  {% endif %}
+</nav>
+
+{% block content %}{% endblock %}
+
+<footer class="foot">
+  <span>Chokepoint Access &mdash; client portfolio</span>
+  <span class="spacer"></span>
+  <span>Phase 5, commercial infrastructure</span>
+</footer>
+</div>
+</body>
+</html>

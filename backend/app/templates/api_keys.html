@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}API keys — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">Account</div>
+  <h1>API keys</h1>
+  <p class="thesis">A key authenticates <code>/api/v1/...</code> the same way your login does,
+  scoped to your own clients and exposures. Anyone with the raw key can act as you through the
+  API &mdash; treat it like a password.</p>
+</header>
+
+{% if just_created %}
+<p class="note" style="border-left-color:var(--sound);color:var(--sound)">
+  <strong>New key created.</strong> This is the only time it is shown &mdash; copy it now:
+  <code style="display:block;margin-top:8px;word-break:break-all;color:var(--ink)">{{ just_created }}</code>
+</p>
+{% endif %}
+
+<div class="grid split">
+  <form class="panel" method="post" action="/account/api-keys" style="margin-top:0">
+    <h2>Create a key</h2>
+    <div class="field">
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" required placeholder="e.g. procurement dashboard">
+    </div>
+    <button class="btn" type="submit">Create key</button>
+  </form>
+
+  <section class="panel" style="margin-top:0">
+    <h2>Keys ({{ keys|length }})</h2>
+    {% if keys %}
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Name</th><th class="m">Created</th><th class="m">Last used</th>
+        <th class="m">Status</th><th></th></tr></thead>
+        <tbody>
+        {% for k in keys %}
+          <tr>
+            <td>{{ k.name }}</td>
+            <td class="m">{{ k.created_at.strftime("%Y-%m-%d") }}</td>
+            <td class="m">{{ k.last_used_at.strftime("%Y-%m-%d") if k.last_used_at else "never" }}</td>
+            <td class="m">{{ "revoked" if k.revoked_at else "active" }}</td>
+            <td>
+              {% if not k.revoked_at %}
+              <form method="post" action="/account/api-keys/{{ k.id }}/revoke" style="margin:0">
+                <button class="btn ghost" type="submit" style="padding:4px 10px">Revoke</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">No API keys yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

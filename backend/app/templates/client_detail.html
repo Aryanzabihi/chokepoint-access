@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }} — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/clients" style="color:inherit">Portfolio</a> &middot; client</div>
+  <h1>{{ client.name }}</h1>
+</header>
+
+<div class="grid split">
+  <form class="panel" method="post" action="/clients/{{ client.id }}/exposures" style="margin-top:0">
+    <h2>Add an exposure</h2>
+    <div class="field">
+      <label for="corridor">Chokepoint</label>
+      <select id="corridor" name="corridor" required>
+        {% for c in corridors %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="commodity">Commodity <span class="hint" style="display:inline">(optional)</span></label>
+      <input type="text" id="commodity" name="commodity" placeholder="e.g. Steel">
+    </div>
+    <div class="field">
+      <label for="annual_exposure">Annual exposure <span class="hint" style="display:inline">(optional)</span></label>
+      <input type="number" id="annual_exposure" name="annual_exposure" min="0" step="1000">
+    </div>
+    <div class="field">
+      <label for="crisis_replacement_cost">Crisis replacement cost</label>
+      <input type="number" id="crisis_replacement_cost" name="crisis_replacement_cost"
+             min="0" step="1000" required>
+    </div>
+    <div class="field">
+      <label for="currency">Currency</label>
+      <select id="currency" name="currency">
+        <option value="EUR" selected>EUR &euro;</option>
+        <option value="USD">USD $</option>
+        <option value="GBP">GBP &pound;</option>
+      </select>
+    </div>
+    <button class="btn" type="submit">Add exposure</button>
+  </form>
+
+  <section class="panel" style="margin-top:0">
+    <h2>Exposures ({{ exposures|length }})</h2>
+    {% if exposures %}
+    <div class="cards">
+      {% for e in exposures %}
+      <a class="card" href="/clients/{{ client.id }}/exposures/{{ e.id }}"
+         style="text-decoration:none;color:inherit;display:block">
+        <div class="name">{{ e.corridor }}</div>
+        <div class="meta">{{ e.commodity or "no commodity noted" }}</div>
+        <div class="meta" style="margin-top:8px">crisis cost {{ e.currency }} {{ "{:,.0f}".format(e.crisis_replacement_cost) }}</div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">No exposures yet. Add one on the left.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

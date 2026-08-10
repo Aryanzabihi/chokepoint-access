@@ -43,3 +43,7 @@ __pycache__/
 .venv/
 venv/
 .ipynb_checkpoints/
+
+# ---- backend (Phase 5): secrets never committed ----
+.env
+backend/.env

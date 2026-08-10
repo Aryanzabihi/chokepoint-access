@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ exposure.corridor }} — {{ client.name }} — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">
+    <a href="/clients" style="color:inherit">Portfolio</a> &middot;
+    <a href="/clients/{{ client.id }}" style="color:inherit">{{ client.name }}</a>
+  </div>
+  <h1>{{ exposure.corridor }}</h1>
+</header>
+
+{% if reading_error %}
+<p class="note hot"><strong>No current reading available.</strong> {{ reading_error }}</p>
+{% elif reading and reading.regime == "in episode" %}
+<p class="note hot"><strong>Disrupted since {{ reading.onset }}.</strong> No timing decision
+applies while this corridor is inside a disruption window &mdash; you can still record
+exposure-management notes below, but the cost-ratio test does not apply.</p>
+{% endif %}
+
+<div class="grid split">
+  <div>
+    <form class="panel" method="post"
+          action="/clients/{{ client.id }}/exposures/{{ exposure.id }}/decide" style="margin-top:0">
+      <h2>Compute a decision</h2>
+      <div class="field">
+        <label for="alpha_pct">What early action costs, against crisis prices</label>
+        <input type="number" id="alpha_pct" name="alpha_pct" min="0.1" max="60" step="0.1"
+               value="12" required>
+        <p class="hint">% of the {{ exposure.currency }}
+        {{ "{:,.0f}".format(exposure.crisis_replacement_cost) }} crisis replacement cost.</p>
+      </div>
+      <div class="field">
+        <label for="window_months">Window</label>
+        <select id="window_months" name="window_months">
+          <option value="3">3 months</option>
+          <option value="6" selected>6 months</option>
+          <option value="12">12 months</option>
+        </select>
+      </div>
+      <button class="btn" type="submit" {{ "disabled" if reading_error else "" }}>
+        Compute and save</button>
+    </form>
+
+    <form class="panel" method="post"
+          action="/clients/{{ client.id }}/exposures/{{ exposure.id }}/subscribe">
+      <h2>Alerts</h2>
+      <p class="hint" style="margin:0 0 var(--s3)">
+        {% if subscribed %}You get a monthly email if this exposure's decision changes.
+        {% else %}Off. Turn on to get a monthly email if this exposure's decision changes.{% endif %}
+      </p>
+      <button class="btn {{ 'ghost' if subscribed else '' }}" type="submit">
+        {{ "Turn off alerts" if subscribed else "Turn on alerts" }}</button>
+    </form>
+  </div>
+
+  <section class="panel" style="margin-top:0">
+    <h2>Decision history ({{ decisions|length }})</h2>
+    {% if decisions %}
+    <div class="scroll">
+      <table>
+        <thead><tr><th class="m">Computed</th><th class="m">As of</th><th class="m">Window</th>
+        <th class="m">Cost</th><th class="m">TAR</th><th>Band</th><th>Decision</th><th></th></tr></thead>
+        <tbody>
+        {% for d in decisions %}
+          <tr>
+            <td class="m">{{ d.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td class="m">{{ d.as_of }}</td>
+            <td class="m">{{ d.window_months }} mo</td>
+            <td class="m">{{ "%.1f"|format(d.alpha * 100) }}%</td>
+            <td class="m">{{ d.tar }}</td>
+            <td>{{ d.band }}</td>
+            <td><strong>{{ d.decision_level|upper }}</strong>
+              {% if d.decision_margin_pp is not none %}
+              <span class="hint" style="display:inline">({{ "%.1f"|format(d.decision_margin_pp) }} pp)</span>
+              {% endif %}
+            </td>
+            <td><a href="/api/v1/decisions/{{ d.id }}/report/standdown" target="_blank">report</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">No decisions computed yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

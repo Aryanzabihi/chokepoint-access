@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Sign up — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">Client portfolio</div>
+  <h1>Create an account</h1>
+  <p class="thesis">Save clients and exposures, keep a decision history per exposure, and
+  export a report whenever you need one. Nothing here changes the public tool &mdash; this is
+  just where a saved copy of your own work lives.</p>
+</header>
+
+<form class="panel" method="post" action="/signup" style="max-width:420px">
+  {% if error %}<p class="note hot">{{ error }}</p>{% endif %}
+  <div class="field">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" required autocomplete="email">
+  </div>
+  <div class="field">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" required minlength="8"
+           autocomplete="new-password">
+    <p class="hint">At least 8 characters.</p>
+  </div>
+  <button class="btn" type="submit">Create account</button>
+  <p class="hint" style="margin-top:var(--s4)">Already have one? <a href="/login">Log in</a>.</p>
+</form>
+{% endblock %}
