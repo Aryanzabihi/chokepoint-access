@@ -437,9 +437,17 @@ def build_readings(df: pd.DataFrame) -> dict:
         "alarm": [bool(v) for v in hist["alarm"]],
     }
 
+    # The horizon belongs to the band, and the band is global — so it is emitted
+    # once here rather than repeated on every corridor, where it would imply a
+    # route-specific warning time that this method cannot give.
+    band_now, pct_now, horizon_now = assign_band(tar_now)
+
     active = [r["corridor"] for r in readings if r["regime"] == "in episode"]
     return {
         "as_of": str(last.date()),
+        "band": band_now,
+        "percentile_range": pct_now,
+        "horizon": horizon_now,
         "history": history,
         "onsets": {k: list(v) for k, v in ONSETS.items()},
         "band_cuts": [[lo, label] for lo, label, _, _ in BANDS],
@@ -609,6 +617,9 @@ def selftest() -> int:
         else:
             assert al is False, f"alarm set before a cut existed at {h['months'][i]}"
     assert out["band_cuts"][0][0] == 0.0 and len(out["band_cuts"]) == len(BANDS)
+    # the horizon must be global, and identical to what the band implies
+    assert out["horizon"] == assign_band(out["readings"][0]["tar"])[2]
+    assert out["band"] == out["readings"][0]["band"]
     assert "Strait of Hormuz" in out["onsets"]
 
     # 11. The per-corridor quantity must actually vary, or the board is still
