@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}New economic scenario — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/economic-scenarios" style="color:inherit">Economic scenarios</a>
+  &middot; new</div>
+  <h1>Build a scenario</h1>
+  <p class="thesis">This is the same scenario.json shape <code>economic_engine.py</code>'s own
+  CLI reads and writes &mdash; edit the pre-filled example below with your own numbers. Every
+  field is documented in <code>engine.md</code>. Probability is never estimated for you; enter
+  your own, informed by whatever context you have.</p>
+</header>
+
+{% if error %}<p class="note hot"><strong>Could not compute this scenario.</strong> {{ error }}</p>{% endif %}
+
+<form class="panel" method="post" action="/economic-scenarios" style="margin-top:0">
+  <div class="field">
+    <label for="scenario_json">Scenario (JSON)</label>
+    <textarea id="scenario_json" name="scenario_json" rows="28" required
+      style="width:100%;font-family:var(--mono);font-size:12.5px;padding:12px;
+      background:#08191F;color:var(--ink);border:1px solid var(--rule);border-radius:3px"
+      >{{ template_json }}</textarea>
+    <p class="hint">Valid corridors: {{ ", ".join(corridors) if corridors else "see engine.md" }}</p>
+  </div>
+  <button class="btn" type="submit">Compute</button>
+</form>
+{% endblock %}

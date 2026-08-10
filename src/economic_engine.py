@@ -409,22 +409,34 @@ def threshold_status_range(probability_range: tuple[float, float], p_star: float
 # Historical context — never a substitute for the manual probability input
 # --------------------------------------------------------------------------
 
-def historical_context(corridor: str, source: Path, as_of: str | None = None) -> dict:
+def historical_context(corridor: str, source: Path | None = None, as_of: str | None = None, *,
+                        reading: dict | None = None) -> dict:
     """What the existing TAR engine already knows about this corridor,
     presented as context for the user's own probability estimate — never
     used to fill it in. See the module docstring and engine.md section 3.1.
+
+    Two ways to get the reading: pass `source` (the raw GPR vintage — the
+    normal CLI path, calls services.point_in_time() directly), or pass an
+    already-built `reading` dict of the same shape and skip the recompute.
+    The second path exists for callers with no access to the raw vintage —
+    a deployed backend, for instance, where the vintage is deliberately
+    never redistributed (see .gitignore). Whoever built that dict is
+    responsible for it being current; this function just presents it.
     """
     if corridor not in CORRIDORS:
         raise ValueError(f"unknown corridor {corridor!r}. Known: {sorted(CORRIDORS)}")
 
-    reading, reading_error = None, None
-    try:
-        from tar_ingest import load
-        df = load(source, None, None)
-        resolved_as_of = as_of or df.index[-1].strftime("%Y-%m")
-        reading = point_in_time(source, resolved_as_of, corridor)
-    except SystemExit as exc:
-        reading_error = str(exc)
+    reading_error = None
+    if reading is None:
+        if source is None:
+            raise ValueError("historical_context() needs either source or a pre-built reading")
+        try:
+            from tar_ingest import load
+            df = load(source, None, None)
+            resolved_as_of = as_of or df.index[-1].strftime("%Y-%m")
+            reading = point_in_time(source, resolved_as_of, corridor)
+        except SystemExit as exc:
+            reading_error = str(exc)
 
     return {
         "corridor": corridor,
@@ -507,7 +519,8 @@ def to_result_dict(*, scenario_id: str, currency: str, scenario: DisruptionScena
 # Orchestration
 # --------------------------------------------------------------------------
 
-def compute(data: dict, *, source: Path | None = None) -> dict:
+def compute(data: dict, *, source: Path | None = None,
+            historical_reading: dict | None = None) -> dict:
     scenario = DisruptionScenario(**data["disruption"])
     cargo = CargoInputs(**data["cargo"])
     transport = TransportInputs(**data.get("transport", {}))
@@ -560,7 +573,9 @@ def compute(data: dict, *, source: Path | None = None) -> dict:
         "supply_chain_pass_through": data.get("supply_chain_pass_through"),
         "social_multiplier": data.get("social_multiplier"),
     }
-    result["historical_context"] = historical_context(scenario.corridor, source) if source else None
+    result["historical_context"] = (
+        historical_context(scenario.corridor, source, reading=historical_reading)
+        if (source or historical_reading) else None)
     result["explain"] = explain(result)
     return result
 
@@ -676,7 +691,7 @@ Phase 1 MVP: no market agent, no Monte Carlo uncertainty ranges, no licensed dat
 # CLI
 # --------------------------------------------------------------------------
 
-def _template() -> dict:
+def template_scenario() -> dict:
     return {
         "scenario_id": "HORMUZ-2026-001",
         "currency": "EUR",
@@ -733,7 +748,7 @@ def _template() -> dict:
 def write_template(path: Path) -> None:
     if path.exists():
         sys.exit(f"{path} exists — refusing to overwrite")
-    path.write_text(json.dumps(_template(), indent=2), encoding="utf-8")
+    path.write_text(json.dumps(template_scenario(), indent=2), encoding="utf-8")
     print(f"wrote {path}")
     print("  edit it, then: python economic_engine.py compute --scenario "
           f"{path.name} --report report.html")
@@ -868,7 +883,7 @@ def selftest() -> int:
 
     # end-to-end: the template scenario computes and reproduces the same
     # section 9 / 11 / 12 figures through the full compute() orchestrator
-    result = compute(_template())
+    result = compute(template_scenario())
     assert abs(result["expected_loss_across_scenarios"] - 1_290_000) < 1, result
     assert result["recommended_strategy"] == "Partial reroute", result["recommended_strategy"]
     assert result["current_status"] == "MITIGATION_JUSTIFIED", result["current_status"]
@@ -876,8 +891,22 @@ def selftest() -> int:
     assert result["historical_context"] is None   # no --source given
     assert len(result["explain"]) >= 5
 
+    # a pre-built reading (the backend's path -- no raw vintage available)
+    # works the same as the source= path, without touching tar_ingest.load()
+    fake_reading = {"tar": 1.68, "band": "Procurement Watch", "regime": "at risk"}
+    ctx = historical_context("Strait of Hormuz", reading=fake_reading)
+    assert ctx["reading"] == fake_reading
+    assert ctx["reading_error"] is None
+    result3 = compute(template_scenario(), historical_reading=fake_reading)
+    assert result3["historical_context"]["reading"] == fake_reading
+    try:
+        historical_context("Strait of Hormuz")
+        assert False, "no source and no reading should have raised"
+    except ValueError:
+        pass
+
     # reproducibility: same input, same version -> identical result (modulo timestamp)
-    result2 = compute(_template())
+    result2 = compute(template_scenario())
     r1, r2 = dict(result), dict(result2)
     del r1["timestamp"], r2["timestamp"]
     assert r1 == r2, "same input should reproduce the same result"

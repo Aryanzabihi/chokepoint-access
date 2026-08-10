@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ row.scenario_id }} — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/economic-scenarios" style="color:inherit">Economic scenarios</a>
+  &middot; {{ row.corridor }}</div>
+  <h1>{{ row.scenario_id }}</h1>
+</header>
+
+<div class="status">
+  <div class="cell"><div class="k">Expected exposure</div>
+    <div class="v big">{{ result.currency }} {{ "{:,.0f}".format(result.expected_exposure) }}</div></div>
+  <div class="cell"><div class="k">Avoidable loss</div>
+    <div class="v">{{ result.currency }} {{ "{:,.0f}".format(result.avoidable_loss) }}</div></div>
+  <div class="cell"><div class="k">Recommended strategy</div>
+    <div class="v">{{ result.recommended_strategy or "—" }}</div></div>
+  {% if result.current_status %}
+  <div class="cell"><div class="k">Threshold status</div>
+    <div class="v {{ 'ok' if result.current_status == 'MITIGATION_JUSTIFIED' else 'hot' }}">
+    {{ result.current_status.replace("_", " ") }}</div></div>
+  {% endif %}
+</div>
+
+<div class="row" style="margin:var(--s4) 0">
+  <a class="btn ghost" href="/economic-scenarios/{{ row.id }}/report" target="_blank">Full report</a>
+</div>
+
+<div class="grid split">
+  <section class="panel" style="margin-top:0">
+    <h2>Baseline cost (counterfactual)</h2>
+    <table><tbody>
+    {% for k, v in result.baseline_breakdown.items() %}
+      <tr><td>{{ k.replace("_"," ")|title }}</td><td class="m">{{ "{:,.0f}".format(v) }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+  </section>
+
+  <section class="panel" style="margin-top:0">
+    <h2>Disrupted cost, by component</h2>
+    <table><tbody>
+    {% for k, v in result.disrupted_breakdown.items() %}
+      <tr><td>{{ k.replace("_"," ")|title }}</td><td class="m">{{ "{:,.0f}".format(v) }}</td></tr>
+    {% endfor %}
+    </tbody></table>
+  </section>
+</div>
+
+<section class="panel">
+  <h2>Strategy comparison</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Strategy</th><th class="m">Direct cost</th><th class="m">Residual loss</th>
+    <th class="m">Expected total cost</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for r in result.strategy_comparison %}
+      <tr{{ ' style="font-weight:600"' | safe if r.name == result.recommended_strategy else "" }}>
+        <td>{{ r.name }}</td>
+        <td class="m">{{ "{:,.0f}".format(r.direct_cost) }}</td>
+        <td class="m">{{ "{:,.0f}".format(r.residual_loss) }}</td>
+        <td class="m">{{ "{:,.0f}".format(r.expected_total_cost) }}</td>
+        <td>{% if r.eligible %}eligible{% else %}<span style="color:var(--caution)">ineligible:
+          {{ r.ineligibility_reason }}</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+{% if result.historical_context %}
+<section class="panel">
+  <h2>Historical context for {{ result.historical_context.corridor }}</h2>
+  <p class="hint">{{ result.historical_context.global_base_rate.note }}</p>
+  <p class="m">{{ result.historical_context.global_base_rate.episodes_with_disruption }} of
+  {{ result.historical_context.global_base_rate.alarm_episodes }} alarm episodes since 1985
+  preceded a real disruption ({{ "{:.0%}".format(result.historical_context.global_base_rate.hit_rate) }},
+  95% CI {{ "{:.0%}".format(result.historical_context.global_base_rate.hit_rate_ci_95[0]) }}&ndash;{{ "{:.0%}".format(result.historical_context.global_base_rate.hit_rate_ci_95[1]) }}).</p>
+  {% if result.historical_context.reading %}
+  <p>Current reading: TAR {{ result.historical_context.reading.tar }},
+  {{ result.historical_context.reading.band }}.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Why</h2>
+  <ol class="explain">
+    {% for line in result.explain %}<li>{{ line }}</li>{% endfor %}
+  </ol>
+</section>
+
+<p class="note">Model {{ result.model_version }}. Computed {{ result.timestamp }}.
+Confidence: {{ result.confidence }}. Phase 1 MVP &mdash; no market agent, no Monte Carlo
+uncertainty ranges, no licensed data feeds.</p>
+{% endblock %}

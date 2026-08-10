@@ -9,6 +9,7 @@ and in CI.
 
 from __future__ import annotations
 
+import json
 import os
 
 os.environ.setdefault("SESSION_SECRET", "smoke-test-secret-do-not-use-in-prod")
@@ -153,6 +154,68 @@ def test_full_walkthrough(client):
     other = TestClient(app)
     other.post("/signup", data={"email": "other@example.com", "password": "different password"})
     r = other.get(f"/api/v1/clients/{client_id}")
+    assert r.status_code == 404
+
+
+def test_economic_scenario_walkthrough(client):
+    client.post("/signup", data={"email": "analyst@example.com",
+                                  "password": "correct horse battery staple"})
+
+    # the template is the same shape economic_engine.py's own CLI writes
+    r = client.get("/api/v1/economic-scenarios/template")
+    assert r.status_code == 200
+    template = r.json()
+    assert template["disruption"]["corridor"] == "Strait of Hormuz"
+
+    # compute via the JSON API reproduces engine.md's own worked examples
+    r = client.post("/api/v1/economic-scenarios", json=template)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    result = body["result"]
+    assert result["recommended_strategy"] == "Partial reroute"
+    assert abs(result["expected_loss_across_scenarios"] - 1_290_000) < 1
+    assert result["current_status"] == "MITIGATION_JUSTIFIED"
+    # historical_context is populated from docs/readings.json (tracked in
+    # git), not the raw GPR vintage this test process doesn't have
+    assert result["historical_context"] is not None
+    assert result["historical_context"]["corridor"] == "Strait of Hormuz"
+    scenario_id = body["id"]
+
+    # an unknown corridor is rejected before compute() ever runs
+    bad = dict(template)
+    bad["disruption"] = dict(template["disruption"], corridor="Not A Real Strait")
+    r = client.post("/api/v1/economic-scenarios", json=bad)
+    assert r.status_code == 422
+
+    # the dashboard form flow: paste JSON, compute, land on the detail page
+    r = client.get("/economic-scenarios/new")
+    assert r.status_code == 200
+    assert "scenario_json" in r.text
+
+    r = client.post("/economic-scenarios",
+                     data={"scenario_json": json.dumps(template)}, follow_redirects=False)
+    assert r.status_code == 303
+    detail_url = r.headers["location"]
+
+    r = client.get(detail_url)
+    assert r.status_code == 200
+    assert "Partial reroute" in r.text
+    assert "MITIGATION JUSTIFIED" in r.text
+
+    r = client.get(detail_url + "/report")
+    assert r.status_code == 200
+    assert "Economic exposure" in r.text
+
+    # malformed JSON in the form is rejected with a helpful error, not a 500
+    r = client.post("/economic-scenarios", data={"scenario_json": "{not valid json"})
+    assert r.status_code == 422
+    assert "JSONDecodeError" in r.text or "error" in r.text.lower()
+
+    # cross-user isolation holds for scenarios too
+    other = TestClient(app)
+    other.post("/signup", data={"email": "other-analyst@example.com",
+                                 "password": "a different password"})
+    r = other.get(f"/api/v1/economic-scenarios/{scenario_id}")
     assert r.status_code == 404
 
 

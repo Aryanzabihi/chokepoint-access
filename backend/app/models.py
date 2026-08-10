@@ -89,6 +89,31 @@ class ApiKey(SQLModel, table=True):
     revoked_at: datetime | None = None
 
 
+class EconomicScenario(SQLModel, table=True):
+    """A saved run of the economic_engine.py decision engine (engine.md) —
+    a different, more detailed lens than Decision above. Scoped directly to
+    the owning user rather than through a client, since a scenario is
+    useful standalone (a broker exploring a "what if" isn't necessarily
+    building it for one specific client yet); client_id/exposure_id are
+    optional links for organising it once it is.
+
+    input_json is exactly the scenario.json shape economic_engine.py's CLI
+    consumes (economic_engine.py template writes an editable example of
+    it) — same input format whether it came from the CLI or this app.
+    result_json is compute()'s full output, so a report generated later
+    reproduces from stored inputs alone (MVP criterion #14).
+    """
+    id: int | None = Field(default=None, primary_key=True)
+    owner_user_id: int = Field(foreign_key="user.id", index=True)
+    client_id: int | None = Field(default=None, foreign_key="client.id", index=True)
+    exposure_id: int | None = Field(default=None, foreign_key="exposure.id", index=True)
+    scenario_id: str
+    corridor: str
+    input_json: str
+    result_json: str
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class AlertSubscription(SQLModel, table=True):
     """Opting an exposure into monthly email alerts. Email address is
     implicit — always the owning user's, so there's no separate address to

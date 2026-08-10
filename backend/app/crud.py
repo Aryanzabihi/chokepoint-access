@@ -15,7 +15,9 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
-from .models import AlertSubscription, ApiKey, AuditEvent, Client, Decision, Exposure, User
+from .models import (
+    AlertSubscription, ApiKey, AuditEvent, Client, Decision, EconomicScenario, Exposure, User,
+)
 
 
 def audit(session: Session, user_id: int, entity_type: str, entity_id: int,
@@ -123,6 +125,38 @@ def create_decision(session: Session, user: User, exposure: Exposure, *, as_of: 
           f"{exposure.corridor} {as_of} -> {decision_level}")
     session.commit()
     return d
+
+
+# ------------------------------------------------------- economic scenarios ---
+
+def list_economic_scenarios(session: Session, user: User) -> list[EconomicScenario]:
+    return list(session.exec(
+        select(EconomicScenario).where(EconomicScenario.owner_user_id == user.id)
+        .order_by(EconomicScenario.created_at.desc())))
+
+
+def get_economic_scenario_owned(session: Session, user: User,
+                                 scenario_id: int) -> EconomicScenario | None:
+    s = session.get(EconomicScenario, scenario_id)
+    if s is None or s.owner_user_id != user.id:
+        return None
+    return s
+
+
+def create_economic_scenario(session: Session, user: User, *, scenario_id: str, corridor: str,
+                              input_data: dict, result: dict,
+                              client_id: int | None = None,
+                              exposure_id: int | None = None) -> EconomicScenario:
+    row = EconomicScenario(owner_user_id=user.id, client_id=client_id, exposure_id=exposure_id,
+                            scenario_id=scenario_id, corridor=corridor,
+                            input_json=json.dumps(input_data), result_json=json.dumps(result))
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    audit(session, user.id, "economic_scenario", row.id, "computed",
+          f"{corridor} {scenario_id} -> {result.get('recommended_strategy')}")
+    session.commit()
+    return row
 
 
 # -------------------------------------------------------------- api keys ---

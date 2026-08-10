@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Economic scenarios — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">Economic &amp; decision engine</div>
+  <h1>Economic scenarios</h1>
+  <p class="thesis">A more detailed lens than the act-or-wait cost ratio: build a scenario
+  with your own transport, insurance, delay, inventory and commodity numbers, and compare
+  named mitigation strategies by expected total cost.</p>
+</header>
+
+<div class="row" style="margin-bottom:var(--s4)">
+  <a class="btn" href="/economic-scenarios/new">New scenario</a>
+</div>
+
+<section class="panel" style="margin-top:0">
+  <h2>Scenarios ({{ scenarios|length }})</h2>
+  {% if scenarios %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Scenario</th><th>Corridor</th><th>Recommended strategy</th>
+      <th class="m">Computed</th></tr></thead>
+      <tbody>
+      {% for s in scenarios %}
+        <tr>
+          <td><a href="/economic-scenarios/{{ s.id }}">{{ s.scenario_id }}</a></td>
+          <td>{{ s.corridor }}</td>
+          <td>{{ s.recommended or "—" }}</td>
+          <td class="m">{{ s.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No scenarios yet. <a href="/economic-scenarios/new">Build one</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}
