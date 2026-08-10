@@ -2984,8 +2984,10 @@ details .inner .field:first-child{margin-top:var(--s3)}
   <h1>Act now, or wait? <em>Answered with your own numbers.</em></h1>
   <p class="thesis">Most war risk alerts do not justify spending money. Tell us what acting
   early costs you against crisis prices, and this says whether the current signal is worth
-  acting on &mdash; <strong>including the months when it is not</strong>. One alert in three
-  is followed by a real disruption, and every call we have made is published in advance.</p>
+  acting on &mdash; <strong>including the months when it is not</strong>. Roughly one alert
+  in three has been followed by a real disruption &mdash; 3 of 11 episodes since 1985, a
+  small enough sample that the true rate could plausibly be anywhere from 10% to 57%
+  (95% confidence) &mdash; and every call we have made is published in advance.</p>
 </header>
 
 <div class="status">
@@ -3241,6 +3243,62 @@ details .inner .field:first-child{margin-top:var(--s3)}
   afterwards roughly triples the apparent hit rate.</p>
 </section>
 
+<section class="panel">
+  <h2>Signal performance by horizon</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Window</th><th>Correct calls</th><th>Missed disruptions</th>
+      <th>False alarms</th><th>Status</th></tr></thead>
+      <tbody id="horizonBody"></tbody>
+    </table>
+  </div>
+  <p class="note">The six-month window is the only one with a fully computed month-level
+  curve behind it. The 3- and 12-month windows are reported bounds carried over from the
+  underlying evaluation, not independently computed curves &mdash; treat them as less
+  precise than the six-month figures.</p>
+</section>
+
+<section class="panel">
+  <h2>Lead time</h2>
+  <div class="stats" id="leadStats"></div>
+  <div class="scroll" style="margin-top:var(--s4)">
+    <table>
+      <thead><tr><th>Corridor</th><th>Onset</th><th>Months since the nearest prior alert</th></tr></thead>
+      <tbody id="leadBody"></tbody>
+    </table>
+  </div>
+  <p class="note" id="leadNote">Measured directly from the published series: for each
+  documented onset, the gap between it and the most recent month before it where the index
+  was at or above its own alert threshold at the time. This is a lag, not a validated
+  forecast horizon &mdash; with a handful of onsets it tells you the rough order of
+  magnitude, not a distribution you should trust down to the month.</p>
+</section>
+
+<details id="provBox">
+  <summary>Where the thresholds come from</summary>
+  <div class="inner">
+    <p class="hint" style="margin-top:0">Each band boundary is a recursive percentile cut:
+    the level a given month is judged against is computed only from months strictly before
+    it, so nothing is fitted with the benefit of hindsight. None of this should be read as
+    a probability of disruption &mdash; it identifies a historical regime boundary, nothing
+    more.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Threshold</th><th>Band</th><th>Percentile</th><th>Basis</th></tr></thead>
+        <tbody id="provBody"></tbody>
+      </table>
+    </div>
+    <p class="note" id="provSample"></p>
+    <p class="note"><strong>Validation status: in-sample.</strong> These cuts are estimated
+    and evaluated on the same 1985&ndash;present history. Out-of-sample / walk-forward
+    validation &mdash; training on an earlier period and testing on a later one the
+    thresholds never saw &mdash; has not been completed. Treat every figure on this page as
+    a historical fit, not a demonstrated forecast, until that validation exists.</p>
+  </div>
+</details>
+
+<p class="note" id="modelNote"></p>
+
 <footer class="foot">
   <span>Chokepoint Access &mdash; maritime war risk timing</span>
   <a href="map.html">Zone map</a>
@@ -3267,6 +3325,17 @@ const WINDOWS = {
 const BANDS = [
   [0.00,"Routine"], [0.99,"Elevated tension"], [1.42,"Procurement Watch"],
   [1.98,"High-risk escalation"], [2.87,"Critical transition"], [5.12,"Crisis regime"]
+];
+/* Table S1, in full: threshold, band, percentile range, recursive-cut basis.
+   Kept separate from BANDS above (which drives the gauges and predates this)
+   rather than merged, so neither has to change shape for the other. */
+const BAND_PROVENANCE = [
+  [0.00, "Routine",             "< P50",   "below the recursive median"],
+  [0.99, "Elevated tension",    "P50-P70", "recursive P50 cut"],
+  [1.42, "Procurement Watch",   "P70-P85", "recursive P70 cut — primary trigger"],
+  [1.98, "High-risk escalation","P85-P95", "recursive P85 cut"],
+  [2.87, "Critical transition", "P95-P99", "recursive P95 cut"],
+  [5.12, "Crisis regime",       "> P99",   "recursive P99 cut"]
 ];
 const GAUGE_MAX = 6.0;
 
@@ -4237,6 +4306,110 @@ function spark(vals){
     + '" r="2.6" fill="' + col + '"/></svg>';
 }
 
+/* ---------- data quality per corridor ---------- */
+function dataQuality(r){
+  if (!r) return null;
+  const proxy = r.attribution === "proxy";
+  const hasShare = r.share != null;
+  if (!proxy && hasShare) return ["strong", "🟢",
+    "Strong — direct attribution, attention share measurable"];
+  if (proxy && !hasShare) return ["limited", "🔴",
+    "Limited — proxy attribution, no attention share measurable"];
+  return ["moderate", "🟡", proxy
+    ? "Moderate — proxy attribution (flanking-state coverage substituted)"
+    : "Moderate — direct attribution, but no attention share measurable"];
+}
+
+/* ---------- threshold provenance ---------- */
+function renderProvenance(d){
+  const box = document.getElementById("provBody");
+  if (!box) return;
+  box.innerHTML = BAND_PROVENANCE.map(([lo,label,pct,basis]) =>
+    "<tr><td class=\"m\">" + lo.toFixed(2) + "</td><td>" + esc(label) + "</td><td class=\"m\">"
+    + esc(pct) + "</td><td>" + esc(basis) + "</td></tr>").join("");
+  document.getElementById("provSample").innerHTML =
+    "<strong>Sample.</strong> Recursive cuts are computed from 1985 through the month "
+    + "immediately before the one being judged, over a series currently running to "
+    + esc((d && d.as_of) || "—") + ". A cut never sees the month it is judging.";
+}
+
+/* ---------- signal performance by horizon ---------- */
+function renderHorizon(){
+  const box = document.getElementById("horizonBody");
+  if (!box) return;
+  const rows = [
+    [1, null],
+    [3, WINDOWS[3].band],
+    [6, "computed"],
+    [12, WINDOWS[12].band]
+  ];
+  box.innerHTML = rows.map(([m, spec]) => {
+    if (spec === "computed"){
+      return "<tr><td class=\"m\">" + m + " mo</td><td class=\"m\">" + H + "</td><td class=\"m\">"
+        + M + "</td><td class=\"m\">" + F + "</td><td>fully computed curve</td></tr>";
+    }
+    if (spec){
+      return "<tr><td class=\"m\">" + m + " mo</td><td colspan=\"3\">not independently "
+        + "computed — reported band " + pc(spec[0]) + "–" + pc(spec[1])
+        + " carried over</td><td>reported bound only</td></tr>";
+    }
+    return "<tr><td class=\"m\">" + m + " mo</td><td colspan=\"3\">not evaluated</td>"
+      + "<td>no data</td></tr>";
+  }).join("");
+}
+
+/* ---------- lead time, computed from the published series ---------- */
+function renderLeadTime(d){
+  const body = document.getElementById("leadBody");
+  const stats = document.getElementById("leadStats");
+  if (!body || !stats) return;
+  const h = d && d.history;
+  const onsets = (d && d.onsets) || {};
+  if (!h || !h.months || !h.months.length){
+    body.innerHTML = "";
+    stats.innerHTML = "";
+    return;
+  }
+  const idx = {};
+  h.months.forEach((m, i) => { idx[m] = i; });
+  const rows = [];
+  Object.keys(onsets).forEach(corridor => {
+    onsets[corridor].forEach(onset => {
+      const oi = idx[onset];
+      if (oi === undefined){
+        rows.push({ corridor, onset, lead: null, why: "predates the loaded series" });
+        return;
+      }
+      let lead = null;
+      for (let i = oi - 1; i >= 0; i--){
+        if (h.alarm[i]){ lead = oi - i; break; }
+      }
+      rows.push({ corridor, onset, lead,
+        why: lead === null ? "no prior alert found in the loaded series" : null });
+    });
+  });
+  body.innerHTML = rows.map(r =>
+    "<tr><td>" + esc(r.corridor) + "</td><td class=\"m\">" + esc(r.onset) + "</td><td class=\"m\">"
+    + (r.lead !== null ? r.lead + " mo" : "— (" + esc(r.why) + ")") + "</td></tr>"
+  ).join("");
+  const known = rows.filter(r => r.lead !== null).map(r => r.lead);
+  if (known.length){
+    const sorted = known.slice().sort((a,b) => a - b);
+    const mid = sorted.length / 2;
+    const median = sorted.length % 2 ? sorted[Math.floor(mid)]
+      : (sorted[mid - 1] + sorted[mid]) / 2;
+    stats.innerHTML =
+      "<div class=\"stat\"><b>" + known.length + "</b><span>onsets with a measurable lead "
+      + "time, of " + rows.length + " documented</span></div>"
+      + "<div class=\"stat\"><b>" + median + "</b><span>median months from nearest prior "
+      + "alert to onset</span></div>"
+      + "<div class=\"stat\"><b>" + Math.min(...known) + "–" + Math.max(...known)
+      + "</b><span>range across those onsets, months</span></div>";
+  } else {
+    stats.innerHTML = "";
+  }
+}
+
 function renderBoard(data){
   const by = {};
   if (data) (data.readings || []).forEach(r => { by[r.corridor] = r; });
@@ -4257,6 +4430,7 @@ function renderBoard(data){
     }
 
     const ep = r.regime === "in episode";
+    const dq = dataQuality(r);
     let body = '';
 
     if (r.share == null){
@@ -4289,6 +4463,8 @@ function renderBoard(data){
     return open
       + '<div class="name">' + esc(name) + '</div>'
       + '<div class="meta">' + esc(onsets) + ' \u00b7 ' + esc(basis) + '</div>'
+      + '<div class="meta" style="margin-top:3px" title="' + esc(dq[2]) + '">'
+      + dq[1] + ' data quality: ' + dq[0] + '</div>'
       + '<div style="margin-top:var(--s3)">'
       + (ep ? '<span class="badge hot">disrupted since ' + esc(r.onset) + '</span>'
             : '<span class="badge ok">open</span>')
@@ -4475,6 +4651,15 @@ function applyData(d){
   const stamp = "readings as of " + d.as_of;
   document.getElementById("stamp").textContent = stamp;
   document.getElementById("footStamp").textContent = stamp;
+  renderProvenance(d);
+  renderHorizon();
+  renderLeadTime(d);
+  const mn = document.getElementById("modelNote");
+  if (mn){
+    mn.innerHTML = "<strong>Construction.</strong> " + esc(d.specification || "—")
+      + ". Historical sample 1985-01 to " + esc(d.as_of || "—")
+      + ". In-sample only — no out-of-sample validation has been completed.";
+  }
 }
 
 function dataFailed(reason, detail){
