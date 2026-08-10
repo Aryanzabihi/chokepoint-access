@@ -2997,7 +2997,11 @@ details .inner .field:first-child{margin-top:var(--s3)}
   <div class="cell"><div class="k">Warning window</div><div class="v" id="sHz">&mdash;</div></div>
   <div class="cell"><div class="k">Alert threshold</div><div class="v" id="sCut">&mdash;</div></div>
   <div class="cell"><div class="k">Disrupted now</div><div class="v" id="sEp">&mdash;</div></div>
+  <div class="cell"><div class="k">Selected chokepoint</div><div class="v" id="sSel">&mdash;</div></div>
 </div>
+<p class="hint" style="margin:8px 0 0">The first five figures are one global reading, the same
+for every chokepoint &mdash; that's why they don't move when you change the selector below.
+"Selected chokepoint" is the one field here that does.</p>
 
 <div class="grid split" style="margin-top:var(--s5)">
 
@@ -4545,8 +4549,23 @@ document.getElementById("clear").addEventListener("click", () => {
 });
 
 /* ---------- wiring ---------- */
+function renderSelectedStamp(){
+  const el = document.getElementById("sSel");
+  if (!el) return;
+  const r = cxReading();
+  if (!r){
+    el.textContent = esc(CX);
+    el.className = "v dim";
+    return;
+  }
+  const ep = r.regime === "in episode";
+  el.textContent = esc(CX) + " — " + (ep ? "disrupted since " + esc(r.onset) : "open");
+  el.className = "v " + (ep ? "hot" : "ok");
+}
+
 const paint = () => { renderCx(); renderVerdict(); drawDial(); drawBars();
-                      drawCurve(); drawHistory(); drawDist(); renderSensitivity(); };
+                      drawCurve(); drawHistory(); drawDist(); renderSensitivity();
+                      renderSelectedStamp(); };
 
 document.getElementById("alpha").addEventListener("input", e => {
   S.alpha = +e.target.value / 100;
