@@ -25,6 +25,9 @@ CSS = HERE / "site.css"
 PAGES = ["threshold-engine.html", "map.html", "track-record.html", "index.html"]
 
 LINK = re.compile(r'[ \t]*<link rel="stylesheet" href="site\.css">\n?')
+READINGS = HERE / "readings.json"
+DATA_BLOCK = re.compile(
+    r'[ \t]*<script type="application/json" id="readings-data"[^>]*>.*?</script>\n?', re.S)
 BLOCK = re.compile(
     r'[ \t]*<style data-inlined="site\.css" data-css-hash="[0-9a-f]+">.*?</style>\n?',
     re.S)
@@ -35,6 +38,32 @@ def css_text() -> tuple[str, str]:
         sys.exit(f"{CSS} not found — nothing to inline")
     t = CSS.read_text(encoding="utf-8")
     return t, hashlib.sha256(t.encode()).hexdigest()[:12]
+
+
+def inline_data(path: Path) -> str | None:
+    """Bake readings.json into the page.
+
+    A page that fetches its data at runtime is one deployment mistake away from
+    showing nothing, and it cannot work from disk at all. Baking the readings in
+    means the page is correct the moment it is written; the runtime fetch stays
+    as a refresh path, not a dependency.
+    """
+    if not READINGS.exists():
+        return None
+    raw = READINGS.read_text(encoding="utf-8")
+    # </script> inside JSON would end the block early; none should occur, but a
+    # silent broken page is not worth the risk.
+    raw = raw.replace("</", "<\\/")
+    h = hashlib.sha256(raw.encode()).hexdigest()[:12]
+    s = path.read_text(encoding="utf-8")
+    s = DATA_BLOCK.sub("", s)
+    block = (f'<script type="application/json" id="readings-data" data-hash="{h}">\n'
+             f'{raw}\n</script>\n')
+    if "</head>" not in s:
+        return None
+    s = s.replace("</head>", block + "</head>", 1)
+    path.write_text(s, encoding="utf-8")
+    return h
 
 
 def inline(path: Path, css: str, h: str) -> str:
@@ -80,6 +109,14 @@ def main() -> int:
             elif m.group(1) != h:
                 bad.append(f"{path.name}: inlined styles are stale "
                            f"({m.group(1)} vs {h}) — re-run build_site.py")
+            if path.name in ("threshold-engine.html", "map.html") and READINGS.exists():
+                want = hashlib.sha256(READINGS.read_text(encoding="utf-8")
+                                      .replace("</", "<\\/").encode()).hexdigest()[:12]
+                dm = re.search(r'id="readings-data" data-hash="([0-9a-f]+)"', s)
+                if not dm:
+                    bad.append(f"{path.name}: no readings baked in")
+                elif dm.group(1) != want:
+                    bad.append(f"{path.name}: baked readings are stale — re-run build_site.py")
         for b in bad:
             print("  " + b)
         print(f"{len(pages) - len(bad)}/{len(pages)} pages carry current styles")
@@ -89,13 +126,20 @@ def main() -> int:
         for path in pages:
             s = BLOCK.sub('<link rel="stylesheet" href="site.css">\n',
                           path.read_text(encoding="utf-8"), count=1)
+            s = DATA_BLOCK.sub("", s)
             path.write_text(s, encoding="utf-8")
-            print(f"  {path.name}: back to <link>")
+            print(f"  {path.name}: back to <link>, baked data removed")
         return 0
 
     for path in pages:
         s = inline(path, css, h)
-        print(f"  {path.name}: {len(s) / 1024:.0f} KB, styles {h}")
+        dh = inline_data(path) if path.name in ("threshold-engine.html", "map.html") else None
+        size = path.stat().st_size / 1024
+        print(f"  {path.name}: {size:.0f} KB, styles {h}"
+              + (f", data {dh}" if dh else ""))
+    if not READINGS.exists():
+        print(f"  !! {READINGS.name} not found — pages will have no data baked in. "
+              f"Run tar_ingest.py first.")
     print(f"inlined site.css ({len(css) / 1024:.0f} KB) into {len(pages)} page(s)")
     return 0
 

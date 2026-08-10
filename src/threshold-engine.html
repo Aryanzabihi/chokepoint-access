@@ -1364,10 +1364,31 @@ renderBoard(null);
 renderLog();
 paint();
 
-/* A page that quietly says "no readings" hides the one fact needed to fix it.
-   Report the status, the URL, and what to do about it. */
+/* Data arrives two ways. It is baked into this page at build time, so the page is
+   correct the moment it is written and works from disk with no server at all. The
+   runtime fetch is only a refresh: if it fails, nothing breaks. */
+function applyData(d){
+  DATA = d;
+  paint();
+  renderBoard(d);
+  const first = (d.readings || [])[0] || {};
+  const ep = d.corridors_in_episode || [];
+  const band = document.getElementById("sBand");
+  band.textContent = first.band || "\u2014";
+  band.className = "v big " + (ep.length ? "hot" : "ok");
+  document.getElementById("sMonth").textContent = d.as_of || "\u2014";
+  document.getElementById("sTar").textContent = first.tar != null ? first.tar : "\u2014";
+  document.getElementById("sCut").textContent =
+    d.recursive_cut != null ? d.recursive_cut : "\u2014";
+  const epc = document.getElementById("sEp");
+  epc.textContent = ep.length ? ep.join(", ") : "none";
+  epc.className = "v" + (ep.length ? " hot" : " ok");
+  const stamp = "readings as of " + d.as_of;
+  document.getElementById("stamp").textContent = stamp;
+  document.getElementById("footStamp").textContent = stamp;
+}
+
 function dataFailed(reason, detail){
-  const msg = "Data not loaded — " + reason;
   document.getElementById("stamp").textContent = "no data";
   document.getElementById("footStamp").textContent = "no data";
   const band = document.getElementById("sBand");
@@ -1375,14 +1396,28 @@ function dataFailed(reason, detail){
   band.className = "v big hot";
   const note = document.getElementById("boardNote");
   note.className = "note hot";
-  note.innerHTML = "<strong>" + msg + "</strong><br>" + detail;
-  const v = document.getElementById("verdict");
-  v.className = "verdict neg";
+  note.innerHTML = "<strong>Data not loaded \u2014 " + reason + "</strong><br>" + detail;
+  document.getElementById("verdict").className = "verdict neg";
   document.getElementById("vTag").textContent = "no data";
   document.getElementById("vCall").textContent = "Readings could not be loaded.";
   document.getElementById("vBody").innerHTML = detail;
-  console.error(msg, detail);
+  console.error("readings not loaded:", reason, detail);
 }
+
+function baked(){
+  const tag = document.getElementById("readings-data");
+  if (!tag) return null;
+  try {
+    const d = JSON.parse(tag.textContent);
+    return (d && Array.isArray(d.readings) && d.history) ? d : null;
+  } catch (e) {
+    console.error("baked readings are not valid JSON", e);
+    return null;
+  }
+}
+
+const BAKED = baked();
+if (BAKED) applyData(BAKED);
 
 fetch("readings.json", { cache: "no-store" })
   .then(r => {
@@ -1390,40 +1425,21 @@ fetch("readings.json", { cache: "no-store" })
     return r.json();
   })
   .then(d => {
-    if (!d || !Array.isArray(d.readings)) throw new Error("file loaded but has no readings array");
-    if (!d.history) throw new Error("file is from an older build: no history field. "
-      + "Re-run tar_ingest.py and redeploy.");
-    DATA = d;
-    paint();
-    renderBoard(d);
-    const first = (d.readings || [])[0] || {};
-    const ep = d.corridors_in_episode || [];
-    const band = document.getElementById("sBand");
-    band.textContent = first.band || "\u2014";
-    band.className = "v big " + (ep.length ? "hot" : "ok");
-    document.getElementById("sMonth").textContent = d.as_of || "\u2014";
-    document.getElementById("sTar").textContent = first.tar != null ? first.tar : "\u2014";
-    document.getElementById("sCut").textContent =
-      d.recursive_cut != null ? d.recursive_cut : "\u2014";
-    const epc = document.getElementById("sEp");
-    epc.textContent = ep.length ? ep.join(", ") : "none";
-    epc.className = "v" + (ep.length ? " hot" : " ok");
-    const stamp = "readings as of " + d.as_of;
-    document.getElementById("stamp").textContent = stamp;
-    document.getElementById("footStamp").textContent = stamp;
+    if (!d || !Array.isArray(d.readings) || !d.history)
+      throw new Error("the served file is from an older build");
+    if (!BAKED || String(d.as_of) >= String(BAKED.as_of)) applyData(d);
   })
   .catch(err => {
+    if (BAKED) return;      // already showing baked data; nothing is wrong
     const url = new URL("readings.json", location.href).href;
-    const local = location.protocol === "file:";
     dataFailed(err.message,
-      local
-        ? "This page was opened directly from disk, and browsers block reading files that "
-          + "way. Serve the folder instead: <code>python -m http.server 8000</code>, then "
-          + "open <code>http://localhost:8000/threshold-engine.html</code>."
-        : "Tried <code>" + url + "</code>. If that address returns 404, the deployment did "
-          + "not include readings.json — run the workflow from the Actions tab and check it "
-          + "finishes green. If it returns JSON, the file is present but unreadable and the "
-          + "message above says why.");
+      location.protocol === "file:"
+        ? "This page has no data baked in, and browsers block reading files from disk. "
+          + "Run <code>python build_site.py</code> to bake the readings in, or serve the "
+          + "folder with <code>python -m http.server 8000</code>."
+        : "Tried <code>" + url + "</code>, and this page has no data baked in either. Run "
+          + "<code>python run_month.py</code> and redeploy \u2014 the build step bakes the "
+          + "readings into the page so this cannot happen again.");
   });
 </script>
 </body>
