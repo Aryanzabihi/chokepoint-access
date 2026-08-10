@@ -1,5 +1,8 @@
 {
   "as_of": "2026-07-01",
+  "band": "Procurement Watch",
+  "percentile_range": "P70-P85",
+  "horizon": "60-90 days",
   "history": {
     "months": [
       "1985-12",
