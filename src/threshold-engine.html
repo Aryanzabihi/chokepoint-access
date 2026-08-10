@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-<style data-inlined="site.css" data-css-hash="4b94eaa2ee58">
+<style data-inlined="site.css" data-css-hash="b8e42b06344b">
 /* ===========================================================================
    Chokepoint Access — design system.
 
@@ -245,6 +245,7 @@ figcaption{font:12px/1.55 var(--sans);color:var(--ink-faint);margin-top:var(--s3
 .badge.ok{border-color:var(--sound-dim);color:var(--sound);
   background:rgba(63,217,188,.07)}
 .badge.none{background:#08191F}
+.badge.warn{border-color:var(--amber);color:var(--amber);background:rgba(255,176,32,.08)}
 
 /* ---------- tables ---------- */
 table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -273,6 +274,37 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .note strong{color:var(--ink-soft);font-weight:600}
 .empty{font:italic 400 14.5px/1.6 var(--serif);color:var(--ink-faint);
   padding:var(--s4) 0;margin:0}
+
+/* ---------- disclosure blocks (calculator, why-panel) ---------- */
+details{border:1px solid var(--rule);border-radius:4px;
+  background:linear-gradient(180deg,#0F2A35,#0B1F29);box-shadow:var(--edge)}
+details + details{margin-top:var(--s3)}
+details > summary{cursor:pointer;padding:12px 14px;list-style:none;
+  font:500 12.5px/1.4 var(--sans);color:var(--ink)}
+details > summary::-webkit-details-marker{display:none}
+details > summary::before{content:"\25b8\a0";color:var(--ink-faint)}
+details[open] > summary::before{content:"\25be\a0"}
+details > summary:hover{background:var(--raise)}
+details .inner{padding:0 var(--s4) var(--s4)}
+details .inner .field:first-child{margin-top:var(--s3)}
+
+/* ---------- numbered explain list ("why this decision") ---------- */
+.explain{margin:0;padding-left:0;list-style:none;counter-reset:wl}
+.explain li{counter-increment:wl;padding:9px 0 9px 32px;position:relative;
+  border-bottom:1px solid var(--rule-soft);font-size:13.5px;color:var(--ink-soft)}
+.explain li:last-child{border-bottom:0}
+.explain li::before{content:counter(wl);position:absolute;left:0;top:9px;
+  width:19px;height:19px;border:1px solid var(--rule);border-radius:50%;
+  font:10px/17px var(--mono);text-align:center;color:var(--ink-faint)}
+.explain b{color:var(--ink);font-weight:600}
+
+/* ---------- recommended-action checklist ---------- */
+.actions{margin:0;padding:0;list-style:none;display:grid;gap:9px}
+.actions li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;
+  color:var(--ink-soft)}
+.actions li .mk{flex:0 0 18px;font:600 13px/1.4 var(--mono)}
+.actions li.yes .mk{color:var(--sound)}
+.actions li.no .mk{color:var(--caution)}
 
 /* ---------- legend ---------- */
 .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(236px,1fr));
@@ -2962,7 +2994,7 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
   <div class="cell"><div class="k">Index value</div><div class="v" id="sTar">&mdash;</div></div>
   <div class="cell"><div class="k">Warning window</div><div class="v" id="sHz">&mdash;</div></div>
   <div class="cell"><div class="k">Alert threshold</div><div class="v" id="sCut">&mdash;</div></div>
-  <div class="cell"><div class="k">Active disruption</div><div class="v" id="sEp">&mdash;</div></div>
+  <div class="cell"><div class="k">Disrupted now</div><div class="v" id="sEp">&mdash;</div></div>
 </div>
 
 <div class="grid split" style="margin-top:var(--s5)">
@@ -3001,6 +3033,46 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
     </div>
 
     <div class="field">
+      <label for="crisisCost">Crisis replacement cost <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label>
+      <div class="row" style="gap:8px;flex-wrap:nowrap">
+        <select id="currency" style="width:88px;flex:0 0 88px">
+          <option value="&euro;">EUR &euro;</option>
+          <option value="$">USD $</option>
+          <option value="&pound;">GBP &pound;</option>
+        </select>
+        <input type="number" id="crisisCost" min="0" step="1000" placeholder="e.g. 5000000" style="flex:1">
+      </div>
+      <p class="hint">What full crisis-price replacement of this exposure costs. Enter it once
+      to see the policy comparison and the cost calculator below in your own currency instead
+      of abstract units.</p>
+    </div>
+
+    <details id="calcBox">
+      <summary>Calculate your early-action cost from actual costs</summary>
+      <div class="inner">
+        <p class="hint" style="margin-top:0">Most people cannot state their cost ratio off the
+        top of their head. It is usually sitting in a few quotes. Enter what you have; the rest
+        can stay at zero.</p>
+        <div class="field"><label for="cAlt">Alternative supplier / route</label>
+          <input type="number" id="cAlt" min="0" step="1000" placeholder="0"></div>
+        <div class="field"><label for="cFreight">Additional freight</label>
+          <input type="number" id="cFreight" min="0" step="1000" placeholder="0"></div>
+        <div class="field"><label for="cInv">Inventory buffer</label>
+          <input type="number" id="cInv" min="0" step="1000" placeholder="0"></div>
+        <div class="field"><label for="cHedge">Hedging</label>
+          <input type="number" id="cHedge" min="0" step="1000" placeholder="0"></div>
+        <div class="field"><label for="cIns">Insurance premium</label>
+          <input type="number" id="cIns" min="0" step="1000" placeholder="0"></div>
+        <div class="field" style="border-top:1px solid var(--rule);padding-top:var(--s3);margin-top:var(--s3)">
+          <div class="hint" style="margin:0">Total early-action cost</div>
+          <div class="readout" id="calcTotal">&mdash;</div>
+          <div class="hint" id="calcRatio" style="margin-top:8px"></div>
+          <button type="button" class="btn" id="calcApply" style="margin-top:10px" disabled>Use this figure</button>
+        </div>
+      </div>
+    </details>
+
+    <div class="field">
       <label for="adopt">How many others are acting on the same signal</label>
       <div class="readout"><span id="adoptOut">0</span><span class="unit">%</span></div>
       <input type="range" id="adopt" min="0" max="100" step="5" value="0">
@@ -3026,10 +3098,18 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
     </section>
 
     <div class="verdict" id="verdict" style="margin-top:var(--s5)">
-      <div class="tag" id="vTag">Verdict</div>
+      <div class="row" style="justify-content:space-between;align-items:baseline">
+        <div class="tag" id="vTag">Verdict</div>
+        <span class="badge" id="vMargin" style="display:none"></span>
+      </div>
       <div class="call" id="vCall">&mdash;</div>
       <p id="vBody"></p>
     </div>
+
+    <details id="whyBox" style="margin-top:var(--s3)">
+      <summary>Why this decision &mdash; what drove it</summary>
+      <div class="inner"><ol class="explain" id="whyList"></ol></div>
+    </details>
 
     <section class="panel">
       <h2>Act or wait &mdash; your position</h2>
@@ -3062,6 +3142,24 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
       </div>
       <figcaption id="curveCap"></figcaption>
     </figure>
+    </section>
+
+    <section class="panel">
+      <h2>Recommended action</h2>
+      <ul class="actions" id="actionList"></ul>
+      <p class="note" id="actionNote"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Sensitivity</h2>
+      <div class="scroll">
+        <table id="sensTable">
+          <thead><tr><th>Your cost, if it were</th><th>Decision</th></tr></thead>
+          <tbody id="sensBody"></tbody>
+        </table>
+      </div>
+      <p class="note" id="sensFlip"></p>
+      <p class="note" id="sensCrisis"></p>
     </section>
 
     <section class="panel">
@@ -3182,7 +3280,16 @@ const CORRIDORS = [
   ["Taiwan Strait","no onsets","Directly covered"]
 ];
 
-const S = { win:6, alpha:0.12, adopt:0, resp:1 };
+const S = { win:6, alpha:0.12, adopt:0, resp:1, currency:"€", crisisCost:0, _calcTotal:0 };
+const BORDERLINE_PP = 1.5;      // percentage points from a band edge counted as borderline
+function fmtMoney(x){
+  if (!isFinite(x)) return "—";
+  const sign = x < 0 ? "-" : "";
+  x = Math.abs(x);
+  if (x >= 1e6) return sign + S.currency + (x/1e6).toFixed(x >= 1e7 ? 1 : 2) + "m";
+  if (x >= 1e3) return sign + S.currency + (x/1e3).toFixed(x >= 1e4 ? 0 : 1) + "k";
+  return sign + S.currency + x.toFixed(0);
+}
 let DATA = null;                          // readings.json once loaded
 let CX = CORRIDORS[0][0];                 // selected chokepoint
 const STORE = "cx-advice-log-v1";
@@ -3232,8 +3339,11 @@ function renderVerdict(){
   // A chokepoint already inside a disruption cannot be given a timing verdict:
   // the reading describes what is happening, not what is coming. This overrides
   // the cost test rather than sitting beside it.
+  const vMargin = document.getElementById("vMargin");
+
   if (r && r.regime === "in episode"){
     document.getElementById("verdict").className = "verdict warn";
+    vMargin.style.display = "none";
     document.getElementById("vTag").textContent =
       esc(CX) + " \u00b7 disruption already under way";
     document.getElementById("vCall").textContent =
@@ -3248,8 +3358,32 @@ function renderVerdict(){
     document.getElementById("curveCap").textContent =
       "The cost test below still shows where your ratio falls, but it applies to "
       + "chokepoints that are not already disrupted.";
+    renderWhy("episode", r);
+    renderAction("episode");
     return;
   }
+
+  // Decision margin: distance in percentage points from the nearest band edge.
+  // Borderline means the call is thin enough that a small change in the client's
+  // own cost quote -- not in TAR -- would flip it.
+  const marginPP = Math.min(Math.abs(a - lo), Math.abs(a - hi)) * 100;
+  const borderline = marginPP < BORDERLINE_PP;
+  let level;
+  if (inside) level = borderline ? "borderline" : "act";
+  else if (a < lo) level = "always";
+  else level = borderline ? "borderline-wait" : "wait";
+
+  vMargin.style.display = "";
+  if (inside){
+    vMargin.textContent = (borderline ? "BORDERLINE \u00b7 " : "") + "+" + marginPP.toFixed(1)
+      + " pp inside the band";
+    vMargin.className = "badge " + (borderline ? "warn" : "ok");
+  } else {
+    vMargin.textContent = (borderline ? "BORDERLINE \u00b7 " : "") + marginPP.toFixed(1)
+      + " pp " + (a < lo ? "below the floor" : "above the ceiling");
+    vMargin.className = "badge " + (borderline ? "warn" : "none");
+  }
+
   document.getElementById("verdict").className =
     "verdict " + (inside ? "pos" : (a < lo ? "warn" : "neg"));
 
@@ -3261,7 +3395,14 @@ function renderVerdict(){
   const body = document.getElementById("vBody");
   const bandTxt = "<strong>" + pc(lo) + " to " + pc(hi) + "</strong>";
 
-  if (inside){
+  if (inside && borderline){
+    call.textContent = "Borderline — reversible mitigation only.";
+    body.innerHTML = "This client sits only " + marginPP.toFixed(1) + " percentage points inside "
+      + bandTxt + ". That is not enough margin to call the decision robust: a small move in the "
+      + "quoted cost could put it on the other side of the band. Take the reversible steps "
+      + "&mdash; check alternatives, extend hedge tenors, book forward in part &mdash; and hold "
+      + "off on anything that cannot be unwound.";
+  } else if (inside){
     call.textContent = "Yes — acting on this alert pays for you.";
     body.innerHTML = "Over a " + S.win + "-month window, acting on the alert is worth money where "
       + "acting early costs " + bandTxt + " of crisis-price replacement. This client is inside "
@@ -3280,7 +3421,9 @@ function renderVerdict(){
       + "is " + bandTxt + ". At your cost level, a service that pushed you to act here would "
       + "lose you money."
       + (S.adopt > 0 ? " Crowding is part of why — their quoted " + pc(a) + " becomes "
-                       + pc(p) + " paid." : "");
+                       + pc(p) + " paid." : "")
+      + (borderline ? " That said, you are only " + marginPP.toFixed(1) + " points above the "
+                     + "ceiling — worth rechecking if your quote moves." : "");
   }
 
   document.getElementById("curveCap").textContent = WINDOWS[S.win].computed
@@ -3290,6 +3433,137 @@ function renderVerdict(){
     : "The " + S.win + "-month window has no month-level counts in the frozen registry, so the "
       + "band is the reported bound rather than a computed curve. The six-month window draws "
       + "the full curve.";
+
+  renderWhy(level, r, lo, hi);
+  renderAction(level);
+}
+
+/* ---------- why this decision ---------- */
+function renderWhy(level, r, lo, hi){
+  const list = document.getElementById("whyList");
+  if (!list) return;
+  const items = [];
+  if (level === "episode"){
+    items.push("Current index value <b>" + (r ? r.tar : "—") + "</b>, band <b>"
+      + (r ? esc(r.band) : "—") + "</b>.");
+    items.push("Regime: <b>disrupted since " + esc(r ? r.onset : "?") + "</b> — concurrent, "
+      + "not anticipatory. The reading describes an ongoing disruption, so no lead time applies.");
+    items.push("Result: no cost ratio can make this a timing decision. The question here is "
+      + "exposure management, not act-or-wait.");
+  } else {
+    const rr = cxReading();
+    items.push("Current index value <b>" + (rr ? rr.tar : "—") + "</b>, band <b>"
+      + (rr ? esc(rr.band) : "—") + "</b> (" + (rr ? esc(rr.percentile_range) : "—") + ").");
+    items.push("Timing: <b>" + (rr && rr.regime === "at risk" ? "anticipatory" : "unclear")
+      + "</b> — " + esc(CX) + " is not currently inside a disruption window, so the band's "
+      + "stated horizon (" + (rr && rr.horizon ? esc(rr.horizon) : "n/a") + ") applies.");
+    items.push("Your action cost: <b>" + pc(S.alpha) + "</b> of crisis-price replacement"
+      + (S.crisisCost > 0 ? " (" + fmtMoney(S.alpha * S.crisisCost) + " on a "
+        + fmtMoney(S.crisisCost) + " exposure)" : "") + ".");
+    items.push("Economic action band for a " + S.win + "-month window: <b>" + pc(lo) + " – "
+      + pc(hi) + "</b>.");
+    items.push("Historical signal performance: roughly <b>1 alert in 3</b> is followed by a "
+      + "real disruption (15 correct calls, 41 misses, 70 false alarms over 484 evaluated "
+      + "corridor-months).");
+    const verdictTxt = level === "borderline" ? "borderline — reversible steps only"
+      : level === "act" ? "following the alert has lower expected cost than either alternative"
+      : level === "always" ? "acting every cycle beats waiting for any signal at this cost"
+      : level === "borderline-wait" ? "not acting is favoured, but the margin is thin"
+      : "not acting has lower expected cost than following the alert";
+    items.push("Result: <b>" + verdictTxt + "</b>.");
+  }
+  list.innerHTML = items.map(i => "<li>" + i + "</li>").join("");
+}
+
+/* ---------- recommended action ---------- */
+const ACTION_SETS = {
+  episode: {
+    note: "Timing no longer applies. These concern the exposure you already have, not "
+      + "anticipation of a new one.",
+    items: [["yes","Review current exposure and contract coverage"],
+            ["yes","Activate any pre-agreed contingency routing"],
+            ["no","Do not treat this as a new anticipatory signal"]]
+  },
+  always: {
+    note: "Acting is cheap enough here that timing the alert adds nothing — make it "
+      + "standing policy instead of watching the signal.",
+    items: [["yes","Make early action standing policy for this exposure"],
+            ["yes","Stop paying for signal-timing on this corridor — it isn't earning its cost"],
+            ["no","No need to wait for a threshold crossing"]]
+  },
+  borderline: {
+    note: "Inside the band, but only just. Take the reversible steps; hold the irreversible "
+      + "ones until the margin is clearer.",
+    items: [["yes","Review alternative suppliers and get fresh quotes"],
+            ["yes","Reserve alternative capacity (cancellable)"],
+            ["yes","Extend hedge tenor partially"],
+            ["no","Avoid full contract replacement or long-term rerouting commitments"]]
+  },
+  act: {
+    note: "Reversible preparation is economically justified. Irreversible commitment is not "
+      + "supported by this signal alone.",
+    items: [["yes","Review alternative suppliers and get fresh quotes"],
+            ["yes","Reserve alternative capacity"],
+            ["yes","Extend hedge tenor partially"],
+            ["yes","Partial forward booking"],
+            ["no","Avoid full contract replacement or permanent route change"]]
+  },
+  "borderline-wait": {
+    note: "Not acting is favoured, but only just — recheck if your quoted cost moves.",
+    items: [["yes","Monitor the signal; no spend justified yet"],
+            ["no","Do not commit budget on this alert at this cost level"]]
+  },
+  wait: {
+    note: "At this cost ratio, the false alarms cost more than the missed disruptions would "
+      + "save. Absorb the exposure or move it elsewhere.",
+    items: [["yes","Absorb the exposure at current terms, or renegotiate it elsewhere"],
+            ["no","Do not act on this alert"],
+            ["no","Avoid signal-timed spend on this corridor at this cost level"]]
+  }
+};
+function renderAction(level){
+  const set = ACTION_SETS[level] || ACTION_SETS.wait;
+  document.getElementById("actionList").innerHTML = set.items.map(([k,t]) =>
+    '<li class="' + k + '"><span class="mk">' + (k === "yes" ? "✓" : "✕")
+    + '</span><span>' + t + '</span></li>').join("");
+  document.getElementById("actionNote").textContent = set.note;
+}
+
+/* ---------- sensitivity ---------- */
+function renderSensitivity(){
+  const [lo,hi] = quotedBand();
+  const offsets = [-8,-4,-2,0,2,4,8];
+  const rows = offsets.map(off => {
+    const v = Math.max(0.5, Math.min(60, +(S.alpha*100 + off).toFixed(1))) / 100;
+    const dec = v < lo ? "ALWAYS ACT" : v > hi ? "WAIT" : "ACT";
+    return { v, dec, current: off === 0 };
+  });
+  document.getElementById("sensBody").innerHTML = rows.map(r =>
+    '<tr' + (r.current ? ' style="font-weight:600;background:var(--water)"' : '') + '>'
+    + '<td class="m">' + pc(r.v) + (r.current ? "  (you)" : "") + '</td>'
+    + '<td class="m">' + r.dec + '</td></tr>').join("");
+
+  document.getElementById("sensFlip").innerHTML =
+    "<strong>What would change this decision.</strong> You would switch to a different call if "
+    + "your action cost rose above <strong>" + pc(hi) + "</strong> or fell below <strong>"
+    + pc(lo) + "</strong> of crisis-price replacement, or if " + esc(CX) + " entered a "
+    + "disruption window — at that point no cost ratio applies and the question stops "
+    + "being about timing.";
+
+  const cc = document.getElementById("sensCrisis");
+  if (S.crisisCost > 0 && S._calcTotal > 0){
+    const rows2 = [["Low", 0.8], ["Base", 1.0], ["High", 1.4]].map(([lab,mult]) => {
+      const cc2 = S.crisisCost * mult;
+      const av = S._calcTotal / cc2;
+      const dec = av < lo ? "ALWAYS ACT" : av > hi ? "WAIT" : "ACT";
+      return lab + " (" + fmtMoney(cc2) + "): " + pc(av) + " → " + dec;
+    });
+    cc.innerHTML = "<strong>If your crisis-cost estimate is off.</strong> Same "
+      + fmtMoney(S._calcTotal) + " of early-action cost, against a crisis replacement cost "
+      + "20% lower and 40% higher: " + rows2.join("; ") + ".";
+  } else {
+    cc.textContent = "";
+  }
 }
 
 /* ---------- selected chokepoint ---------- */
@@ -3405,7 +3679,11 @@ function annulus(a0, a1){
 function drawDial(){
   const svg = document.getElementById("dial");
   const [blo,bhi] = quotedBand();
-  const key = [S.win, S.adopt, S.resp].join("|");
+  const cxr = cxReading();
+  const epNow = !!(cxr && cxr.regime === "in episode");
+  // Episode state is part of the key so the dial can never disagree with the
+  // verdict: changing chokepoint rebuilds the static layers as well.
+  const key = [S.win, S.adopt, S.resp, epNow].join("|");
 
   if (svg.dataset.key !== key){
     svg.dataset.key = key;
@@ -3476,12 +3754,38 @@ function drawDial(){
       "font-family":"IBM Plex Mono,monospace", "font-size":12, fill:SOFT }));
     svg.appendChild(el("text", { id:"dlYou", x:DL.cx, y:DL.cy + 44, "text-anchor":"middle",
       "font-family":"IBM Plex Mono,monospace", "font-size":13, fill:INK }));
+
+    if (epNow){
+      // Grey the whole instrument out: no cost ratio makes a timing decision
+      // meaningful once the route is already shut.
+      svg.appendChild(el("rect", { x:0, y:0, width:780, height:380, fill:"#0B1D26",
+        "fill-opacity":.66 }));
+      svg.appendChild(el("text", { id:"dlEpTitle", x:DL.cx, y:DL.cy - 96,
+        "text-anchor":"middle", "font-family":"Spectral,Georgia,serif", "font-weight":600,
+        "font-size":34, fill:AMBER }, "No timing decision"));
+      svg.appendChild(el("text", { id:"dlEpSub", x:DL.cx, y:DL.cy - 64,
+        "text-anchor":"middle", "font-family":"IBM Plex Mono,monospace", "font-size":12,
+        fill:SOFT }));
+      svg.appendChild(el("text", { id:"dlEpSub2", x:DL.cx, y:DL.cy - 44,
+        "text-anchor":"middle", "font-family":"IBM Plex Sans,sans-serif", "font-size":12.5,
+        fill:INK }, "pick a chokepoint that is still open to use the cost test"));
+    }
   }
 
   const a = S.alpha, [lo,hi] = quotedBand();
   const inside = a >= lo && a <= hi;
   const col = inside ? TEAL : (a < lo ? AMBER : PINK);
   document.getElementById("dlNeedle").style.transform = `rotate(${(-dlAng(a)).toFixed(2)}deg)`;
+
+  if (epNow){
+    document.getElementById("dlEpSub").textContent =
+      CX + " \u00b7 disrupted since " + (cxr.onset || "?");
+    document.getElementById("dialCap").textContent =
+      CX + " has been disrupted since " + cxr.onset + ", " + cxr.months_since_onset
+      + " months ago. The dial answers when to act ahead of a disruption, so it does not "
+      + "apply here \u2014 the exposure is already live. Select an open chokepoint to use it.";
+    return;
+  }
   const vd = document.getElementById("dlVerdict");
   vd.textContent = inside ? "Act" : (a < lo ? "Always act" : "Wait");
   vd.setAttribute("fill", col);
@@ -3523,7 +3827,10 @@ function drawBars(){
   const worst = rows.reduce((m, r) => r[1] > m[1] ? r : m, rows[0]);
   const g = el("g", {});
 
-  g.appendChild(label(L, 20, "COST OVER " + N + " MONTHS, IN CRISIS-PRICE UNITS",
+  const hasMoney = S.crisisCost > 0;
+  g.appendChild(label(L, 20, hasMoney
+    ? "COST OVER " + N + " MONTHS, IN " + S.currency + " (1 UNIT = " + fmtMoney(S.crisisCost) + ")"
+    : "COST OVER " + N + " MONTHS, IN CRISIS-PRICE UNITS",
     { "font-size":9.5, "letter-spacing":1.4 }));
 
   rows.forEach(([name, cost, why], i) => {
@@ -3537,7 +3844,8 @@ function drawBars(){
     g.appendChild(el("rect", { x:L, y:y + 3, width:Math.max(2, w), height:20, rx:2,
       fill: isBest ? TEAL : "#3B5A67", "fill-opacity": isBest ? .85 : .6,
       style:"transition:width .42s cubic-bezier(.2,.8,.25,1)" }));
-    g.appendChild(label(L + Math.max(2, w) + 10, y + 18, cost.toFixed(1),
+    g.appendChild(label(L + Math.max(2, w) + 10, y + 18,
+      hasMoney ? fmtMoney(cost * S.crisisCost) + "  (" + cost.toFixed(1) + " u)" : cost.toFixed(1),
       { "font-size":12.5, fill: isBest ? TEAL : SOFT }));
     if (isBest){
       g.appendChild(el("rect", { x:L + w + 52, y:y + 4, width:74, height:18, rx:9,
@@ -3553,15 +3861,35 @@ function drawBars(){
     stroke:LINE }));
   g.appendChild(label(L, T + 3 * rowH + 28,
     "Choosing " + best[0].toLowerCase() + " over the worst option saves "
-    + saved.toFixed(1) + " units \u2014 " + Math.round(saved / worst[1] * 100) + "% of the bill.",
+    + (hasMoney ? fmtMoney(saved * S.crisisCost) : saved.toFixed(1) + " units") + " \u2014 "
+    + Math.round(saved / worst[1] * 100) + "% of the bill.",
     { "font-size":11.5, fill:INK, "font-family":"IBM Plex Sans,sans-serif" }));
   svg.appendChild(g);
 
-  document.getElementById("barsCap").textContent =
-    "One unit is what a disruption costs you at crisis prices. Multiply by your own "
-    + "figure to read it in money: at 1 unit = \u00a31m, the gap between best and worst is "
-    + "\u00a3" + (saved).toFixed(1) + "m over the period. Counts are fixed at " + H
-    + " correct calls, " + M + " misses and " + F + " false alerts.";
+  const cxr2 = cxReading();
+  if (cxr2 && cxr2.regime === "in episode"){
+    g.appendChild(el("rect", { x:0, y:0, width:780, height:240, fill:"#0B1D26",
+      "fill-opacity":.62 }));
+    g.appendChild(el("text", { x:390, y:112, "text-anchor":"middle",
+      "font-family":"Spectral,Georgia,serif", "font-style":"italic", "font-size":16,
+      fill:AMBER }, "Not applicable while " + CX + " is disrupted"));
+    g.appendChild(el("text", { x:390, y:136, "text-anchor":"middle",
+      "font-family":"IBM Plex Sans,sans-serif", "font-size":12.5, fill:SOFT },
+      "these are the costs of acting ahead of a disruption, not during one"));
+    document.getElementById("barsCap").textContent =
+      "Hidden because " + CX + " is already disrupted. Select an open chokepoint to compare "
+      + "what each policy would have cost.";
+    return;
+  }
+
+  document.getElementById("barsCap").textContent = hasMoney
+    ? "Priced against your crisis replacement cost of " + fmtMoney(S.crisisCost) + ". Counts "
+      + "are fixed at " + H + " correct calls, " + M + " misses and " + F + " false alerts, "
+      + "scaled to your figure \u2014 not a forecast of what will happen to you, but what these "
+      + "484 evaluated months would have cost at your numbers."
+    : "One unit is what a disruption costs you at crisis prices. Enter a crisis replacement "
+      + "cost above to see this in your own currency. Counts are fixed at " + H
+      + " correct calls, " + M + " misses and " + F + " false alerts.";
 }
 
 /* =========================== the curve =========================== */
@@ -3573,7 +3901,11 @@ function drawCurve(){
   const svg = document.getElementById("curve");
   const [blo,bhi] = quotedBand();
   const computed = WINDOWS[S.win].computed;
-  const key = [S.win, S.adopt, S.resp].join("|");
+  const cxr = cxReading();
+  const epNow = !!(cxr && cxr.regime === "in episode");
+  // Episode state is part of the key: the dial and the verdict must never
+  // disagree, so a change of chokepoint rebuilds the static layers too.
+  const key = [S.win, S.adopt, S.resp, epNow].join("|");
 
   /* Static layers are rebuilt only when the band itself moves. That keeps the
      position marker a persistent element, so it can glide instead of blinking. */
@@ -4038,12 +4370,55 @@ document.getElementById("clear").addEventListener("click", () => {
 
 /* ---------- wiring ---------- */
 const paint = () => { renderCx(); renderVerdict(); drawDial(); drawBars();
-                      drawCurve(); drawHistory(); drawDist(); };
+                      drawCurve(); drawHistory(); drawDist(); renderSensitivity(); };
 
 document.getElementById("alpha").addEventListener("input", e => {
   S.alpha = +e.target.value / 100;
   document.getElementById("alphaOut").textContent = (+e.target.value).toFixed(1);
   paint();
+});
+document.getElementById("currency").addEventListener("change", e => {
+  S.currency = e.target.value; paint();
+});
+document.getElementById("crisisCost").addEventListener("input", e => {
+  S.crisisCost = Math.max(0, +e.target.value || 0);
+  updateCalc();
+  paint();
+});
+
+/* ---------- cost-breakdown calculator ---------- */
+function updateCalc(){
+  const parts = ["cAlt","cFreight","cInv","cHedge","cIns"]
+    .map(id => Math.max(0, +document.getElementById(id).value || 0));
+  const total = parts.reduce((a,b) => a + b, 0);
+  S._calcTotal = total;
+  document.getElementById("calcTotal").textContent = total > 0 ? fmtMoney(total) : "—";
+  const ratioEl = document.getElementById("calcRatio");
+  const apply = document.getElementById("calcApply");
+  if (total > 0 && S.crisisCost > 0){
+    const ratio = total / S.crisisCost;
+    ratioEl.innerHTML = fmtMoney(total) + " &divide; " + fmtMoney(S.crisisCost) + " = "
+      + '<strong style="color:var(--ink)">' + pc(ratio) + "</strong> of crisis-price replacement";
+    apply.disabled = false;
+    apply.dataset.ratio = ratio;
+  } else {
+    ratioEl.textContent = total > 0
+      ? "Enter a crisis replacement cost above to compute the ratio."
+      : "";
+    apply.disabled = true;
+    delete apply.dataset.ratio;
+  }
+}
+["cAlt","cFreight","cInv","cHedge","cIns"].forEach(id => {
+  document.getElementById(id).addEventListener("input", updateCalc);
+});
+document.getElementById("calcApply").addEventListener("click", e => {
+  const r = +e.target.dataset.ratio;
+  if (!r) return;
+  const pct = Math.max(1, Math.min(60, r * 100));
+  const inp = document.getElementById("alpha");
+  inp.value = pct.toFixed(1);
+  inp.dispatchEvent(new Event("input"));
 });
 document.getElementById("adopt").addEventListener("input", e => {
   S.adopt = +e.target.value;

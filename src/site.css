@@ -229,6 +229,7 @@ figcaption{font:12px/1.55 var(--sans);color:var(--ink-faint);margin-top:var(--s3
 .badge.ok{border-color:var(--sound-dim);color:var(--sound);
   background:rgba(63,217,188,.07)}
 .badge.none{background:#08191F}
+.badge.warn{border-color:var(--amber);color:var(--amber);background:rgba(255,176,32,.08)}
 
 /* ---------- tables ---------- */
 table{width:100%;border-collapse:collapse;font-size:13.5px}
@@ -257,6 +258,37 @@ td.m,th.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .note strong{color:var(--ink-soft);font-weight:600}
 .empty{font:italic 400 14.5px/1.6 var(--serif);color:var(--ink-faint);
   padding:var(--s4) 0;margin:0}
+
+/* ---------- disclosure blocks (calculator, why-panel) ---------- */
+details{border:1px solid var(--rule);border-radius:4px;
+  background:linear-gradient(180deg,#0F2A35,#0B1F29);box-shadow:var(--edge)}
+details + details{margin-top:var(--s3)}
+details > summary{cursor:pointer;padding:12px 14px;list-style:none;
+  font:500 12.5px/1.4 var(--sans);color:var(--ink)}
+details > summary::-webkit-details-marker{display:none}
+details > summary::before{content:"\25b8\a0";color:var(--ink-faint)}
+details[open] > summary::before{content:"\25be\a0"}
+details > summary:hover{background:var(--raise)}
+details .inner{padding:0 var(--s4) var(--s4)}
+details .inner .field:first-child{margin-top:var(--s3)}
+
+/* ---------- numbered explain list ("why this decision") ---------- */
+.explain{margin:0;padding-left:0;list-style:none;counter-reset:wl}
+.explain li{counter-increment:wl;padding:9px 0 9px 32px;position:relative;
+  border-bottom:1px solid var(--rule-soft);font-size:13.5px;color:var(--ink-soft)}
+.explain li:last-child{border-bottom:0}
+.explain li::before{content:counter(wl);position:absolute;left:0;top:9px;
+  width:19px;height:19px;border:1px solid var(--rule);border-radius:50%;
+  font:10px/17px var(--mono);text-align:center;color:var(--ink-faint)}
+.explain b{color:var(--ink);font-weight:600}
+
+/* ---------- recommended-action checklist ---------- */
+.actions{margin:0;padding:0;list-style:none;display:grid;gap:9px}
+.actions li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;
+  color:var(--ink-soft)}
+.actions li .mk{flex:0 0 18px;font:600 13px/1.4 var(--mono)}
+.actions li.yes .mk{color:var(--sound)}
+.actions li.no .mk{color:var(--caution)}
 
 /* ---------- legend ---------- */
 .legend{display:grid;grid-template-columns:repeat(auto-fit,minmax(236px,1fr));
