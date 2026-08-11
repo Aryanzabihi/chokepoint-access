@@ -5,10 +5,10 @@
   <div class="eyebrow"><a href="/economic-scenarios" style="color:inherit">Economic scenarios</a>
   &middot; new</div>
   <h1>Build a scenario</h1>
-  <p class="thesis">This is the same scenario.json shape <code>economic_engine.py</code>'s own
-  CLI reads and writes &mdash; edit the pre-filled example below with your own numbers. Every
-  field is documented in <code>engine.md</code>. Probability is never estimated for you; enter
-  your own, informed by whatever context you have.</p>
+  <p class="thesis">Every field below is pre-filled with an example so you can see the shape of
+  a scenario &mdash; replace the numbers with your own. Nothing is computed for you until you
+  press Compute. Probability is never estimated for you; enter your own, informed by whatever
+  context you have.</p>
 </header>
 
 {% if error %}<p class="note hot"><strong>Could not compute this scenario.</strong> {{ error }}</p>{% endif %}
@@ -18,33 +18,282 @@
 exposure &mdash; it'll show up on that client's portfolio page.</p>
 {% endif %}
 
-<form class="panel" method="post" action="/economic-scenarios" style="margin-top:0">
+<form method="post" action="/economic-scenarios">
   {% if exposure_id %}<input type="hidden" name="exposure_id" value="{{ exposure_id }}">{% endif %}
-  <div class="field">
-    <label for="scenario_json">Scenario (JSON)</label>
-    <textarea id="scenario_json" name="scenario_json" rows="28" required
-      style="width:100%;font-family:var(--mono);font-size:12.5px;padding:12px;
-      background:#08191F;color:var(--ink);border:1px solid var(--rule);border-radius:3px"
-      >{{ template_json }}</textarea>
-    <p class="hint">Valid corridors: {{ ", ".join(corridors) if corridors else "see engine.md" }}</p>
-  </div>
-  <button class="btn" type="submit">Compute</button>
-</form>
 
-<details style="margin-top:var(--s4)">
-  <summary>Want uncertainty ranges instead of one exact number?</summary>
-  <div class="inner">
-    <p class="hint" style="margin-top:0">Optional &mdash; leave this out and you get exactly
-    what's above. Add a top-level <code>"uncertainty"</code> block and the result includes a
-    P10/P50/P90 spread plus a note on what it's most sensitive to:</p>
-    <pre style="background:#08191F;border:1px solid var(--rule);padding:12px;overflow-x:auto;
-    font-size:12px;color:var(--ink)">"uncertainty": {
-  "probability": {"low": 0.15, "high": 0.30},
-  "cost_multiplier": {"low": 0.85, "high": 1.15}
-}</pre>
-    <p class="hint"><code>probability</code> ranges how likely disruption is; <code>cost_multiplier</code>
-    ranges how far off your total cost estimate could be. Neither is guessed for you &mdash;
-    both come only from the numbers you put in this block.</p>
+  <section class="panel">
+    <h2>Basics</h2>
+    <div class="row">
+      <div class="field" style="min-width:220px;flex:1">
+        <label for="scenario_id">Scenario name</label>
+        <input type="text" id="scenario_id" name="scenario_id" value="{{ t.scenario_id }}" required>
+      </div>
+      <div class="field" style="width:120px">
+        <label for="currency">Currency</label>
+        <select id="currency" name="currency">
+          <option value="EUR" {{ "selected" if t.currency == "EUR" else "" }}>EUR &euro;</option>
+          <option value="USD" {{ "selected" if t.currency == "USD" else "" }}>USD $</option>
+          <option value="GBP" {{ "selected" if t.currency == "GBP" else "" }}>GBP &pound;</option>
+        </select>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Disruption</h2>
+    <div class="row">
+      <div class="field" style="min-width:260px;flex:1">
+        <label for="corridor">Chokepoint</label>
+        <select id="corridor" name="corridor" required>
+          {% for c in corridors %}
+          <option value="{{ c }}" {{ "selected" if c == t.disruption.corridor else "" }}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field" style="width:160px">
+        <label for="probability">Disruption probability</label>
+        <input type="number" id="probability" name="probability" min="0" max="100" step="0.1"
+               value="{{ (t.disruption.probability * 100)|round(2) }}" required>
+        <p class="hint">% &mdash; your own estimate, not computed here.</p>
+      </div>
+      <div class="field" style="width:160px">
+        <label for="delay_days">Expected delay</label>
+        <input type="number" id="delay_days" name="delay_days" min="0" step="0.5"
+               value="{{ t.disruption.delay_days }}" required>
+        <p class="hint">days, if disruption occurs</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Cargo</h2>
+    <div class="row">
+      <div class="field" style="min-width:200px;flex:1">
+        <label for="commodity">Commodity</label>
+        <input type="text" id="commodity" name="commodity" value="{{ t.cargo.commodity }}" required>
+      </div>
+      <div class="field" style="width:160px">
+        <label for="quantity">Quantity</label>
+        <input type="number" id="quantity" name="quantity" min="0" step="1"
+               value="{{ t.cargo.quantity }}" required>
+      </div>
+      <div class="field" style="width:200px">
+        <label for="cargo_value">Cargo value</label>
+        <input type="number" id="cargo_value" name="cargo_value" min="0" step="1000"
+               value="{{ t.cargo.cargo_value }}" required>
+      </div>
+      <div class="field" style="width:200px">
+        <label for="inventory_level">Current inventory level</label>
+        <input type="number" id="inventory_level" name="inventory_level" min="0" step="1"
+               value="{{ t.cargo.inventory_level }}">
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Transport cost</h2>
+    <div class="row">
+      <div class="field" style="width:180px">
+        <label for="baseline_freight">Baseline freight</label>
+        <input type="number" id="baseline_freight" name="baseline_freight" min="0" step="1000"
+               value="{{ t.transport.baseline_freight }}">
+        <p class="hint">no disruption</p>
+      </div>
+      <div class="field" style="width:180px">
+        <label for="disrupted_freight">Disrupted freight</label>
+        <input type="number" id="disrupted_freight" name="disrupted_freight" min="0" step="1000"
+               value="{{ t.transport.disrupted_freight }}">
+      </div>
+      <div class="field" style="width:150px">
+        <label for="fuel_cost">Extra fuel</label>
+        <input type="number" id="fuel_cost" name="fuel_cost" min="0" step="1000"
+               value="{{ t.transport.fuel_cost }}">
+      </div>
+      <div class="field" style="width:150px">
+        <label for="port_charges">Port charges</label>
+        <input type="number" id="port_charges" name="port_charges" min="0" step="1000"
+               value="{{ t.transport.port_charges }}">
+      </div>
+      <div class="field" style="width:150px">
+        <label for="handling_costs">Handling</label>
+        <input type="number" id="handling_costs" name="handling_costs" min="0" step="1000"
+               value="{{ t.transport.handling_costs }}">
+      </div>
+      <div class="field" style="width:170px">
+        <label for="rerouting_premium">Rerouting premium</label>
+        <input type="number" id="rerouting_premium" name="rerouting_premium" min="0" step="1000"
+               value="{{ t.transport.rerouting_premium }}">
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Insurance</h2>
+    <div class="row">
+      <div class="field" style="width:180px">
+        <label for="baseline_premium">Baseline premium</label>
+        <input type="number" id="baseline_premium" name="baseline_premium" min="0" step="1000"
+               value="{{ t.insurance.baseline_premium }}">
+      </div>
+      <div class="field" style="width:180px">
+        <label for="war_risk_premium">War-risk premium</label>
+        <input type="number" id="war_risk_premium" name="war_risk_premium" min="0" step="1000"
+               value="{{ t.insurance.war_risk_premium }}">
+      </div>
+      <div class="field" style="width:180px">
+        <label for="additional_surcharge">Additional surcharge</label>
+        <input type="number" id="additional_surcharge" name="additional_surcharge" min="0" step="1000"
+               value="{{ t.insurance.additional_surcharge }}">
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Delay, inventory &amp; commodity price effects</h2>
+    <div class="row">
+      <div class="field" style="width:200px">
+        <label for="delay_cost_rate">Delay cost rate</label>
+        <input type="number" id="delay_cost_rate" name="delay_cost_rate" min="0" step="0.0001"
+               value="{{ t.economic.delay_cost_rate }}">
+        <p class="hint">fraction of cargo value lost per day of delay &mdash; e.g. 0.0012 = 0.12%/day</p>
+      </div>
+      <div class="field" style="width:220px">
+        <label for="inventory_holding_cost_rate">Inventory holding cost</label>
+        <input type="number" id="inventory_holding_cost_rate" name="inventory_holding_cost_rate"
+               min="0" step="0.1" value="{{ t.economic.inventory_holding_cost_rate }}">
+        <p class="hint">{{ t.currency }} per unit held per day</p>
+      </div>
+      <div class="field" style="width:180px">
+        <label for="additional_inventory_qty">Extra inventory held</label>
+        <input type="number" id="additional_inventory_qty" name="additional_inventory_qty" min="0"
+               step="1" value="{{ t.additional_inventory_qty }}">
+        <p class="hint">units, if pre-positioning stock</p>
+      </div>
+      <div class="field" style="width:220px">
+        <label for="disruption_attributable_price_change">Price rise from this disruption</label>
+        <input type="number" id="disruption_attributable_price_change"
+               name="disruption_attributable_price_change" step="0.01"
+               value="{{ t.commodity_effect.disruption_attributable_price_change }}">
+        <p class="hint">{{ t.currency }} extra per unit, disruption-attributable only</p>
+      </div>
+      <div class="field" style="width:220px">
+        <label for="market_wide_price_change">Market-wide price move</label>
+        <input type="number" id="market_wide_price_change" name="market_wide_price_change" step="0.01"
+               value="{{ t.commodity_effect.market_wide_price_change }}">
+        <p class="hint">{{ t.currency }} per unit, for context &mdash; shown on the report but not
+        counted in your total, to avoid double-counting a move that was happening anyway</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Disruption-severity scenarios</h2>
+    <p class="hint" style="margin-top:0">How likely each outcome is, and what it costs if it
+    happens. Probabilities must add up to 100%.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Outcome</th><th class="m">Probability</th><th class="m">Cost if this happens</th></tr></thead>
+        <tbody>
+        {% for row in t.scenarios %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td class="m"><input type="number" name="scenario_{{ loop.index0 }}_probability"
+                min="0" max="100" step="0.1" style="width:90px"
+                value="{{ (row.probability * 100)|round(2) }}"> %</td>
+            <td class="m"><input type="number" name="scenario_{{ loop.index0 }}_conditional_loss"
+                min="0" step="1000" style="width:140px" value="{{ row.conditional_loss }}"></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Strategy costs</h2>
+    <p class="hint" style="margin-top:0">What each option would cost you directly, and the loss
+    you'd still expect to take even after taking it.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Strategy</th><th class="m">Direct cost</th><th class="m">Residual loss</th></tr></thead>
+        <tbody>
+        {% for row in t.strategies %}
+          <tr>
+            <td>{{ row.name }}</td>
+            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_direct_cost"
+                min="0" step="1000" style="width:140px" value="{{ row.direct_cost }}"></td>
+            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_residual_loss_estimate"
+                min="0" step="1000" style="width:140px" value="{{ row.residual_loss_estimate }}"></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Decision thresholds</h2>
+    <div class="row">
+      <div class="field" style="width:220px">
+        <label for="mitigation_cost">Mitigation cost</label>
+        <input type="number" id="mitigation_cost" name="mitigation_cost" min="0" step="1000"
+               value="{{ t.mitigation_cost if t.mitigation_cost is not none else '' }}">
+        <p class="hint">usually your recommended strategy's direct cost, above</p>
+      </div>
+      <div class="field" style="width:220px">
+        <label for="loss_if_disrupted">Loss if disrupted</label>
+        <input type="number" id="loss_if_disrupted" name="loss_if_disrupted" min="0" step="1000"
+               value="{{ t.loss_if_disrupted if t.loss_if_disrupted is not none else '' }}">
+        <p class="hint">worst case you're weighing that cost against</p>
+      </div>
+    </div>
+  </section>
+
+  <details style="margin-top:var(--s4)" {{ "open" if t.uncertainty else "" }}>
+    <summary>Add uncertainty ranges (optional)</summary>
+    <div class="inner">
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400">
+          <input type="checkbox" name="enable_uncertainty" style="width:auto"
+                 {{ "checked" if t.uncertainty else "" }}>
+          Run this scenario as a range instead of one exact number
+        </label>
+        <p class="hint">Leave unchecked and you get exactly what's above. Check it, and the result
+        includes a P10/P50/P90 spread plus a note on what it's most sensitive to. Neither range is
+        guessed for you &mdash; both come only from the numbers below.</p>
+      </div>
+      <div class="row">
+        <div class="field" style="width:160px">
+          <label for="unc_probability_low">Probability, low end</label>
+          <input type="number" id="unc_probability_low" name="unc_probability_low" min="0" max="100"
+                 step="0.1" value="{{ ((t.uncertainty.probability.low if t.uncertainty else 0.15) * 100)|round(2) }}"> %
+        </div>
+        <div class="field" style="width:160px">
+          <label for="unc_probability_high">Probability, high end</label>
+          <input type="number" id="unc_probability_high" name="unc_probability_high" min="0" max="100"
+                 step="0.1" value="{{ ((t.uncertainty.probability.high if t.uncertainty else 0.30) * 100)|round(2) }}"> %
+        </div>
+        <div class="field" style="width:160px">
+          <label for="unc_cost_multiplier_low">Cost estimate, low end</label>
+          <input type="number" id="unc_cost_multiplier_low" name="unc_cost_multiplier_low" min="0"
+                 step="1" value="{{ ((t.uncertainty.cost_multiplier.low if t.uncertainty else 0.85) * 100)|round(2) }}"> %
+        </div>
+        <div class="field" style="width:160px">
+          <label for="unc_cost_multiplier_high">Cost estimate, high end</label>
+          <input type="number" id="unc_cost_multiplier_high" name="unc_cost_multiplier_high" min="0"
+                 step="1" value="{{ ((t.uncertainty.cost_multiplier.high if t.uncertainty else 1.15) * 100)|round(2) }}"> %
+        </div>
+        <div class="field" style="width:140px">
+          <label for="unc_n_simulations">Simulations</label>
+          <input type="number" id="unc_n_simulations" name="unc_n_simulations" min="100" max="20000"
+                 step="100" value="{{ t.uncertainty.n_simulations if t.uncertainty else 2000 }}">
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <div class="row" style="margin-top:var(--s5)">
+    <button class="btn" type="submit">Compute</button>
   </div>
-</details>
+</form>
 {% endblock %}

@@ -161,6 +161,51 @@ def test_full_walkthrough(client):
     assert r.status_code == 404
 
 
+def _scenario_form(template: dict, *, exposure_id: int | None = None,
+                    uncertainty: dict | None = None) -> dict:
+    """Converts the nested scenario.json shape (what the JSON API and the
+    engine's own template() return) into the flat field names the "new
+    scenario" dashboard form now posts -- app/routers/economic.py's
+    _form_to_data() is the inverse of this."""
+    d, cargo, t, ins, econ, ce = (template["disruption"], template["cargo"], template["transport"],
+                                   template["insurance"], template["economic"],
+                                   template["commodity_effect"])
+    fields = {
+        "scenario_id": template.get("scenario_id", ""), "currency": template.get("currency", "EUR"),
+        "corridor": d["corridor"], "probability": d["probability"] * 100, "delay_days": d["delay_days"],
+        "commodity": cargo["commodity"], "quantity": cargo["quantity"],
+        "cargo_value": cargo["cargo_value"], "inventory_level": cargo["inventory_level"],
+        "baseline_freight": t["baseline_freight"], "disrupted_freight": t["disrupted_freight"],
+        "fuel_cost": t["fuel_cost"], "port_charges": t["port_charges"],
+        "handling_costs": t["handling_costs"], "rerouting_premium": t["rerouting_premium"],
+        "baseline_premium": ins["baseline_premium"], "war_risk_premium": ins["war_risk_premium"],
+        "additional_surcharge": ins["additional_surcharge"],
+        "delay_cost_rate": econ["delay_cost_rate"],
+        "inventory_holding_cost_rate": econ["inventory_holding_cost_rate"],
+        "additional_inventory_qty": template.get("additional_inventory_qty", 0),
+        "disruption_attributable_price_change": ce["disruption_attributable_price_change"],
+        "market_wide_price_change": ce["market_wide_price_change"],
+        "mitigation_cost": template.get("mitigation_cost"),
+        "loss_if_disrupted": template.get("loss_if_disrupted"),
+    }
+    for i, row in enumerate(template["scenarios"]):
+        fields[f"scenario_{i}_probability"] = row["probability"] * 100
+        fields[f"scenario_{i}_conditional_loss"] = row["conditional_loss"]
+    for i, row in enumerate(template["strategies"]):
+        fields[f"strategy_{i}_direct_cost"] = row["direct_cost"]
+        fields[f"strategy_{i}_residual_loss_estimate"] = row["residual_loss_estimate"]
+    if exposure_id is not None:
+        fields["exposure_id"] = exposure_id
+    if uncertainty is not None:
+        fields["enable_uncertainty"] = "on"
+        fields["unc_probability_low"] = uncertainty["probability"]["low"] * 100
+        fields["unc_probability_high"] = uncertainty["probability"]["high"] * 100
+        fields["unc_cost_multiplier_low"] = uncertainty["cost_multiplier"]["low"] * 100
+        fields["unc_cost_multiplier_high"] = uncertainty["cost_multiplier"]["high"] * 100
+        fields["unc_n_simulations"] = uncertainty.get("n_simulations", 2000)
+    return {k: str(v) for k, v in fields.items() if v is not None}
+
+
 def test_economic_scenario_walkthrough(client):
     client.post("/signup", data={"email": "analyst@example.com",
                                   "password": "correct horse battery staple"})
@@ -191,13 +236,13 @@ def test_economic_scenario_walkthrough(client):
     r = client.post("/api/v1/economic-scenarios", json=bad)
     assert r.status_code == 422
 
-    # the dashboard form flow: paste JSON, compute, land on the detail page
+    # the dashboard form flow: labeled fields, pre-filled with the example,
+    # compute, land on the detail page
     r = client.get("/economic-scenarios/new")
     assert r.status_code == 200
-    assert "scenario_json" in r.text
+    assert 'name="probability"' in r.text and 'name="cargo_value"' in r.text
 
-    r = client.post("/economic-scenarios",
-                     data={"scenario_json": json.dumps(template)}, follow_redirects=False)
+    r = client.post("/economic-scenarios", data=_scenario_form(template), follow_redirects=False)
     assert r.status_code == 303
     detail_url = r.headers["location"]
 
@@ -210,10 +255,12 @@ def test_economic_scenario_walkthrough(client):
     assert r.status_code == 200
     assert "Economic exposure" in r.text
 
-    # malformed JSON in the form is rejected with a helpful error, not a 500
-    r = client.post("/economic-scenarios", data={"scenario_json": "{not valid json"})
+    # an unknown corridor via the form is rejected with a helpful error, not a 500
+    bad_fields = _scenario_form(template)
+    bad_fields["corridor"] = "Not A Real Strait"
+    r = client.post("/economic-scenarios", data=bad_fields)
     assert r.status_code == 422
-    assert "JSONDecodeError" in r.text or "error" in r.text.lower()
+    assert "ValueError" in r.text or "error" in r.text.lower()
 
     # cross-user isolation holds for scenarios too
     other = TestClient(app)
@@ -259,9 +306,11 @@ def test_economic_scenario_v2_features(client):
     assert unc_result["sensitivity"] is not None
     unc_scenario_id = unc_body["id"]
 
-    # the dashboard form path also exercises this, textarea + all
+    # the dashboard form path also exercises this, via the "add uncertainty
+    # ranges" checkbox section rather than hand-edited JSON
     r = client.post("/economic-scenarios",
-                     data={"scenario_json": json.dumps(with_unc)}, follow_redirects=False)
+                     data=_scenario_form(template, uncertainty=with_unc["uncertainty"]),
+                     follow_redirects=False)
     assert r.status_code == 303
     detail_url = r.headers["location"]
     r = client.get(detail_url)
@@ -291,9 +340,8 @@ def test_economic_scenario_v2_features(client):
     for exp_id in exposure_ids:
         scenario = dict(template)
         scenario["disruption"] = dict(template["disruption"], corridor="Bab-el-Mandeb")
-        r = client.post("/economic-scenarios", data={
-            "scenario_json": json.dumps(scenario), "exposure_id": str(exp_id),
-        }, follow_redirects=False)
+        r = client.post("/economic-scenarios",
+                         data=_scenario_form(scenario, exposure_id=exp_id), follow_redirects=False)
         assert r.status_code == 303
 
     r = client.get(f"/clients/{client_id}/portfolio")
