@@ -37,7 +37,11 @@ services:
   - type: cron
     name: chokepoint-alerts
     runtime: python
-    plan: free
+    # Render has no free tier for cron jobs (only web services and
+    # databases get one) -- starter is the cheapest plan that's valid
+    # here. This is the one piece of this stack that isn't free; check
+    # Render's current pricing for this plan before applying the blueprint.
+    plan: starter
     rootDir: backend
     # 09:00 UTC on the 6th — a day after the existing GitHub Actions monthly
     # reading workflow (the 5th), so this month's reading has had a chance
