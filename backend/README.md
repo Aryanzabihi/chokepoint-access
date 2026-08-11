@@ -50,9 +50,13 @@ since the last saved one.
 ## Deploying
 
 1. Push this repo to GitHub (already the case).
-2. On Render: **New → Blueprint**, point it at the repo. `render.yaml`
-   creates the Postgres instance, the web service, and the monthly cron job
-   together, wired to each other.
+2. On Render: **New → Blueprint**, point it at the repo. `/render.yaml`
+   (repo root — not `backend/render.yaml`; Render looks at the root by
+   default, and a non-default Blueprint Path setting has been flaky) creates
+   the Postgres instance, the web service, and the monthly cron job together,
+   wired to each other. `rootDir: backend` on each service is what actually
+   scopes their build/start commands to `backend/` — the blueprint file's
+   own location doesn't need to match.
 3. In the Render dashboard, set `RESEND_API_KEY` and `EMAIL_FROM` on both
    the web service and the cron job (the blueprint leaves these blank on
    purpose — see the comment at the top of `render.yaml`).
