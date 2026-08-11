@@ -122,3 +122,15 @@ class AlertSubscription(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id", index=True)
     exposure_id: int = Field(foreign_key="exposure.id", index=True)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class EconomicScenarioSubscription(SQLModel, table=True):
+    """The same idea as AlertSubscription, for EconomicScenario instead of
+    Exposure. Kept as its own table rather than adding a second nullable FK
+    to AlertSubscription — that would mean every read of the existing,
+    already-working exposure alert logic has to account for a case it never
+    used to have."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    economic_scenario_id: int = Field(foreign_key="economicscenario.id", index=True)
+    created_at: datetime = Field(default_factory=utcnow)

@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 from sqlmodel import Session, select
 
 from .models import (
-    AlertSubscription, ApiKey, AuditEvent, Client, Decision, EconomicScenario, Exposure, User,
+    AlertSubscription, ApiKey, AuditEvent, Client, Decision, EconomicScenario,
+    EconomicScenarioSubscription, Exposure, User,
 )
 
 
@@ -159,6 +160,13 @@ def create_economic_scenario(session: Session, user: User, *, scenario_id: str, 
     return row
 
 
+def latest_economic_scenario_for_exposure(session: Session,
+                                           exposure_id: int) -> EconomicScenario | None:
+    return session.exec(
+        select(EconomicScenario).where(EconomicScenario.exposure_id == exposure_id)
+        .order_by(EconomicScenario.created_at.desc())).first()
+
+
 # -------------------------------------------------------------- api keys ---
 
 def list_api_keys(session: Session, user: User) -> list[ApiKey]:
@@ -212,5 +220,32 @@ def toggle_subscription(session: Session, user: User, exposure_id: int) -> bool:
         session.commit()
         return False
     session.add(AlertSubscription(user_id=user.id, exposure_id=exposure_id))
+    session.commit()
+    return True
+
+
+def is_subscribed_economic_scenario(session: Session, user: User, economic_scenario_id: int) -> bool:
+    return session.exec(
+        select(EconomicScenarioSubscription).where(
+            EconomicScenarioSubscription.user_id == user.id,
+            EconomicScenarioSubscription.economic_scenario_id == economic_scenario_id)
+    ).first() is not None
+
+
+def toggle_economic_scenario_subscription(session: Session, user: User,
+                                           economic_scenario_id: int) -> bool:
+    """Returns the new state (True = now subscribed). Mirrors
+    toggle_subscription() above, for EconomicScenario instead of Exposure."""
+    existing = session.exec(
+        select(EconomicScenarioSubscription).where(
+            EconomicScenarioSubscription.user_id == user.id,
+            EconomicScenarioSubscription.economic_scenario_id == economic_scenario_id)
+    ).first()
+    if existing:
+        session.delete(existing)
+        session.commit()
+        return False
+    session.add(EconomicScenarioSubscription(user_id=user.id,
+                                               economic_scenario_id=economic_scenario_id))
     session.commit()
     return True

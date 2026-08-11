@@ -51,6 +51,15 @@ exposure-management notes below, but the cost-ratio test does not apply.</p>
       <button class="btn {{ 'ghost' if subscribed else '' }}" type="submit">
         {{ "Turn off alerts" if subscribed else "Turn on alerts" }}</button>
     </form>
+
+    <section class="panel">
+      <h2>Economic scenario</h2>
+      <p class="hint" style="margin:0 0 var(--s3)">A more detailed lens than the cost ratio above
+      &mdash; transport, insurance, delay, inventory and commodity cost, each priced separately,
+      with named strategies compared by expected total cost.</p>
+      <a class="btn ghost" href="/economic-scenarios/new?exposure_id={{ exposure.id }}">
+        Build an economic scenario for this exposure</a>
+    </section>
   </div>
 
   <section class="panel" style="margin-top:0">

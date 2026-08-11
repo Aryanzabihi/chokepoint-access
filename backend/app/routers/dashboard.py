@@ -8,6 +8,7 @@ should render them.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -108,6 +109,40 @@ def client_page(client_id: int, request: Request, user: User = Depends(current_u
     return templates.TemplateResponse(request, "client_detail.html",
         {"user": user, "client": client, "exposures": exposures,
          "corridors": sorted(engine.CORRIDORS)})
+
+
+@router.get("/clients/{client_id}/portfolio", response_class=HTMLResponse)
+def portfolio_page(client_id: int, request: Request, user: User = Depends(current_user),
+                    session: Session = Depends(get_session)):
+    """Sums each exposure's most recent economic scenario, and flags when
+    two or more exposures share a corridor -- a plain structural note
+    ("these move together"), not a fabricated correlation coefficient this
+    app has no data to back up. Totals are kept per-currency rather than
+    summed across currencies, which would silently produce a wrong number.
+    """
+    client = crud.get_client_owned(session, user, client_id)
+    if client is None:
+        raise HTTPException(404, "client not found")
+    exposures = crud.list_exposures(session, client)
+
+    rows = []
+    totals: dict[str, dict[str, float]] = {}
+    by_corridor: dict[str, int] = {}
+    for exp in exposures:
+        scenario = crud.latest_economic_scenario_for_exposure(session, exp.id)
+        result = json.loads(scenario.result_json) if scenario else None
+        if result:
+            cur = result.get("currency", "EUR")
+            t = totals.setdefault(cur, {"expected_exposure": 0.0, "avoidable_loss": 0.0})
+            t["expected_exposure"] += result.get("expected_exposure") or 0.0
+            t["avoidable_loss"] += result.get("avoidable_loss") or 0.0
+        rows.append({"exposure": exp, "scenario": scenario, "result": result})
+        by_corridor[exp.corridor] = by_corridor.get(exp.corridor, 0) + 1
+
+    overlaps = [corridor for corridor, n in by_corridor.items() if n > 1]
+
+    return templates.TemplateResponse(request, "client_portfolio.html",
+        {"user": user, "client": client, "rows": rows, "totals": totals, "overlaps": overlaps})
 
 
 @router.post("/clients/{client_id}/exposures")

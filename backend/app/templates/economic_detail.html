@@ -23,7 +23,17 @@
 
 <div class="row" style="margin:var(--s4) 0">
   <a class="btn ghost" href="/economic-scenarios/{{ row.id }}/report" target="_blank">Full report</a>
+  <form method="post" action="/economic-scenarios/{{ row.id }}/subscribe" style="margin:0">
+    <button class="btn {{ 'ghost' if subscribed else '' }}" type="submit">
+      {{ "Turn off monthly re-check" if subscribed else "Re-check this monthly" }}</button>
+  </form>
 </div>
+<p class="hint" style="margin:0 0 var(--s4)">
+  {% if subscribed %}You'll get an email if next month's reading changes the recommended
+  strategy or threshold status for this scenario.
+  {% else %}Off. Turn on to get a monthly email if this scenario's recommendation changes as
+  new readings come in.{% endif %}
+</p>
 
 <div class="grid split">
   <section class="panel" style="margin-top:0">
@@ -50,7 +60,7 @@
   <div class="scroll">
   <table>
     <thead><tr><th>Strategy</th><th class="m">Direct cost</th><th class="m">Residual loss</th>
-    <th class="m">Expected total cost</th><th>Status</th></tr></thead>
+    <th class="m">Expected total cost</th><th>Vs. TAR's evaluated band</th><th>Status</th></tr></thead>
     <tbody>
     {% for r in result.strategy_comparison %}
       <tr{{ ' style="font-weight:600"' | safe if r.name == result.recommended_strategy else "" }}>
@@ -58,6 +68,13 @@
         <td class="m">{{ "{:,.0f}".format(r.direct_cost) }}</td>
         <td class="m">{{ "{:,.0f}".format(r.residual_loss) }}</td>
         <td class="m">{{ "{:,.0f}".format(r.expected_total_cost) }}</td>
+        <td class="m">
+          {% if r.implied_alpha is none %}&mdash;
+          {% elif r.historically_favorable is none %}<span class="hint">{{ r.band_note }}</span>
+          {% elif r.historically_favorable %}<span style="color:var(--sound)">{{ "{:.0%}".format(r.implied_alpha) }} &mdash; favorable</span>
+          {% else %}<span style="color:var(--caution)">{{ "{:.0%}".format(r.implied_alpha) }} &mdash; outside band</span>
+          {% endif %}
+        </td>
         <td>{% if r.eligible %}eligible{% else %}<span style="color:var(--caution)">ineligible:
           {{ r.ineligibility_reason }}</span>{% endif %}</td>
       </tr>
@@ -65,7 +82,47 @@
     </tbody>
   </table>
   </div>
+  <p class="hint">"Vs. TAR's evaluated band" checks each strategy's own cost ratio (direct cost
+  &divide; loss if disrupted) against the same value curve <code>client_profile.py</code> and
+  <code>services.py</code> compute from 40 years of real onsets &mdash; not a new prediction, a
+  cross-check against the one that already exists.</p>
 </section>
+
+{% if result.uncertainty and result.uncertainty.expected_exposure_p10 is defined %}
+<section class="panel">
+  <h2>Uncertainty</h2>
+  <p class="hint">Monte Carlo over a cost estimate ranging from
+  {{ "{:.0%}".format(result.uncertainty.cost_multiplier_range[0]) }} to
+  {{ "{:.0%}".format(result.uncertainty.cost_multiplier_range[1]) }} of your figures,
+  {{ result.uncertainty.n_simulations }} draws.</p>
+  <div class="stats">
+    <div><b>{{ result.currency }} {{ "{:,.0f}".format(result.uncertainty.expected_exposure_p10) }}</b>
+      <span>expected exposure, P10</span></div>
+    <div><b>{{ result.currency }} {{ "{:,.0f}".format(result.uncertainty.expected_exposure_p50) }}</b>
+      <span>expected exposure, P50</span></div>
+    <div><b>{{ result.currency }} {{ "{:,.0f}".format(result.uncertainty.expected_exposure_p90) }}</b>
+      <span>expected exposure, P90</span></div>
+  </div>
+  {% if result.uncertainty.probability_check %}
+  <p class="note {{ 'hot' if not result.uncertainty.probability_check.robust else '' }}"
+     style="margin-top:var(--s4)">
+    {% if result.uncertainty.probability_check.robust %}Your recommendation is stable across
+    the probability range you gave.
+    {% else %}Your recommendation is <strong>not</strong> stable across the probability range
+    you gave &mdash; it depends on which end turns out to be closer to right.{% endif %}
+  </p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if result.sensitivity %}
+<section class="panel">
+  <h2>What this is sensitive to</h2>
+  <ol class="explain">
+    {% for s in result.sensitivity %}<li>{{ s.note }}</li>{% endfor %}
+  </ol>
+</section>
+{% endif %}
 
 {% if result.historical_context %}
 <section class="panel">
@@ -90,6 +147,7 @@
 </section>
 
 <p class="note">Model {{ result.model_version }}. Computed {{ result.timestamp }}.
-Confidence: {{ result.confidence }}. Phase 1 MVP &mdash; no market agent, no Monte Carlo
-uncertainty ranges, no licensed data feeds.</p>
+Confidence: {{ result.confidence }}. No market agent, no licensed data feeds. Uncertainty
+ranges above (when shown) come only from the ranges you supplied &mdash; nothing here
+estimates a probability or a cost on your behalf.</p>
 {% endblock %}

@@ -42,6 +42,9 @@
   <section class="panel" style="margin-top:0">
     <h2>Exposures ({{ exposures|length }})</h2>
     {% if exposures %}
+    <div class="row" style="margin-bottom:var(--s4)">
+      <a class="btn ghost" href="/clients/{{ client.id }}/portfolio">Portfolio summary</a>
+    </div>
     <div class="cards">
       {% for e in exposures %}
       <a class="card" href="/clients/{{ client.id }}/exposures/{{ e.id }}"

@@ -13,7 +13,13 @@
 
 {% if error %}<p class="note hot"><strong>Could not compute this scenario.</strong> {{ error }}</p>{% endif %}
 
+{% if linked_exposure %}
+<p class="hint">This scenario will be linked to your <strong>{{ linked_exposure.corridor }}</strong>
+exposure &mdash; it'll show up on that client's portfolio page.</p>
+{% endif %}
+
 <form class="panel" method="post" action="/economic-scenarios" style="margin-top:0">
+  {% if exposure_id %}<input type="hidden" name="exposure_id" value="{{ exposure_id }}">{% endif %}
   <div class="field">
     <label for="scenario_json">Scenario (JSON)</label>
     <textarea id="scenario_json" name="scenario_json" rows="28" required
@@ -24,4 +30,21 @@
   </div>
   <button class="btn" type="submit">Compute</button>
 </form>
+
+<details style="margin-top:var(--s4)">
+  <summary>Want uncertainty ranges instead of one exact number?</summary>
+  <div class="inner">
+    <p class="hint" style="margin-top:0">Optional &mdash; leave this out and you get exactly
+    what's above. Add a top-level <code>"uncertainty"</code> block and the result includes a
+    P10/P50/P90 spread plus a note on what it's most sensitive to:</p>
+    <pre style="background:#08191F;border:1px solid var(--rule);padding:12px;overflow-x:auto;
+    font-size:12px;color:var(--ink)">"uncertainty": {
+  "probability": {"low": 0.15, "high": 0.30},
+  "cost_multiplier": {"low": 0.85, "high": 1.15}
+}</pre>
+    <p class="hint"><code>probability</code> ranges how likely disruption is; <code>cost_multiplier</code>
+    ranges how far off your total cost estimate could be. Neither is guessed for you &mdash;
+    both come only from the numbers you put in this block.</p>
+  </div>
+</details>
 {% endblock %}

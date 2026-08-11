@@ -52,24 +52,36 @@ def list_page(request: Request, user: User = Depends(current_user),
 
 
 @router.get("/economic-scenarios/new", response_class=HTMLResponse)
-def new_page(request: Request, user: User = Depends(current_user)):
+def new_page(request: Request, user: User = Depends(current_user),
+             session: Session = Depends(get_session), exposure_id: int | None = None):
+    linked_exposure = crud.get_exposure_owned(session, user, exposure_id) if exposure_id else None
     return templates.TemplateResponse(request, "economic_new.html",
         {"user": user, "template_json": json.dumps(template_scenario(), indent=2),
-         "corridors": sorted(CORRIDORS), "error": None})
+         "corridors": sorted(CORRIDORS), "error": None,
+         "exposure_id": linked_exposure.id if linked_exposure else None,
+         "linked_exposure": linked_exposure})
 
 
 @router.post("/economic-scenarios")
 def create_page(request: Request, scenario_json: str = Form(...),
+                 exposure_id: int | None = Form(None),
                  user: User = Depends(current_user), session: Session = Depends(get_session)):
     try:
         data, result = _parse_and_compute(scenario_json)
     except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
         return templates.TemplateResponse(request, "economic_new.html",
             {"user": user, "template_json": scenario_json, "corridors": sorted(CORRIDORS),
-             "error": f"{type(exc).__name__}: {exc}"}, status_code=422)
+             "error": f"{type(exc).__name__}: {exc}", "exposure_id": exposure_id,
+             "linked_exposure": None}, status_code=422)
+    # re-verify ownership server-side rather than trust the hidden field;
+    # client_id is taken from the verified exposure itself, not the form,
+    # since the exposure already knows its own client
+    exposure = crud.get_exposure_owned(session, user, exposure_id) if exposure_id else None
     row = crud.create_economic_scenario(
         session, user, scenario_id=data.get("scenario_id", "SCENARIO-UNSPECIFIED"),
-        corridor=result["corridor"], input_data=data, result=result)
+        corridor=result["corridor"], input_data=data, result=result,
+        client_id=exposure.client_id if exposure else None,
+        exposure_id=exposure.id if exposure else None)
     return RedirectResponse(f"/economic-scenarios/{row.id}", status_code=303)
 
 
@@ -80,8 +92,19 @@ def detail_page(scenario_id: int, request: Request, user: User = Depends(current
     if row is None:
         raise HTTPException(404, "scenario not found")
     result = json.loads(row.result_json)
+    subscribed = crud.is_subscribed_economic_scenario(session, user, row.id)
     return templates.TemplateResponse(request, "economic_detail.html",
-        {"user": user, "row": row, "result": result})
+        {"user": user, "row": row, "result": result, "subscribed": subscribed})
+
+
+@router.post("/economic-scenarios/{scenario_id}/subscribe")
+def subscribe_page(scenario_id: int, user: User = Depends(current_user),
+                    session: Session = Depends(get_session)):
+    row = crud.get_economic_scenario_owned(session, user, scenario_id)
+    if row is None:
+        raise HTTPException(404, "scenario not found")
+    crud.toggle_economic_scenario_subscription(session, user, row.id)
+    return RedirectResponse(f"/economic-scenarios/{row.id}", status_code=303)
 
 
 @router.get("/economic-scenarios/{scenario_id}/report", response_class=HTMLResponse)

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }} — portfolio — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">
+    <a href="/clients" style="color:inherit">Portfolio</a> &middot;
+    <a href="/clients/{{ client.id }}" style="color:inherit">{{ client.name }}</a>
+  </div>
+  <h1>Portfolio summary</h1>
+  <p class="thesis">Sums the most recent economic scenario for each exposure. An exposure
+  with no scenario yet just doesn't count toward the total &mdash; nothing here is estimated
+  on your behalf.</p>
+</header>
+
+{% if totals %}
+<div class="status">
+  {% for currency, t in totals.items() %}
+  <div class="cell"><div class="k">Expected exposure ({{ currency }})</div>
+    <div class="v big">{{ currency }} {{ "{:,.0f}".format(t.expected_exposure) }}</div></div>
+  <div class="cell"><div class="k">Avoidable loss ({{ currency }})</div>
+    <div class="v">{{ currency }} {{ "{:,.0f}".format(t.avoidable_loss) }}</div></div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="note">None of this client's exposures have a saved economic scenario yet &mdash;
+totals will appear here once at least one does.</p>
+{% endif %}
+
+{% if overlaps %}
+<p class="note hot" style="margin-top:var(--s4)">
+  {% for c in overlaps %}This client has more than one exposure on <strong>{{ c }}</strong> —
+  a single disruption there would affect all of them together, not independently.
+  {% endfor %}
+</p>
+{% endif %}
+
+<section class="panel">
+  <h2>Exposures ({{ rows|length }})</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Corridor</th><th>Commodity</th><th>Latest scenario</th>
+      <th class="m">Expected exposure</th><th class="m">Avoidable loss</th>
+      <th>Recommended strategy</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="/clients/{{ client.id }}/exposures/{{ r.exposure.id }}">{{ r.exposure.corridor }}</a></td>
+          <td>{{ r.exposure.commodity or "—" }}</td>
+          {% if r.scenario %}
+            <td><a href="/economic-scenarios/{{ r.scenario.id }}">{{ r.scenario.scenario_id }}</a></td>
+            <td class="m">{{ r.result.currency }} {{ "{:,.0f}".format(r.result.expected_exposure) }}</td>
+            <td class="m">{{ r.result.currency }} {{ "{:,.0f}".format(r.result.avoidable_loss) }}</td>
+            <td>{{ r.result.recommended_strategy or "—" }}</td>
+          {% else %}
+            <td colspan="4"><span class="empty">no scenario yet &mdash;
+              <a href="/economic-scenarios/new?exposure_id={{ r.exposure.id }}">build one</a></span></td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
