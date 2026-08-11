@@ -73,7 +73,12 @@ def inline(path: Path, css: str, h: str) -> str:
     block = f'<style data-inlined="site.css" data-css-hash="{h}">\n{css}</style>\n'
 
     if LINK.search(s):
-        s = LINK.sub(block, s, count=1)
+        # re.sub treats a *string* replacement's backslash-digit sequences
+        # (\25, \a0, ...) as group backreferences -- and CSS unicode escapes
+        # look exactly like that (see the disclosure-triangle content: "\25b8"
+        # rules in site.css). A function replacement is inserted literally,
+        # with no backslash processing, so this is the only safe form here.
+        s = LINK.sub(lambda _m: block, s, count=1)
     elif "</head>" in s:
         s = s.replace("</head>", block + "</head>", 1)
     else:
