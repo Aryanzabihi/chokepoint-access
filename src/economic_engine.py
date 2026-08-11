@@ -12,10 +12,22 @@ and compares strategies by expected total cost. Nothing here replaces
 alpha; it is a second, more detailed lens for someone who has real
 quotations to put into it.
 
-Scope is exactly engine.md's Phase 1 MVP (see its section 23): baseline
-engine, the five disruption-cost components, a basic welfare gap, a basic
-decision engine, a basic threshold engine. No market agent, no Monte Carlo
-uncertainty engine, no licensed data feeds — the spec defers those.
+Beyond engine.md's Phase 1 MVP (see its section 23 — baseline engine, the
+five disruption-cost components, a basic welfare gap, decision engine,
+threshold engine), this module adds three things deliberately kept out of
+the user's way unless asked for:
+
+  - simulate(): Monte Carlo uncertainty ranges, via exactly two optional
+    knobs (a probability range and an overall cost multiplier range) —
+    not twenty rangeable line items. Omit the "uncertainty" block and
+    compute() is byte-identical to the Phase 1 behaviour.
+  - Every strategy's implied cost ratio (direct_cost / loss_if_disrupted)
+    checked against services.value_score()/positive_band() — the SAME
+    alpha curve client_profile.py and services.py already compute from 40
+    years of real onsets. This is the module's actual link to TAR: not a
+    new, unproven backtest, but reuse of the one that already exists.
+  - sensitivity(): which of the two uncertainty knobs moves the result
+    more, as plain sentences, not a chart.
 
 Probability is never invented here. engine.md section 3.1 is explicit that
 the Economic Engine "should not independently invent geopolitical
@@ -23,7 +35,8 @@ probabilities unless explicitly configured to do so," and Implementation
 Rule 18 says never silently substitute missing data. historical_context()
 surfaces the *existing* published base rate (3 of 11 alarm episodes have
 preceded a real disruption) as labelled context next to the input — it
-never fills the field.
+never fills the field. simulate() only ever ranges a probability the user
+supplied a range for; it does not manufacture uncertainty from nothing.
 
 Usage
 -----
@@ -37,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -44,9 +58,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tar_ingest import CORRIDORS  # noqa: E402
-from services import point_in_time  # noqa: E402
+from services import point_in_time, positive_band, value_score  # noqa: E402
 
-MODEL_VERSION = "economic-engine-0.1"
+MODEL_VERSION = "economic-engine-0.2"
 
 # Mirrors the published figures already used in services.py's attestation
 # document and threshold-engine.html's track record panel. Duplicated
@@ -343,11 +357,31 @@ class StrategyResult:
     expected_total_cost: float
     eligible: bool
     ineligibility_reason: str | None = None
+    # The link to TAR: this strategy's direct cost as a share of the stated
+    # loss-if-disrupted, checked against the SAME alpha curve
+    # client_profile.py / services.py already compute from 40 years of real
+    # onsets (value_score(), positive_band()) — not a new backtest, reuse of
+    # the one that already exists. None when loss_if_disrupted wasn't given,
+    # or when direct_cost is 0 (the curve is undefined at alpha=0).
+    implied_alpha: float | None = None
+    historically_favorable: bool | None = None
+    value_score: float | None = None
+    band_note: str | None = None
+
+
+def _check_against_tar_band(alpha: float | None) -> tuple[bool | None, float | None, str | None]:
+    if alpha is None:
+        return None, None, None
+    if alpha <= 0:
+        return None, None, "no early-action cost — outside the value curve's domain"
+    lo, hi = positive_band()
+    return (lo <= alpha <= hi), round(value_score(alpha), 4), None
 
 
 def compare_strategies(strategies: list[MitigationStrategy], *, scenario: DisruptionScenario,
                         constraints: Constraints | None = None,
-                        strategy_delay_days: dict[str, float] | None = None
+                        strategy_delay_days: dict[str, float] | None = None,
+                        loss_if_disrupted: float | None = None,
                         ) -> list[StrategyResult]:
     """Expected Total Cost = Direct Cost + Expected Residual Disruption Loss
     (section 11; implementation-cost and benefit terms fold into direct_cost
@@ -370,11 +404,17 @@ def compare_strategies(strategies: list[MitigationStrategy], *, scenario: Disrup
         if eligible and constraints.max_delay_days is not None and delay > constraints.max_delay_days:
             eligible, reason = False, (f"{delay:.0f} days exceeds max acceptable delay "
                                         f"{constraints.max_delay_days:.0f}")
+
+        alpha = (s.direct_cost / loss_if_disrupted) if loss_if_disrupted else None
+        favorable, vscore, band_note = _check_against_tar_band(alpha)
+
         out.append(StrategyResult(
             name=s.name, kind=s.kind, direct_cost=s.direct_cost,
             residual_loss=s.residual_loss_estimate,
             expected_total_cost=s.direct_cost + s.residual_loss_estimate,
-            eligible=eligible, ineligibility_reason=reason))
+            eligible=eligible, ineligibility_reason=reason,
+            implied_alpha=round(alpha, 4) if alpha is not None else None,
+            historically_favorable=favorable, value_score=vscore, band_note=band_note))
     return sorted(out, key=lambda r: (not r.eligible, r.expected_total_cost))
 
 
@@ -403,6 +443,95 @@ def threshold_status_range(probability_range: tuple[float, float], p_star: float
     lo_status, hi_status = threshold_status(lo, p_star), threshold_status(hi, p_star)
     return {"low": lo_status, "high": hi_status, "p_star": p_star,
             "probability_range": probability_range, "robust": lo_status == hi_status}
+
+
+# --------------------------------------------------------------------------
+# Uncertainty (section 16) and sensitivity (section 17) — via exactly two
+# knobs, not every cost line item. Both are gated behind one optional
+# top-level "uncertainty" block; omit it and compute()'s output is
+# unaffected by anything below existing at all.
+# --------------------------------------------------------------------------
+
+def simulate(data: dict, result: dict) -> dict | None:
+    """Monte Carlo over a cost multiplier range (how far off the total
+    disrupted-cost estimate could plausibly be), plus a deterministic check
+    of threshold status at both ends of a probability range. These are
+    reported separately rather than combined into one simulation: cost has
+    a natural continuous spread worth sampling, but threshold status is a
+    step function (JUSTIFIED / NOT) -- a P10/P50/P90 of a yes/no answer
+    would be exactly the kind of false precision this project avoids
+    elsewhere, so probability uncertainty is shown as "does the answer
+    change across your range" instead.
+    """
+    unc = data.get("uncertainty")
+    if not unc:
+        return None
+    out: dict = {}
+
+    cm = unc.get("cost_multiplier")
+    if cm:
+        n = int(unc.get("n_simulations", 3000))
+        rng = random.Random(unc.get("seed", 0))
+        base_exposure = result["expected_exposure"]
+        base_avoidable = result["avoidable_loss"]
+        draws = [rng.triangular(cm["low"], cm["high"], 1.0) for _ in range(n)]
+        exposures = sorted(base_exposure * d for d in draws)
+        avoidables = sorted(base_avoidable * d for d in draws)
+
+        def pct(xs: list[float], p: float) -> float:
+            return xs[min(len(xs) - 1, max(0, int(p * len(xs))))]
+
+        out["cost_multiplier_range"] = [cm["low"], cm["high"]]
+        out["n_simulations"] = n
+        out["expected_exposure_p10"] = round(pct(exposures, 0.10), 2)
+        out["expected_exposure_p50"] = round(pct(exposures, 0.50), 2)
+        out["expected_exposure_p90"] = round(pct(exposures, 0.90), 2)
+        out["avoidable_loss_p10"] = round(pct(avoidables, 0.10), 2)
+        out["avoidable_loss_p50"] = round(pct(avoidables, 0.50), 2)
+        out["avoidable_loss_p90"] = round(pct(avoidables, 0.90), 2)
+
+    pr = unc.get("probability")
+    if pr and result.get("action_threshold") is not None:
+        out["probability_check"] = threshold_status_range(
+            (pr["low"], pr["high"]), result["action_threshold"])
+
+    return out or None
+
+
+def sensitivity(data: dict, result: dict) -> list[dict] | None:
+    """Which of the two uncertainty knobs the result is more sensitive to,
+    as plain sentences rather than a chart. Only runs when the same
+    "uncertainty" block simulate() uses is present -- one on/off switch for
+    both, not two separate things to learn.
+    """
+    unc = data.get("uncertainty")
+    if not unc:
+        return None
+    items = []
+
+    cm = unc.get("cost_multiplier", {"low": 0.85, "high": 1.15})
+    base_exposure = result["expected_exposure"]
+    lo_exp, hi_exp = base_exposure * cm["low"], base_exposure * cm["high"]
+    impact = abs(hi_exp - lo_exp)
+    items.append({
+        "driver": "cost estimate", "range": [cm["low"], cm["high"]], "impact": round(impact, 2),
+        "note": (f"A swing from {cm['low']:.0%} to {cm['high']:.0%} of your cost estimate moves "
+                 f"expected exposure by about {result['currency']} {impact:,.0f}."),
+    })
+
+    if result.get("action_threshold") is not None:
+        base_p = data.get("disruption", {}).get("probability", 0.0)
+        pr = unc.get("probability", {"low": max(0.0, base_p - 0.05), "high": min(1.0, base_p + 0.05)})
+        rng_check = threshold_status_range((pr["low"], pr["high"]), result["action_threshold"])
+        flips = not rng_check["robust"]
+        items.append({
+            "driver": "disruption probability", "range": [pr["low"], pr["high"]],
+            "impact": None, "status_flips": flips,
+            "note": (f"Between {pr['low']:.0%} and {pr['high']:.0%} probability, your "
+                     + ("recommendation could flip." if flips else "recommendation stays the same.")),
+        })
+
+    return sorted(items, key=lambda x: (x["impact"] is None, -(x["impact"] or 0)))
 
 
 # --------------------------------------------------------------------------
@@ -474,6 +603,10 @@ def explain(result: dict) -> list[str]:
                       f"{result['currency']} {result['expected_saving']:,.0f}")
     if result.get("current_status"):
         lines.append(f"Result: {result['current_status'].replace('_', ' ').title()}")
+    unc = result.get("uncertainty")
+    if unc and "expected_exposure_p10" in unc:
+        lines.append(f"Uncertainty range (P10-P90): {result['currency']} "
+                      f"{unc['expected_exposure_p10']:,.0f} to {unc['expected_exposure_p90']:,.0f}")
     return lines
 
 
@@ -542,14 +675,16 @@ def compute(data: dict, *, source: Path | None = None,
                        supply_chain_pass_through=data.get("supply_chain_pass_through"),
                        social_multiplier=data.get("social_multiplier"))
 
+    mitigation_cost = data.get("mitigation_cost")
+    loss_if_disrupted = data.get("loss_if_disrupted")
+
     strategies = [MitigationStrategy(**s) for s in data.get("strategies", [])]
     constraints = Constraints(**data["constraints"]) if data.get("constraints") else None
-    strategy_results = (compare_strategies(strategies, scenario=scenario, constraints=constraints)
+    strategy_results = (compare_strategies(strategies, scenario=scenario, constraints=constraints,
+                                            loss_if_disrupted=loss_if_disrupted)
                          if strategies else [])
     recommended = next((r for r in strategy_results if r.eligible), None)
 
-    mitigation_cost = data.get("mitigation_cost")
-    loss_if_disrupted = data.get("loss_if_disrupted")
     p_star = status = None
     if mitigation_cost is not None and loss_if_disrupted:
         p_star = mitigation_threshold(mitigation_cost, loss_if_disrupted)
@@ -576,6 +711,8 @@ def compute(data: dict, *, source: Path | None = None,
     result["historical_context"] = (
         historical_context(scenario.corridor, source, reading=historical_reading)
         if (source or historical_reading) else None)
+    result["uncertainty"] = simulate(data, result)
+    result["sensitivity"] = sensitivity(data, result) if result["uncertainty"] is not None else None
     result["explain"] = explain(result)
     return result
 
@@ -621,15 +758,48 @@ def economic_report_html(result: dict, path: Path) -> None:
         return "".join(f"<tr><td>{esc(k.replace('_', ' ').title())}</td>"
                         f"<td class='m'>{v:,.0f}</td></tr>" for k, v in components.items())
 
+    def _band_cell(r: dict) -> str:
+        if r.get("implied_alpha") is None:
+            return "&mdash;"
+        if r.get("historically_favorable") is None:
+            return esc(r.get("band_note") or "n/a")
+        tag = "favorable" if r["historically_favorable"] else "outside band"
+        return f"{r['implied_alpha']:.0%} &mdash; {tag}"
+
     strategy_rows = "".join(
         f"<tr><td>{esc(r['name'])}</td><td class='m'>{r['direct_cost']:,.0f}</td>"
         f"<td class='m'>{r['residual_loss']:,.0f}</td>"
         f"<td class='m'>{r['expected_total_cost']:,.0f}</td>"
+        f"<td class='m'>{_band_cell(r)}</td>"
         f"<td class=\"{'' if r['eligible'] else 'ineligible'}\">"
         f"{'eligible' if r['eligible'] else 'ineligible: ' + esc(r['ineligibility_reason'] or '')}"
         f"</td></tr>" for r in result["strategy_comparison"])
 
     explain_items = "".join(f"<li>{esc(x)}</li>" for x in result["explain"])
+
+    unc = result.get("uncertainty")
+    unc_block = ""
+    if unc and "expected_exposure_p10" in unc:
+        cm = unc["cost_multiplier_range"]
+        unc_block = (f"<section><h2>Uncertainty</h2>"
+                     f"<p class='hint'>Monte Carlo over a cost estimate ranging from "
+                     f"{cm[0]:.0%} to {cm[1]:.0%} of your figures, {unc['n_simulations']} draws.</p>"
+                     f"<table><tbody>"
+                     f"<tr><td>Expected exposure</td><td class='m'>P10 {result['currency']} "
+                     f"{unc['expected_exposure_p10']:,.0f}</td><td class='m'>P50 {result['currency']} "
+                     f"{unc['expected_exposure_p50']:,.0f}</td><td class='m'>P90 {result['currency']} "
+                     f"{unc['expected_exposure_p90']:,.0f}</td></tr>"
+                     f"<tr><td>Avoidable loss</td><td class='m'>P10 {result['currency']} "
+                     f"{unc['avoidable_loss_p10']:,.0f}</td><td class='m'>P50 {result['currency']} "
+                     f"{unc['avoidable_loss_p50']:,.0f}</td><td class='m'>P90 {result['currency']} "
+                     f"{unc['avoidable_loss_p90']:,.0f}</td></tr>"
+                     f"</tbody></table></section>")
+
+    sens = result.get("sensitivity")
+    sens_block = ""
+    if sens:
+        sens_items = "".join(f"<li>{esc(s['note'])}</li>" for s in sens)
+        sens_block = f"<section><h2>What this is sensitive to</h2><ol>{sens_items}</ol></section>"
 
     ctx = result.get("historical_context")
     ctx_block = ""
@@ -671,8 +841,16 @@ def economic_report_html(result: dict, path: Path) -> None:
 
 <section><h2>Strategy comparison</h2>
 <table><thead><tr><th>Strategy</th><th>Direct cost</th><th>Residual loss</th>
-<th>Expected total cost</th><th>Status</th></tr></thead>
-<tbody>{strategy_rows}</tbody></table></section>
+<th>Expected total cost</th><th>Vs. TAR's evaluated band</th><th>Status</th></tr></thead>
+<tbody>{strategy_rows}</tbody></table>
+<p class="hint">"Vs. TAR's evaluated band" checks each strategy's own cost ratio (direct cost
+&divide; loss if disrupted) against the same value curve client_profile.py and services.py
+compute from 40 years of real onsets &mdash; not a new prediction, a cross-check against the
+one that already exists.</p></section>
+
+{unc_block}
+
+{sens_block}
 
 {ctx_block}
 
@@ -680,8 +858,9 @@ def economic_report_html(result: dict, path: Path) -> None:
 
 <p class="note">Model {esc(result['model_version'])}. Computed {esc(result['timestamp'])}.
 Confidence: {esc(result['confidence'])} (the weakest data source behind this result).
-Phase 1 MVP: no market agent, no Monte Carlo uncertainty ranges, no licensed data feeds
-&mdash; see engine.md for what is deferred to later phases.</p>
+No market agent, no licensed data feeds &mdash; see engine.md for what is deferred to later
+phases. Uncertainty ranges above (when shown) come only from the ranges you supplied &mdash;
+nothing here estimates a probability or a cost on your behalf.</p>
 </div>
 """, encoding="utf-8")
     print(f"wrote {path}")
@@ -890,6 +1069,77 @@ def selftest() -> int:
     assert result["model_version"] == MODEL_VERSION
     assert result["historical_context"] is None   # no --source given
     assert len(result["explain"]) >= 5
+    # no "uncertainty" block in the template -> both stay off, provably
+    assert result["uncertainty"] is None
+    assert result["sensitivity"] is None
+
+    # every strategy's implied alpha vs TAR's own evaluated value curve
+    # (mitigation_cost 700,000 / loss_if_disrupted 4,375,000 = 0.16, same
+    # p_star as the section 12 check above)
+    by_name = {r["name"]: r for r in result["strategy_comparison"]}
+    partial = by_name["Partial reroute"]
+    assert abs(partial["implied_alpha"] - 0.16) < 1e-9, partial["implied_alpha"]
+    lo, hi = positive_band()
+    assert partial["historically_favorable"] == (lo <= 0.16 <= hi)
+    assert partial["value_score"] is not None
+    # "Continue" has direct_cost 0 -- implied_alpha is a real, informative
+    # 0.0, but the value curve itself is undefined at alpha=0 (see
+    # value_score()'s formula), so favorability is left None rather than a
+    # silently-computed, meaningless number
+    continue_row = by_name["Continue"]
+    assert continue_row["implied_alpha"] == 0.0
+    assert continue_row["historically_favorable"] is None
+    assert continue_row["value_score"] is None
+    assert continue_row["band_note"] is not None
+
+    # uncertainty + sensitivity, opted into via one block
+    with_unc = template_scenario()
+    with_unc["uncertainty"] = {
+        "cost_multiplier": {"low": 0.8, "high": 1.3}, "n_simulations": 2000, "seed": 7,
+        "probability": {"low": 0.05, "high": 0.45},
+    }
+    r_unc = compute(with_unc)
+    u = r_unc["uncertainty"]
+    assert u is not None
+    assert u["expected_exposure_p10"] <= u["expected_exposure_p50"] <= u["expected_exposure_p90"]
+    assert u["avoidable_loss_p10"] <= u["avoidable_loss_p50"] <= u["avoidable_loss_p90"]
+    # same seed, same draws -> reproducible, exactly like the rest of compute()
+    r_unc2 = compute(with_unc)
+    assert r_unc["uncertainty"] == r_unc2["uncertainty"]
+    # 0.05-0.45 straddles the 0.16 threshold -> not robust
+    assert u["probability_check"]["robust"] is False
+
+    sens = r_unc["sensitivity"]
+    assert sens is not None and len(sens) == 2
+    assert {s["driver"] for s in sens} == {"cost estimate", "disruption probability"}
+    cost_row = next(s for s in sens if s["driver"] == "cost estimate")
+    assert cost_row["impact"] > 0
+
+    # the two drivers are deliberately not forced onto one comparable scale
+    # (a monetary swing vs. a yes/no threshold flip aren't the same unit --
+    # see sensitivity()'s docstring), so what "not hardcoded" means here is
+    # that each driver's own reported value actually responds to its own
+    # range, on the same base scenario:
+    swapped = template_scenario()
+    swapped["uncertainty"] = {
+        "cost_multiplier": {"low": 0.99, "high": 1.01},   # trivial cost range
+        "probability": {"low": 0.05, "high": 0.45},        # straddles p_star -> flips
+    }
+    r_swapped = compute(swapped)
+    sens_swapped = {s["driver"]: s for s in r_swapped["sensitivity"]}
+    assert sens_swapped["cost estimate"]["impact"] < cost_row["impact"], \
+        "narrowing the cost range should shrink its impact"
+    assert sens_swapped["disruption probability"]["status_flips"] is True
+
+    narrow_prob = template_scenario()
+    narrow_prob["uncertainty"] = {
+        "cost_multiplier": {"low": 0.8, "high": 1.3},
+        "probability": {"low": 0.20, "high": 0.24},   # both sides of, but close to, p_star=0.16
+    }
+    r_narrow = compute(narrow_prob)
+    sens_narrow = {s["driver"]: s for s in r_narrow["sensitivity"]}
+    assert sens_narrow["disruption probability"]["status_flips"] is False, \
+        "a probability range entirely above p_star should not flip the status"
 
     # a pre-built reading (the backend's path -- no raw vintage available)
     # works the same as the source= path, without touching tar_ingest.load()
