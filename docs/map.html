@@ -3034,6 +3034,31 @@ JWC circular. Switch to <em>Both</em> to see the water added on 29 July 2026.</p
 </div>
 
 <section class="panel">
+  <h2>Live vessel traffic</h2>
+  <p class="hint" style="margin:0 0 var(--s4)">Real ship positions, not ours &mdash; this is
+  MarineTraffic's own live AIS feed, embedded as-is. We don't interpret it, filter it, or
+  claim it means anything about disruption risk; it's here so you can look at a chokepoint
+  the same moment you're reading its TAR reading.</p>
+  <div class="seg wide" id="traffic" role="group" aria-label="Chokepoint">
+    <button type="button" data-c="Strait of Hormuz" data-z="8" aria-pressed="true">Strait of Hormuz</button>
+    <button type="button" data-c="Bab-el-Mandeb" data-z="8">Bab-el-Mandeb</button>
+    <button type="button" data-c="Suez Canal" data-z="9">Suez Canal</button>
+    <button type="button" data-c="Turkish Straits / Black Sea" data-z="9">Turkish Straits</button>
+    <button type="button" data-c="Adriatic" data-z="7">Adriatic</button>
+    <button type="button" data-c="Strait of Malacca" data-z="7">Strait of Malacca</button>
+    <button type="button" data-c="Taiwan Strait" data-z="7">Taiwan Strait</button>
+  </div>
+  <div class="stage" style="margin-top:var(--s4)">
+    <iframe id="trafficFrame" title="Live vessel traffic" width="100%" height="460"
+      style="display:block;border:0" loading="lazy"
+      src="https://www.marinetraffic.com/en/ais/embed/zoom:8/centery:26.57/centerx:56.25/maptype:0/shownames:false"></iframe>
+  </div>
+  <p class="note">Live positions and attribution are <a href="https://www.marinetraffic.com/"
+  target="_blank" rel="noopener">MarineTraffic's</a> &mdash; we embed their public widget,
+  we don't hold or process any vessel data ourselves.</p>
+</section>
+
+<section class="panel">
   <h2>Legend</h2>
   <div class="legend">
     <span><i class="sw" style="background:rgba(228,70,127,.30);border:1.5px solid #E4467F"></i>Listed water &mdash; war risk premium applies</span>
@@ -3070,8 +3095,10 @@ JWC circular. Switch to <em>Both</em> to see the water added on 29 July 2026.</p
   <h2>What this map will not tell you</h2>
   <p class="note">A marker shows the current global risk level and whether that route is
   already inside a disruption. It is not a forecast for that route &mdash; the signal tells
-  you escalation risk is rising somewhere, not where. There are no vessel positions here
-  either: we make no claim about traffic volumes, so showing ships would imply one.</p>
+  you escalation risk is rising somewhere, not where. The live traffic panel above is
+  MarineTraffic's raw feed, not ours &mdash; we don't count ships, measure congestion, or
+  read traffic density as a risk signal. Fewer or more dots on that panel means nothing here;
+  treat it as situational awareness, not a data source this app draws conclusions from.</p>
 </section>
 
 <footer class="foot">
@@ -3210,6 +3237,22 @@ document.querySelectorAll("#layers button").forEach(b => {
     b.setAttribute("aria-pressed", String(on));
     const g = b.dataset.l === "zones" ? zones : marks;
     if (on) g.addTo(map); else map.removeLayer(g);
+  });
+});
+
+// Live vessel traffic: swaps the MarineTraffic embed to the picked
+// chokepoint's coordinates -- same CORRIDORS array the zone map markers
+// use, so this can't silently drift from the corridors the rest of the
+// page already knows about.
+document.querySelectorAll("#traffic button").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#traffic button")
+      .forEach(x => x.setAttribute("aria-pressed", "false"));
+    b.setAttribute("aria-pressed", "true");
+    const [, lat, lon] = CORRIDORS.find(([name]) => name === b.dataset.c);
+    const zoom = b.dataset.z || 7;
+    document.getElementById("trafficFrame").src =
+      `https://www.marinetraffic.com/en/ais/embed/zoom:${zoom}/centery:${lat}/centerx:${lon}/maptype:0/shownames:false`;
   });
 });
 
