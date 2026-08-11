@@ -303,6 +303,42 @@ def test_economic_scenario_v2_features(client):
     assert "EUR 1,692,000" in r.text or "1,692,000" in r.text  # 846,000 x 2 exposures
 
 
+def test_economic_scenario_detail_survives_pre_v2_data(client):
+    """Regression: scenarios saved before the v2 engine added implied_alpha/
+    historically_favorable to each strategy_comparison row used to 500 the
+    detail page -- Jinja's Undefined can't be passed through "{:.0%}".format().
+    Simulates that old shape directly (crud.create_economic_scenario, not the
+    API, since the API always produces new-shape results now)."""
+    from app import crud
+
+    client.post("/signup", data={"email": "legacy-analyst@example.com",
+                                  "password": "correct horse battery staple"})
+    session = next(app.dependency_overrides[get_session]())
+    user = crud.get_user_by_email(session, "legacy-analyst@example.com")
+
+    old_result = {
+        "scenario_id": "OLD-2025-001", "currency": "EUR", "corridor": "Strait of Hormuz",
+        "expected_exposure": 846000.0, "avoidable_loss": 846000.0,
+        "recommended_strategy": "Partial reroute", "current_status": "MITIGATION_JUSTIFIED",
+        "baseline_breakdown": {"transport": 530000}, "disrupted_breakdown": {"transport": 930000},
+        "strategy_comparison": [
+            # no implied_alpha / historically_favorable / band_note keys at all
+            {"name": "Partial reroute", "direct_cost": 700000, "residual_loss": 750000,
+             "expected_total_cost": 1450000, "eligible": True},
+        ],
+        "uncertainty": None, "sensitivity": None, "historical_context": None,
+        "explain": ["Mitigation Justified"], "model_version": "economic-engine-0.1",
+        "timestamp": "2025-01-01T00:00:00+00:00", "confidence": "customer_quotation",
+    }
+    row = crud.create_economic_scenario(
+        session, user, scenario_id="OLD-2025-001", corridor="Strait of Hormuz",
+        input_data={}, result=old_result)
+
+    r = client.get(f"/economic-scenarios/{row.id}")
+    assert r.status_code == 200, r.text
+    assert "Partial reroute" in r.text
+
+
 def test_alerts_job_runs_without_error(client):
     """alerts.run() opens its own session against app.db.engine, which in
     this process points at DATABASE_URL (the sqlite file), not the

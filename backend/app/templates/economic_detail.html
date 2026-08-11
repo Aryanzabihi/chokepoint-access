@@ -69,7 +69,7 @@
         <td class="m">{{ "{:,.0f}".format(r.residual_loss) }}</td>
         <td class="m">{{ "{:,.0f}".format(r.expected_total_cost) }}</td>
         <td class="m">
-          {% if r.implied_alpha is none %}&mdash;
+          {% if r.implied_alpha is not defined or r.implied_alpha is none %}&mdash;
           {% elif r.historically_favorable is none %}<span class="hint">{{ r.band_note }}</span>
           {% elif r.historically_favorable %}<span style="color:var(--sound)">{{ "{:.0%}".format(r.implied_alpha) }} &mdash; favorable</span>
           {% else %}<span style="color:var(--caution)">{{ "{:.0%}".format(r.implied_alpha) }} &mdash; outside band</span>
