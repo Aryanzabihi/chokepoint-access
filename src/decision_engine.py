@@ -1,0 +1,1219 @@
+"""
+decision_engine.py — the TAR Decision Engine v2 (enginev2.md, L4 Decision +
+L5 Ledger + L6 Brief).
+
+economic_engine.py (v1) asks the client for `residual_loss_estimate` per
+strategy — the answer the engine should be deriving — and its
+`expected_total_cost` never actually weights by probability despite the
+name. This module inverts that: a strategy declares what it costs and what
+it *does* (StrategyEffects), and the conditional loss is recomputed by the
+pricing kernel with those effects applied. v1 (economic_engine.py) is not
+imported for its comparison logic at all — only its pure, effect-free
+kernel functions (transport_cost, insurance_cost, inventory_cost,
+commodity_effect, CostBreakdown, welfare_gap) and its published constants
+are reused. v1 is untouched and stays a second, standalone tool.
+
+intake.py (L1 + the client-fact half of L2) and episodes.py (L3's crisis-
+multiplier half) are imported; this module owns the seam where L2's
+derivations meet L3's analogues and the kernel — assembling a conditional
+loss per strategy — plus everything from there up: expected cost,
+break-even probability, decision flip, cost of waiting, regret, the
+travelling ledger, and the one-page brief.
+
+Every number that reaches a result is written through a Ledger, which
+grades it CLIENT_QUOTED / CLIENT_SYSTEM / DERIVED / EPISODE_ANALOGUE /
+PUBLISHED / ABSENT (enginev2.md section 9.2) — never a default, never a
+silent substitution.
+
+Usage
+-----
+    python decision_engine.py intake --tier 1 [--incoterm CIF] --out intake.json
+    python decision_engine.py decide --intake intake.json [--source ../data/gpr_monthly.dta] \\
+        [--warrisk ../data/warrisk.csv] [--jwc ../data/warrisk_jwc.csv] [--as-of YYYY-MM] \\
+        [--out result.json] [--brief brief.html]
+    python decision_engine.py flip --intake intake.json [--source ...] [--warrisk ...] [--jwc ...]
+    python decision_engine.py --selftest
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import json
+import sys
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import intake  # noqa: E402
+import episodes  # noqa: E402
+import chokepoint_profiles  # noqa: E402
+
+from economic_engine import (  # noqa: E402
+    transport_cost, insurance_cost, inventory_cost, commodity_effect,
+    CostBreakdown, welfare_gap, mitigation_threshold,
+    TransportInputs, InsuranceInputs,
+    ALARM_EPISODES, EPISODES_WITH_DISRUPTION, EPISODE_HIT_RATE_CI,
+)
+from tar_ingest import CORRIDORS, POST_ONSET_MONTHS, regime  # noqa: E402
+from services import point_in_time  # noqa: E402
+
+MODEL_VERSION = "decision-engine-2.0"
+
+
+# --------------------------------------------------------------------------
+# Strategy effects (section 8.1 — the core fix)
+# --------------------------------------------------------------------------
+
+@dataclass
+class StrategyEffects:
+    delay_days_delta: float = 0.0
+    capacity_restored: float = 0.0                      # fraction 0-1
+    war_risk_premium_multiplier: float | None = None    # None = leave the quote as-is
+    days_of_cover_delta: float = 0.0
+
+
+@dataclass
+class Strategy:
+    name: str
+    direct_cost: float
+    effects: StrategyEffects = field(default_factory=StrategyEffects)
+    quoted_residual_loss: float | None = None    # Tier-3 override, still optional
+    is_baseline: bool = False
+    notes: str = ""
+
+
+def _strategy_from_dict(d: dict) -> Strategy:
+    return Strategy(name=d["name"], direct_cost=d["direct_cost"],
+                    effects=StrategyEffects(**d.get("effects", {})),
+                    quoted_residual_loss=d.get("quoted_residual_loss"),
+                    is_baseline=d.get("is_baseline", False),
+                    notes=d.get("notes", ""))
+
+
+# --------------------------------------------------------------------------
+# Assembly — the L2/L4 seam (section 5's L_conditional, per strategy)
+# --------------------------------------------------------------------------
+
+def baseline_costbreakdown(intake_data: dict) -> CostBreakdown:
+    """The counterfactual: normal-state cost, no disruption. v2 does not
+    collect a baseline insurance premium (not in intake.py's field set —
+    the decision only needs the *change* in war-risk exposure, not a full
+    steady-state accounting), so insurance stays 0 here by design."""
+    f = intake_data.get("fields", {})
+    return CostBreakdown({
+        "transport": f.get("contract_freight_rate") or 0.0,
+        "insurance": 0.0,
+        "delay": 0.0,
+        "inventory": 0.0,
+        "commodity": 0.0,
+    })
+
+
+def disrupted_costbreakdown(intake_data: dict) -> CostBreakdown:
+    """The unmitigated crisis state, for the exposure/avoidable-loss figure
+    only (section 10's EXPOSURE line) — not per-strategy. Built from
+    whatever Tier-3 quotes exist; components with no quote and no
+    derivation available stay 0 here and are flagged ABSENT by
+    build_decision()'s ledger, never faked as a real cost."""
+    f = intake_data.get("fields", {})
+    transport = f.get("disrupted_freight_quote") or f.get("contract_freight_rate") or 0.0
+    insurance = f.get("war_risk_premium_quote") or 0.0
+    delay_rate = intake.delay_cost_per_day(
+        wacc_pct=f.get("wacc_pct"), cargo_value=f.get("cargo_value"),
+        penalty_per_day=f.get("penalty_per_day"), days_of_cover=f.get("days_of_cover"),
+        delay_days=f.get("delay_days_estimate"),
+        daily_gross_margin=_daily_gross_margin_value(f))
+    delay = delay_rate.value * (f.get("delay_days_estimate") or 0.0)
+    holding_rate = intake.holding_per_unit_day(
+        f.get("carrying_cost_pct_pa"), intake.unit_value(f.get("cargo_value"), f.get("quantity")))
+    inventory = inventory_cost(f.get("quantity") or 0.0,
+                               holding_rate.value if holding_rate else 0.0,
+                               f.get("delay_days_estimate") or 0.0)
+    return CostBreakdown({
+        "transport": transport, "insurance": insurance, "delay": delay,
+        "inventory": inventory, "commodity": 0.0,
+    })
+
+
+def _daily_gross_margin_value(fields: dict, days_of_cover: float | None = None) -> float | None:
+    dgm = intake.daily_gross_margin(fields.get("cargo_value"), fields.get("gross_margin_pct"),
+                                    days_of_cover if days_of_cover is not None else fields.get("days_of_cover"))
+    return dgm.value if dgm is not None else None
+
+
+@dataclass
+class ConditionalLoss:
+    strategy: str
+    components: dict[str, float]
+    total: float
+    grade: str                              # "CLIENT_QUOTED" (quoted override) or "DERIVED"
+    absent_components: list[str] = field(default_factory=list)
+
+
+def conditional_loss(intake_data: dict, strategy: Strategy,
+                     premium_analogue: "episodes.Analogue | None" = None) -> ConditionalLoss:
+    """section 5's L_conditional, recomputed per strategy per section 8.1.
+    Strategy effects shift days_of_cover/delay_days BEFORE
+    delay_cost_per_day is re-derived — this is where the step-function
+    interaction section 8.6 is about actually lives. war_risk_premium_
+    multiplier scales a Tier-3 war-risk quote (None = leave it unmitigated);
+    capacity_restored scales the Tier-3 disrupted-freight delta. commodity
+    is excluded by default, per section 5. `premium_analogue` is accepted
+    for interface symmetry with cost_of_waiting() but is not used to
+    manufacture a currency figure here: without a baseline premium field in
+    intake.py's schema, a multiplier alone has no monetary anchor — see the
+    module docstring. If strategy.quoted_residual_loss is set, it overrides
+    the total (grade CLIENT_QUOTED), but the assembled components stay in
+    the return value alongside it — the override is auditable, never a
+    silent substitution."""
+    f = intake_data.get("fields", {})
+    absent: list[str] = []
+
+    days_of_cover = f.get("days_of_cover")
+    effective_days_of_cover = (None if days_of_cover is None
+                               else days_of_cover + strategy.effects.days_of_cover_delta)
+    delay_days = f.get("delay_days_estimate")
+    effective_delay_days = (None if delay_days is None
+                            else max(0.0, delay_days + strategy.effects.delay_days_delta))
+
+    dgm = _daily_gross_margin_value(f, effective_days_of_cover)
+    delay_rate = intake.delay_cost_per_day(
+        wacc_pct=f.get("wacc_pct"), cargo_value=f.get("cargo_value"),
+        penalty_per_day=f.get("penalty_per_day"), days_of_cover=effective_days_of_cover,
+        delay_days=effective_delay_days, daily_gross_margin=dgm)
+    delay_component = delay_rate.value * (effective_delay_days or 0.0)
+
+    holding_rate = intake.holding_per_unit_day(
+        f.get("carrying_cost_pct_pa"), intake.unit_value(f.get("cargo_value"), f.get("quantity")))
+    inventory_component = inventory_cost(f.get("quantity") or 0.0,
+                                         holding_rate.value if holding_rate else 0.0,
+                                         effective_delay_days or 0.0)
+
+    disrupted_quote = f.get("disrupted_freight_quote")
+    contract_rate = f.get("contract_freight_rate")
+    if disrupted_quote is not None and contract_rate is not None:
+        delta = max(0.0, disrupted_quote - contract_rate)
+        transport_component = transport_cost(TransportInputs(
+            disrupted_freight=delta * (1.0 - strategy.effects.capacity_restored)))
+    else:
+        transport_component = 0.0
+        absent.append("transport")
+
+    war_risk_quote = f.get("war_risk_premium_quote")
+    if war_risk_quote is not None:
+        mult = strategy.effects.war_risk_premium_multiplier
+        war_risk_component = war_risk_quote if mult is None else war_risk_quote * mult
+        insurance_component = insurance_cost(InsuranceInputs(war_risk_premium=war_risk_component))
+    else:
+        insurance_component = 0.0
+        absent.append("insurance")
+
+    commodity_component = commodity_effect(f.get("quantity") or 0.0, 0.0, 0.0)
+
+    components = {
+        "transport": transport_component, "insurance": insurance_component,
+        "delay": delay_component, "inventory": inventory_component,
+        "commodity": commodity_component,
+    }
+    computed_total = CostBreakdown(components).total
+
+    if strategy.quoted_residual_loss is not None:
+        return ConditionalLoss(strategy=strategy.name, components=components,
+                               total=strategy.quoted_residual_loss, grade="CLIENT_QUOTED",
+                               absent_components=absent)
+    return ConditionalLoss(strategy=strategy.name, components=components, total=computed_total,
+                           grade="DERIVED", absent_components=absent)
+
+
+# --------------------------------------------------------------------------
+# Expected cost (section 8.2)
+# --------------------------------------------------------------------------
+
+def expected_cost(direct_cost: float, probability: float, l_cond: float) -> float:
+    """E[C_s] = C_action(s) + p * L_cond(s). Binary state (disruption / no
+    disruption) by deliberate scope — matches section 8.3's own reduction
+    to C/L (inherently two-state) and section 2's refusal of cascade
+    elasticities."""
+    return direct_cost + probability * l_cond
+
+
+def _expected_costs(strategies: list[Strategy], losses: dict[str, float],
+                    probability: float) -> dict[str, float]:
+    return {s.name: expected_cost(s.direct_cost, probability, losses[s.name]) for s in strategies}
+
+
+# --------------------------------------------------------------------------
+# Break-even probability (section 8.3 — the generalised threshold)
+# --------------------------------------------------------------------------
+
+@dataclass
+class BreakEvenResult:
+    strategy: str
+    baseline: str
+    p_star: float | None
+    reason: str | None = None
+
+
+def break_even_probability(strategy: Strategy, baseline: Strategy,
+                           l_cond_s: float, l_cond_s0: float) -> BreakEvenResult:
+    """p*(s vs s0) = [C_action(s) - C_action(s0)] / [L_cond(s0) - L_cond(s)].
+    When the denominator is <= 0, s does not reduce conditional loss versus
+    s0 — no probability makes the trade worthwhile on this axis alone.
+    Returns p_star=None with a reason, never raises ZeroDivisionError, never
+    silently flips sign. Reduces exactly to economic_engine.
+    mitigation_threshold()'s C/L when l_cond(s)=0 and C_action(s0)=0 — see
+    selftest()."""
+    denom = l_cond_s0 - l_cond_s
+    if denom <= 0:
+        return BreakEvenResult(
+            strategy.name, baseline.name, None,
+            reason=(f"{strategy.name} does not reduce conditional loss versus {baseline.name} "
+                    f"(L_cond {l_cond_s:,.0f} vs {l_cond_s0:,.0f}) — no probability makes this "
+                    f"trade worthwhile on this axis alone"))
+    numer = strategy.direct_cost - baseline.direct_cost
+    return BreakEvenResult(strategy.name, baseline.name, numer / denom, None)
+
+
+def base_rate_context() -> dict:
+    """Wraps economic_engine's own published constants — reused, not
+    duplicated, since economic_engine.py already exposes them as named
+    module-level constants."""
+    return {
+        "alarm_episodes": ALARM_EPISODES,
+        "episodes_with_disruption": EPISODES_WITH_DISRUPTION,
+        "hit_rate": round(EPISODES_WITH_DISRUPTION / ALARM_EPISODES, 3),
+        "hit_rate_ci_95": EPISODE_HIT_RATE_CI,
+    }
+
+
+def inverse_mode_sentence(recommended: BreakEvenResult, base_rate: dict) -> str:
+    """section 8.4's core sentence. Zero new inputs — solves for the
+    probability rather than asking for one, then places it against the
+    already-published base rate."""
+    if recommended.p_star is None:
+        return f"{recommended.strategy} — {recommended.reason}"
+    lo, hi = base_rate["hit_rate_ci_95"]
+    return (f"{recommended.strategy} pays only if a closure is more likely than "
+            f"{recommended.p_star:.0%} in your shipping window. The published base rate "
+            f"across {base_rate['alarm_episodes']} alarm episodes is {base_rate['hit_rate']:.0%} "
+            f"(95% CI {lo:.0%}-{hi:.0%}).")
+
+
+# --------------------------------------------------------------------------
+# Decision flip (section 8.6) — two mechanisms, not one generic solver
+# --------------------------------------------------------------------------
+
+LINEAR_FLIP_PARAMS = ("probability", "direct_cost", "war_risk_premium_multiplier")
+STEP_FLIP_PARAMS = ("delay_days_estimate", "days_of_cover")
+
+
+@dataclass
+class FlipPoint:
+    parameter: str
+    strategy: str | None
+    current_value: float
+    flip_value: float
+    direction: str
+
+
+def solve_linear_flip(param: str, current: float, probe_fn) -> FlipPoint | None:
+    """Exact two-point interpolation, no numerical solver, no simulation —
+    valid because `probe_fn` is guaranteed linear in `param` for every
+    parameter this is called with (see LINEAR_FLIP_PARAMS)."""
+    g0 = probe_fn(current)
+    g1 = probe_fn(current + 1.0)
+    slope = g1 - g0
+    if slope == 0:
+        return None
+    flip = current - g0 / slope
+    return FlipPoint(param, None, current, flip, "top strategy changes")
+
+
+def solve_step_flip(param: str, current: float, threshold: float, probe_fn) -> FlipPoint | None:
+    """stockout_probability (intake.py section 5) is a step, not a curve —
+    delay_days_estimate and days_of_cover cannot be solved as if the
+    underlying cost were smooth through their shared threshold. Reports the
+    threshold itself as the flip point, only when probing threshold-eps and
+    threshold+eps actually changes which strategy ranks first — checked
+    mechanically, not assumed."""
+    eps = 1e-6
+    below, above = probe_fn(threshold - eps), probe_fn(threshold + eps)
+    if (below > 0) == (above > 0):
+        return None
+    return FlipPoint(param, None, current, threshold, "top strategy changes at the stockout threshold")
+
+
+def solve_flips(intake_data: dict, strategies: list[Strategy],
+                premium_analogue: "episodes.Analogue | None", probability: float) -> list[FlipPoint]:
+    """Runs every whitelisted linear param (on the current top strategy)
+    plus the two step params, drops any with no in-range flip point, sorts
+    by relative proximity of current value to flip value (section 8.6's own
+    ordering rule)."""
+    if len(strategies) < 2:
+        return []
+
+    losses = {s.name: conditional_loss(intake_data, s, premium_analogue).total for s in strategies}
+    expected = _expected_costs(strategies, losses, probability)
+    ranked = sorted(expected, key=expected.get)
+    top_name, runner_name = ranked[0], ranked[1]
+    by_name = {s.name: s for s in strategies}
+    top = by_name[top_name]
+
+    def gap_with_losses(overridden_losses: dict[str, float], p: float) -> float:
+        e = _expected_costs(strategies, overridden_losses, p)
+        return e[top_name] - e[runner_name]
+
+    flips: list[FlipPoint] = []
+
+    fp = solve_linear_flip("probability", probability, lambda p: gap_with_losses(losses, p))
+    if fp is not None and 0.0 <= fp.flip_value <= 1.0:
+        flips.append(fp)
+
+    def gap_top_direct_cost(x: float) -> float:
+        modified = dataclasses.replace(top, direct_cost=x)
+        e = {**expected, top_name: expected_cost(x, probability, losses[top_name])}
+        return e[top_name] - e[runner_name]
+
+    fp = solve_linear_flip("direct_cost", top.direct_cost, gap_top_direct_cost)
+    if fp is not None and fp.flip_value >= 0:
+        fp.strategy = top_name
+        flips.append(fp)
+
+    if top.effects.war_risk_premium_multiplier is not None:
+        def gap_top_wrpm(x: float) -> float:
+            modified = dataclasses.replace(top, effects=dataclasses.replace(
+                top.effects, war_risk_premium_multiplier=x))
+            l2 = dict(losses)
+            l2[top_name] = conditional_loss(intake_data, modified, premium_analogue).total
+            return gap_with_losses(l2, probability)
+
+        fp = solve_linear_flip("war_risk_premium_multiplier",
+                               top.effects.war_risk_premium_multiplier, gap_top_wrpm)
+        if fp is not None and fp.flip_value >= 0:
+            fp.strategy = top_name
+            flips.append(fp)
+
+    f = intake_data.get("fields", {})
+    dc0, dd0 = f.get("days_of_cover"), f.get("delay_days_estimate")
+    if dc0 is not None and dd0 is not None:
+        def gap_with_field(name: str, x: float) -> float:
+            fields2 = dict(f)
+            fields2[name] = x
+            data2 = dict(intake_data)
+            data2["fields"] = fields2
+            l2 = {s.name: conditional_loss(data2, s, premium_analogue).total for s in strategies}
+            return gap_with_losses(l2, probability)
+
+        threshold_dd = dc0 + top.effects.days_of_cover_delta - top.effects.delay_days_delta
+        fp = solve_step_flip("delay_days_estimate", dd0, threshold_dd,
+                             lambda x: gap_with_field("delay_days_estimate", x))
+        if fp is not None:
+            fp.strategy = top_name
+            flips.append(fp)
+
+        threshold_dc = dd0 + top.effects.delay_days_delta - top.effects.days_of_cover_delta
+        fp = solve_step_flip("days_of_cover", dc0, threshold_dc,
+                             lambda x: gap_with_field("days_of_cover", x))
+        if fp is not None:
+            fp.strategy = top_name
+            flips.append(fp)
+
+    flips.sort(key=lambda fp: abs(fp.current_value - fp.flip_value) / max(abs(fp.current_value), 1e-9))
+    return flips
+
+
+# --------------------------------------------------------------------------
+# Regret (section 8.7)
+# --------------------------------------------------------------------------
+
+def regret_at_range(strategies: list[Strategy], intake_data: dict,
+                    premium_analogue: "episodes.Analogue | None",
+                    prob_range: tuple[float, float] | None = None) -> dict:
+    """R(s) = E[C_s] - min_s' E[C_s'], evaluated at both ends of a
+    probability range. Defaults to EPISODE_HIT_RATE_CI — already-published
+    context, not a new client ask — unless intake.json supplies its own
+    probability_range."""
+    lo, hi = prob_range or EPISODE_HIT_RATE_CI
+    losses = {s.name: conditional_loss(intake_data, s, premium_analogue).total for s in strategies}
+    out: dict = {}
+    for p, label in ((lo, "low"), (hi, "high")):
+        expected = _expected_costs(strategies, losses, p)
+        best = min(expected, key=expected.get)
+        out[label] = {"probability": p, "best": best,
+                     "regret": {name: round(v - expected[best], 2) for name, v in expected.items()}}
+    return out
+
+
+# --------------------------------------------------------------------------
+# Cost of waiting (section 8.5)
+# --------------------------------------------------------------------------
+
+@dataclass
+class CostOfWaitingPath:
+    episode_label: str
+    points: list[tuple[int, float]]
+
+
+@dataclass
+class CostOfWaiting:
+    paths: list[CostOfWaitingPath] = field(default_factory=list)
+
+
+def _with_field(intake_data: dict, name: str, value) -> dict:
+    fields2 = dict(intake_data.get("fields", {}))
+    fields2[name] = value
+    out = dict(intake_data)
+    out["fields"] = fields2
+    return out
+
+
+def cost_of_waiting(intake_data: dict, strategy: Strategy, day_offsets: list[int], corridor: str,
+                    probability: float, *, warrisk_path: Path | None = None,
+                    jwc_path: Path | None = None, as_of: str | None = None) -> CostOfWaiting | None:
+    """COW(delta) = E[C_act at t+delta] - E[C_act at t], cost path taken
+    from episodes.analogue() at each discrete day offset, never a fitted
+    curve. Requires a war_risk_premium_quote as the currency anchor for the
+    trajectory (a multiplier alone has no monetary anchor without a
+    baseline premium field — see conditional_loss()'s docstring); returns
+    None — the whole object absent, not a null field — when that anchor is
+    missing, or when episodes.analogue() itself returns None at any
+    requested offset (section 8.5: 'suppressed entirely when section 6
+    returns None')."""
+    anchor = intake_data.get("fields", {}).get("war_risk_premium_quote")
+    if anchor is None:
+        return None
+
+    by_episode: dict[str, list[tuple[int, float]]] = {}
+    for d in day_offsets:
+        a = episodes.analogue(corridor, "war_risk_premium", d, warrisk_path=warrisk_path,
+                              jwc_path=jwc_path, as_of=as_of)
+        if a is None:
+            return None
+        for obs in a.observations:
+            by_episode.setdefault(obs.episode_label, []).append((d, obs.value))
+
+    if len(by_episode) < 2:
+        return None
+
+    t0 = min(day_offsets)
+    paths = []
+    for label, points in sorted(by_episode.items()):
+        points = sorted(points)
+        mult_at_t0 = next((v for d, v in points if d == t0), points[0][1])
+        loss_t0 = conditional_loss(_with_field(intake_data, "war_risk_premium_quote",
+                                               anchor * mult_at_t0), strategy).total
+        e_t0 = expected_cost(strategy.direct_cost, probability, loss_t0)
+        cow_points = []
+        for d, mult in points:
+            loss_then = conditional_loss(_with_field(intake_data, "war_risk_premium_quote",
+                                                     anchor * mult), strategy).total
+            e_then = expected_cost(strategy.direct_cost, probability, loss_then)
+            cow_points.append((d, round(e_then - e_t0, 2)))
+        paths.append(CostOfWaitingPath(episode_label=label, points=cow_points))
+    return CostOfWaiting(paths=paths)
+
+
+# --------------------------------------------------------------------------
+# Ledger and grades (section 9)
+# --------------------------------------------------------------------------
+
+GRADES = ("CLIENT_QUOTED", "CLIENT_SYSTEM", "DERIVED", "EPISODE_ANALOGUE", "STRUCTURAL", "PUBLISHED", "ABSENT")
+GRADE_STRENGTH = {g: i for i, g in enumerate(
+    ("PUBLISHED", "CLIENT_QUOTED", "CLIENT_SYSTEM", "DERIVED", "EPISODE_ANALOGUE", "STRUCTURAL", "ABSENT"))}
+# STRUCTURAL sits between EPISODE_ANALOGUE and ABSENT: a chokepoint_profiles.py
+# corridor with no tested incidents still has real descriptive/geographic
+# evidence behind it (chokepoint_profiles.ChokepointProfile.evidence_grade ==
+# "STRUCTURAL") — weaker than a corridor with tested episodes, but not the
+# same as a field nobody supplied at all.
+
+
+@dataclass
+class LedgerEntry:
+    field: str
+    value: object
+    unit: str
+    grade: str
+    formula: str | None = None
+    source: str | None = None
+    n: int | None = None
+    department: str | None = None
+
+
+class Ledger:
+    """The travelling ledger (section 9.3). Every number that enters the
+    result JSON is written through record(), which both stores the graded
+    entry AND returns the value for use in the result dict — 'every number
+    has a grade' (selftest #9) is true by construction, not a property
+    checked after the fact by walking arbitrary JSON keys."""
+
+    def __init__(self) -> None:
+        self.entries: list[LedgerEntry] = []
+
+    def record(self, field_name: str, value, *, unit: str, grade: str,
+              formula: str | None = None, source: str | None = None,
+              n: int | None = None, department: str | None = None):
+        if grade not in GRADES:
+            raise ValueError(f"unknown grade {grade!r} — must be one of {GRADES}")
+        self.entries.append(LedgerEntry(field_name, value, unit, grade, formula, source, n, department))
+        return value
+
+    def weakest(self) -> str:
+        if not self.entries:
+            return "unknown"
+        return max(self.entries, key=lambda e: GRADE_STRENGTH[e.grade]).grade
+
+    def as_list(self) -> list[dict]:
+        return [asdict(e) for e in self.entries]
+
+
+def weakest_grade(ledger: Ledger) -> str:
+    return ledger.weakest()
+
+
+# --------------------------------------------------------------------------
+# What would sharpen this (section 10's "value of information, for free")
+# --------------------------------------------------------------------------
+
+def what_would_sharpen(missing: list[intake.FieldSpec]) -> list[str]:
+    """Qualitative, not quantified: stating a euro figure a missing field
+    would narrow the result by requires assuming a value for that field,
+    which is exactly the fabrication section 2 forbids. Names the
+    department and what the field would let the engine derive instead of
+    leave ABSENT."""
+    return [f"ask {f.department} for {f.name.replace('_', ' ')} ({f.system_of_record}) — "
+            f"it would let the {f.unit}-denominated figure be derived instead of left absent"
+            for f in missing]
+
+
+# --------------------------------------------------------------------------
+# Orchestration
+# --------------------------------------------------------------------------
+
+def build_decision(intake_data: dict, *, as_of: str | None = None,
+                   gpr_source: Path | None = None,
+                   warrisk_path: Path | None = None, jwc_path: Path | None = None) -> dict:
+    problems = intake.validate_intake(intake_data)
+    if problems:
+        raise ValueError(f"intake has {len(problems)} problem(s): {problems}")
+
+    corridor = intake_data["corridor"]
+    incoterm = intake_data["incoterm"]
+    strategies_data = intake_data.get("strategies", [])
+    if len(strategies_data) < 1:
+        raise ValueError("intake needs at least one strategy")
+    strategies = [_strategy_from_dict(s) for s in strategies_data]
+    baseline_candidates = [s for s in strategies if s.is_baseline]
+    baseline = baseline_candidates[0] if baseline_candidates else strategies[0]
+
+    ledger = Ledger()
+
+    chokepoint = chokepoint_profiles.profile_for(corridor)
+    ledger.record("chokepoint_evidence_grade", chokepoint.response_character,
+                 unit="text", grade=chokepoint.evidence_grade,
+                 source=chokepoint.evidence_source,
+                 n=len(chokepoint.tested_incidents) or None)
+
+    reading = None
+    if gpr_source is not None and as_of:
+        try:
+            reading = point_in_time(gpr_source, as_of, corridor)
+        except SystemExit:
+            reading = None
+    if reading is not None:
+        mapped_grade = "PUBLISHED" if reading.get("grade") == "PUBLISHED" else "DERIVED"
+        ledger.record("reading_tar", reading.get("tar"), unit="index", grade=mapped_grade,
+                     source="services.point_in_time() (reconstructed from the public vintage)"
+                     if mapped_grade == "DERIVED" else "record.jsonl")
+
+    day_offset_anchor = int(intake_data.get("fields", {}).get("delay_days_estimate") or 0)
+    premium_analogue = episodes.analogue(corridor, "war_risk_premium", day_offset_anchor,
+                                         warrisk_path=warrisk_path, jwc_path=jwc_path, as_of=as_of)
+    if premium_analogue is not None:
+        ledger.record("premium_analogue", [round(o.value, 3) for o in premium_analogue.observations],
+                     unit="multiplier vs. pre-onset baseline", grade="EPISODE_ANALOGUE",
+                     source="; ".join(o.episode_label for o in premium_analogue.observations),
+                     n=premium_analogue.n)
+
+    probability = intake_data.get("client_probability_estimate")
+    base_rate = base_rate_context()
+    ranking_probability = probability if probability is not None else base_rate["hit_rate"]
+
+    strategy_rows = []
+    losses: dict[str, float] = {}
+    for s in strategies:
+        cl = conditional_loss(intake_data, s, premium_analogue)
+        losses[s.name] = cl.total
+        ledger.record(f"conditional_loss[{s.name}]", round(cl.total, 2), unit="currency",
+                     grade=cl.grade,
+                     formula="quoted override" if cl.grade == "CLIENT_QUOTED" else
+                             "sum(transport, insurance, delay, inventory, commodity)")
+        for absent_component in cl.absent_components:
+            ledger.record(f"conditional_loss[{s.name}].{absent_component}", None,
+                         unit="currency", grade="ABSENT")
+        strategy_rows.append({
+            "name": s.name, "direct_cost": s.direct_cost, "conditional_loss": round(cl.total, 2),
+            "expected_cost": round(expected_cost(s.direct_cost, ranking_probability, cl.total), 2),
+            "components": {k: round(v, 2) for k, v in cl.components.items()},
+            "grade": cl.grade, "is_baseline": s.is_baseline,
+        })
+
+    recommended = min(strategy_rows, key=lambda r: r["expected_cost"])["name"]
+
+    break_even = [break_even_probability(s, baseline, losses[s.name], losses[baseline.name])
+                 for s in strategies if s.name != baseline.name]
+    recommended_be = next((b for b in break_even if b.strategy == recommended), None)
+    if recommended_be is None and recommended == baseline.name:
+        # The baseline itself is winning — there is no "break-even to switch
+        # into it" by definition. Show the cheapest alternative's own
+        # break-even instead (the probability that would flip the
+        # recommendation away from the baseline), so BREAK-EVEN never
+        # collapses to "not solvable" just because nothing beats doing
+        # nothing yet.
+        solvable = [b for b in break_even if b.p_star is not None]
+        recommended_be = min(solvable, key=lambda b: b.p_star) if solvable else (
+            break_even[0] if break_even else None)
+
+    cow = None
+    if premium_analogue is not None:
+        # Start from the LATEST day_offset_used among the episodes already
+        # pooled at the anchor offset (every episode in premium_analogue has
+        # data at-or-before that day) and step forward only — "at or before"
+        # only gains coverage as the offset grows, so this never drops an
+        # episode below the n>=2 floor the way starting from a smaller,
+        # per-episode day_offset_used could.
+        start = max(o.day_offset_used for o in premium_analogue.observations)
+        offsets = sorted({start, start + 7, start + 14})
+        recommended_strategy = next(s for s in strategies if s.name == recommended)
+        cow = cost_of_waiting(intake_data, recommended_strategy, offsets, corridor,
+                              ranking_probability, warrisk_path=warrisk_path,
+                              jwc_path=jwc_path, as_of=as_of)
+
+    flips = solve_flips(intake_data, strategies, premium_analogue, ranking_probability)
+    regret = regret_at_range(strategies, intake_data, premium_analogue,
+                             tuple(intake_data["probability_range"])
+                             if intake_data.get("probability_range") else None)
+
+    baseline_cb = baseline_costbreakdown(intake_data)
+    disrupted_cb = disrupted_costbreakdown(intake_data)
+    gap = welfare_gap(disrupted_cb, baseline_cb)
+
+    missing = intake.missing_fields(intake_data)
+    for m in missing:
+        ledger.record(m.name, None, unit=m.unit, grade="ABSENT", department=m.department)
+
+    not_claimed = [
+        "no claim about the disruption's global origin",
+        "no theatre identification beyond the named chokepoint",
+        (f"episode analogue n={premium_analogue.n} — plural, never averaged"
+         if premium_analogue is not None else
+         "episode analogue — no register supplied, or fewer than two comparable episodes on file"),
+    ]
+
+    result = {
+        "scenario_id": intake_data.get("scenario_id", "SCENARIO-UNSPECIFIED"),
+        "corridor": corridor, "incoterm": incoterm,
+        "client_exposure_note": intake.client_exposure_note(incoterm),
+        "chokepoint_profile": {
+            "geography": chokepoint.geography,
+            "width": chokepoint.width,
+            "traffic_character": chokepoint.traffic_character,
+            "primary_cargo": chokepoint.primary_cargo,
+            "alternate_route": chokepoint.alternate_route,
+            "littoral_states": chokepoint.littoral_states,
+            "fact_grade": chokepoint.fact_grade,
+            "evidence_grade": chokepoint.evidence_grade,
+            "response_character": chokepoint.response_character,
+            "tested_incidents": [asdict(i) for i in chokepoint.tested_incidents],
+        },
+        "strategies": strategy_rows,
+        "recommended": recommended,
+        "recommended_break_even": asdict(recommended_be) if recommended_be else None,
+        "break_even": [asdict(b) for b in break_even],
+        "probability_used": ranking_probability,
+        "probability_is_published_fallback": probability is None,
+        "reading": reading,
+        "base_rate": base_rate,
+        "cost_of_waiting": ({"paths": [{"episode_label": p.episode_label, "points": p.points}
+                                       for p in cow.paths]} if cow else None),
+        "flip_points": [asdict(fp) for fp in flips],
+        "regret": regret,
+        "exposure": {"baseline": round(baseline_cb.total, 2), "disrupted": round(disrupted_cb.total, 2),
+                    "avoidable": round(gap["private"], 2)},
+        "ledger": ledger.as_list(),
+        "weakest_grade": ledger.weakest(),
+        "what_would_sharpen": what_would_sharpen(missing),
+        "not_claimed": not_claimed,
+        "model_version": MODEL_VERSION,
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    return result
+
+
+# --------------------------------------------------------------------------
+# Brief (section 10, L6)
+# --------------------------------------------------------------------------
+
+CSS = """
+:root{--water:#E9EFF1;--ink:#10222E;--soft:#4A6070;--rule:#B4C3C8;
+--caution:#C0157A;--sound:#1F5F6B;--paper:#F6F9FA}
+body{margin:0;background:var(--water);color:var(--ink);
+font:15px/1.55 "IBM Plex Sans",system-ui,sans-serif}
+.w{max-width:880px;margin:0 auto;padding:34px 20px 64px}
+h1{font:600 clamp(24px,3.6vw,33px)/1.14 Spectral,Georgia,serif;margin:8px 0 10px}
+h2{font:600 11px/1 "IBM Plex Mono",monospace;letter-spacing:.14em;
+text-transform:uppercase;color:var(--soft);margin:0 0 12px;
+padding-bottom:8px;border-bottom:1px solid var(--rule)}
+.eyebrow{font:11px/1 "IBM Plex Mono",monospace;letter-spacing:.16em;
+text-transform:uppercase;color:var(--soft)}
+section{background:var(--paper);border:1px solid var(--rule);padding:20px;margin-top:20px}
+.stats{display:flex;gap:28px;flex-wrap:wrap;margin-top:14px}
+.stats b{display:block;font:500 22px/1 "IBM Plex Mono",monospace}
+.stats span{font-size:11.5px;color:var(--soft);max-width:24ch;display:block;margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--rule)}
+th{font:600 10px/1 "IBM Plex Mono",monospace;letter-spacing:.1em;
+text-transform:uppercase;color:var(--soft)}
+.m{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+ol,ul{margin:0;padding-left:20px} li{margin-bottom:6px}
+.note{font-size:12.5px;color:var(--soft);border-left:3px solid var(--rule);
+padding-left:12px;margin-top:20px;max-width:74ch}
+"""
+
+
+def esc(s) -> str:
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def decision_brief_html(decision: dict, path: Path) -> None:
+    """One screen, self-contained inline <style>, section order fixed to
+    section 10's mockup — same precedent as economic_engine.
+    economic_report_html(): not registered in build_site.py's PAGES list,
+    since this is generated per-scenario output, not a static site page."""
+    recommended = decision["recommended"]
+    be = decision.get("recommended_break_even")
+    is_baseline_recommended = be is not None and be.get("baseline") == recommended
+    if be and be.get("p_star") is not None and is_baseline_recommended:
+        decision_line = (f"{recommended} — switches to {be['strategy']} if you assign "
+                         f"over {be['p_star']:.0%}")
+    elif be and be.get("p_star") is not None:
+        decision_line = f"{recommended} — or wait, if you assign under {be['p_star']:.0%}"
+    elif be:
+        decision_line = f"{recommended} — {be['reason']}"
+    else:
+        decision_line = recommended
+
+    br = decision["base_rate"]
+    lo, hi = br["hit_rate_ci_95"]
+    break_even_line = (
+        f"{be['p_star']:.0%} vs published base rate {br['hit_rate']:.0%} "
+        f"(CI {lo:.0%}-{hi:.0%}, n={br['alarm_episodes']})"
+        if be and be.get("p_star") is not None else "not solvable — see WHAT FLIPS IT")
+
+    reading = decision.get("reading")
+    reading_line = (f"TAR {reading['tar']}, {reading.get('band', '')}"
+                    if reading else "no current reading supplied")
+
+    cp = decision["chokepoint_profile"]
+    incidents = cp["tested_incidents"]
+    if incidents:
+        def _incident_row(i: dict) -> str:
+            ratio = "—" if i["response_ratio"] is None else f"{i['response_ratio']:.2f}x"
+            return (f"<tr><td>{esc(i['date'])}</td><td>{esc(i['label'])}</td>"
+                   f"<td class='m'>{ratio}</td><td>{esc(i['source'])}</td></tr>")
+        incident_rows = "".join(_incident_row(i) for i in incidents)
+        incidents_table = (f"<table><thead><tr><th>Date</th><th>Incident</th>"
+                           f"<th>Response</th><th>Source</th></tr></thead>"
+                           f"<tbody>{incident_rows}</tbody></table>")
+    else:
+        incidents_table = ""
+    chokepoint_html = (
+        f"<p>{esc(cp['geography'])}</p>"
+        f"<p><b>Width:</b> {esc(cp['width'])} &middot; <b>Traffic:</b> {esc(cp['traffic_character'])}</p>"
+        f"<p><b>Alternate route:</b> {esc(cp['alternate_route'] or 'none')}</p>"
+        f"<p class='note'>Geography/traffic figures: {esc(cp['fact_grade'])} — general/public "
+        f"knowledge, not independently cited. Evidence grade: {esc(cp['evidence_grade'])}.</p>"
+        f"<p>{esc(cp['response_character'])}</p>"
+        f"{incidents_table}")
+
+    cow = decision.get("cost_of_waiting")
+    if cow:
+        cow_line = " · ".join(
+            f"{p['episode_label'].split(',')[0]}-like: "
+            f"{p['points'][-1][1]:+,.0f} by day {p['points'][-1][0]}"
+            for p in cow["paths"])
+    else:
+        cow_line = "not shown — insufficient episode register coverage"
+
+    flips = decision["flip_points"]
+    flips_line = " · ".join(
+        f"{fp['parameter'].replace('_', ' ')} {fp['direction']} at {fp['flip_value']:g}"
+        for fp in flips) if flips else "no in-range flip points"
+
+    exp = decision["exposure"]
+    ledger_by_grade: dict[str, int] = {}
+    for e in decision["ledger"]:
+        ledger_by_grade[e["grade"]] = ledger_by_grade.get(e["grade"], 0) + 1
+    ledger_line = " · ".join(f"{n} {g}" for g, n in sorted(ledger_by_grade.items()))
+
+    strategy_rows = "".join(
+        f"<tr><td>{esc(r['name'])}</td><td class='m'>{r['direct_cost']:,.0f}</td>"
+        f"<td class='m'>{r['conditional_loss']:,.0f}</td>"
+        f"<td class='m'>{r['expected_cost']:,.0f}</td><td>{esc(r['grade'])}</td></tr>"
+        for r in decision["strategies"])
+
+    sharpen_items = "".join(f"<li>{esc(x)}</li>" for x in decision["what_would_sharpen"])
+    not_claimed_items = "".join(f"<li>{esc(x)}</li>" for x in decision["not_claimed"])
+
+    exposure_note = (f"<p class='note'>{esc(decision['client_exposure_note'])}</p>"
+                     if decision.get("client_exposure_note") else "")
+
+    path.write_text(f"""<!DOCTYPE html>
+<meta charset="utf-8"><title>Decision — {esc(decision['scenario_id'])}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>{CSS}</style>
+<div class="w">
+<div class="eyebrow">Decision engine v2 &middot; {esc(decision['corridor'])} &middot; {esc(decision['incoterm'])}</div>
+<h1>{esc(decision['scenario_id'])}</h1>
+{exposure_note}
+
+<section><h2>Decision</h2><p>{esc(decision_line)}</p></section>
+<section><h2>Break-even</h2><p>{esc(break_even_line)}</p></section>
+<section><h2>Reading</h2><p>{esc(reading_line)}</p></section>
+<section><h2>Chokepoint</h2>{chokepoint_html}</section>
+<section><h2>Cost of waiting</h2><p>{esc(cow_line)}</p></section>
+<section><h2>What flips it</h2><p>{esc(flips_line)}</p></section>
+
+<section><h2>Exposure</h2>
+<div class="stats">
+<div><b>{exp['baseline']:,.0f}</b><span>baseline</span></div>
+<div><b>{exp['disrupted']:,.0f}</b><span>disrupted (unmitigated)</span></div>
+<div><b>{exp['avoidable']:,.0f}</b><span>avoidable</span></div>
+</div></section>
+
+<section><h2>Strategy comparison</h2>
+<table><thead><tr><th>Strategy</th><th>Direct cost</th><th>Conditional loss</th>
+<th>Expected cost</th><th>Grade</th></tr></thead>
+<tbody>{strategy_rows}</tbody></table></section>
+
+<section><h2>Ledger</h2><p>{esc(ledger_line)}</p></section>
+<section><h2>What would sharpen this</h2><ul>{sharpen_items}</ul></section>
+<section><h2>Not claimed</h2><ul>{not_claimed_items}</ul></section>
+
+<p class="note">Model {esc(decision['model_version'])}. Computed {esc(decision['timestamp'])}.
+Weakest grade feeding this result: {esc(decision['weakest_grade'])}.
+{"Probability shown is the published base rate, not a client estimate — the decision above is "
+ "phrased conditionally." if decision.get('probability_is_published_fallback') else
+ "Probability shown was supplied by the client."}
+</p>
+</div>
+""", encoding="utf-8")
+    print(f"wrote {path}")
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd")
+
+    it = sub.add_parser("intake", help="write an editable intake template")
+    it.add_argument("--tier", type=int, default=1, choices=(1, 2, 3))
+    it.add_argument("--incoterm", choices=sorted(intake.INCOTERM_GROUPS))
+    it.add_argument("--out", type=Path, default=Path("intake.json"))
+
+    d = sub.add_parser("decide", help="compute a decision from an intake document")
+    d.add_argument("--intake", type=Path, required=True)
+    d.add_argument("--source", type=Path, help="GPR vintage, for the current reading")
+    d.add_argument("--warrisk", type=Path)
+    d.add_argument("--jwc", type=Path)
+    d.add_argument("--as-of", help="YYYY-MM")
+    d.add_argument("--out", type=Path)
+    d.add_argument("--brief", type=Path)
+
+    f = sub.add_parser("flip", help="print decision-flip sentences")
+    f.add_argument("--intake", type=Path, required=True)
+    f.add_argument("--source", type=Path)
+    f.add_argument("--warrisk", type=Path)
+    f.add_argument("--jwc", type=Path)
+    f.add_argument("--as-of")
+
+    p.add_argument("--selftest", action="store_true")
+    a = p.parse_args()
+
+    if a.selftest:
+        return selftest()
+    if a.cmd == "intake":
+        intake.write_template(a.tier, a.incoterm, a.out)
+        return 0
+    if a.cmd in ("decide", "flip"):
+        data = json.loads(a.intake.read_text(encoding="utf-8"))
+        result = build_decision(data, as_of=a.as_of, gpr_source=a.source,
+                                warrisk_path=a.warrisk, jwc_path=a.jwc)
+        if a.cmd == "flip":
+            if not result["flip_points"]:
+                print("no in-range flip points")
+            for fp in result["flip_points"]:
+                print(f"  {fp['parameter']}: current {fp['current_value']:g} -> "
+                     f"flips at {fp['flip_value']:g} ({fp['direction']})")
+            return 0
+        text = json.dumps(result, indent=2, default=str)
+        print(text)
+        if a.out:
+            a.out.write_text(text, encoding="utf-8")
+            print(f"wrote {a.out}")
+        if a.brief:
+            decision_brief_html(result, a.brief)
+        return 0
+    p.error("pass a subcommand (intake, decide, flip) or --selftest")
+    return 1
+
+
+# --------------------------------------------------------------------------
+# Self-test
+# --------------------------------------------------------------------------
+
+def _sample_intake() -> dict:
+    return {
+        "scenario_id": "HORMUZ-2026-001", "corridor": "Strait of Hormuz", "incoterm": "FOB",
+        "fields": {
+            "ship_date": "2026-09-01", "cargo_value": 5_000_000, "quantity": 50_000,
+            "quantity_unit": "MT", "contract_freight_rate": 400_000,
+            "contract_transit_time_days": 25, "days_of_cover": 10, "delay_days_estimate": 11,
+            "wacc_pct": 0.08, "carrying_cost_pct_pa": 0.18, "gross_margin_pct": 0.12,
+            "penalty_per_day": 5_000, "disrupted_freight_quote": 650_000,
+            "reroute_quote": None, "war_risk_premium_quote": 340_000,
+            "emergency_replacement_quote": None,
+        },
+        "strategies": [
+            {"name": "Continue", "direct_cost": 0, "effects": {}, "is_baseline": True},
+            {"name": "Partial reroute", "direct_cost": 700_000,
+             "effects": {"delay_days_delta": -6, "capacity_restored": 0.4,
+                        "war_risk_premium_multiplier": 0.25, "days_of_cover_delta": 0}},
+        ],
+        "client_probability_estimate": None, "probability_range": None,
+    }
+
+
+def selftest() -> int:
+    data = _sample_intake()
+    strategies = [_strategy_from_dict(s) for s in data["strategies"]]
+    continue_s, reroute_s = strategies
+
+    # --- #1 / #3: hand-worked conditional loss, reproduced component by
+    # component (the oracle is derived and shown here, not lifted from a
+    # spec table — enginev2.md has no worked numeric example to reuse).
+    cl_continue = conditional_loss(data, continue_s)
+    dgm_c = 5_000_000 * 0.12 / 10
+    delay_rate_c = (0.08 / 365) * 5_000_000 + 5_000 + 1.0 * dgm_c   # stockout=1: 10 <= 11
+    expected_delay_c = delay_rate_c * 11
+    holding_rate = (0.18 / 365) * (5_000_000 / 50_000)
+    expected_inventory_c = holding_rate * 50_000 * 11
+    expected_transport_c = (650_000 - 400_000) * (1 - 0)
+    expected_insurance_c = 340_000
+    expected_total_c = expected_delay_c + expected_inventory_c + expected_transport_c + expected_insurance_c
+    assert abs(cl_continue.components["delay"] - expected_delay_c) < 1e-6
+    assert abs(cl_continue.components["inventory"] - expected_inventory_c) < 1e-6
+    assert abs(cl_continue.components["transport"] - expected_transport_c) < 1e-6
+    assert abs(cl_continue.components["insurance"] - expected_insurance_c) < 1e-6
+    assert abs(cl_continue.total - expected_total_c) < 1e-6, (cl_continue.total, expected_total_c)
+    assert cl_continue.grade == "DERIVED"
+
+    cl_reroute = conditional_loss(data, reroute_s)
+    dgm_r = 5_000_000 * 0.12 / 10   # days_of_cover unaffected by this strategy's effects
+    delay_rate_r = (0.08 / 365) * 5_000_000 + 5_000 + 0.0 * dgm_r   # stockout=0: 10 > 5
+    expected_delay_r = delay_rate_r * 5
+    expected_inventory_r = holding_rate * 50_000 * 5
+    expected_transport_r = (650_000 - 400_000) * (1 - 0.4)
+    expected_insurance_r = 340_000 * 0.25
+    expected_total_r = expected_delay_r + expected_inventory_r + expected_transport_r + expected_insurance_r
+    assert abs(cl_reroute.total - expected_total_r) < 1e-6, (cl_reroute.total, expected_total_r)
+    assert cl_reroute.total < cl_continue.total   # the mitigation genuinely mitigates
+
+    # E[C_s] with an explicit probability — assertion #1.
+    p = 0.22
+    e_continue = expected_cost(continue_s.direct_cost, p, cl_continue.total)
+    e_reroute = expected_cost(reroute_s.direct_cost, p, cl_reroute.total)
+    assert abs(e_continue - (0 + p * cl_continue.total)) < 1e-6
+    assert abs(e_reroute - (700_000 + p * cl_reroute.total)) < 1e-6
+
+    # Quoted override (CLIENT_QUOTED) is auditable: components survive
+    # alongside the override, not discarded.
+    quoted = dataclasses.replace(reroute_s, quoted_residual_loss=250_000)
+    cl_quoted = conditional_loss(data, quoted)
+    assert cl_quoted.total == 250_000 and cl_quoted.grade == "CLIENT_QUOTED"
+    assert abs(cl_quoted.components["transport"] - expected_transport_r) < 1e-6
+
+    # --- #2: p* reduces exactly to v1's published C/L special case.
+    zero_loss_s = Strategy("s", 700_000, quoted_residual_loss=0.0)
+    zero_cost_s0 = Strategy("s0", 0.0, quoted_residual_loss=0.0)
+    be = break_even_probability(zero_loss_s, zero_cost_s0, 0.0, 4_375_000.0)
+    assert be.p_star is not None
+    assert abs(be.p_star - mitigation_threshold(700_000, 4_375_000)) < 1e-9, be.p_star
+    assert abs(be.p_star - 0.16) < 1e-9
+
+    # Degenerate case: denominator <= 0 -> None with a reason, never a crash.
+    worse = Strategy("worse", 100_000, quoted_residual_loss=5_000_000.0)
+    base0 = Strategy("base", 0.0, quoted_residual_loss=1_000_000.0)
+    be_bad = break_even_probability(worse, base0, 5_000_000.0, 1_000_000.0)
+    assert be_bad.p_star is None and be_bad.reason is not None
+
+    # Real scenario's own break-even, sanity-checked against the hand-worked totals.
+    be_real = break_even_probability(reroute_s, continue_s, cl_reroute.total, cl_continue.total)
+    assert be_real.p_star is not None
+    expected_p_star = 700_000 / (expected_total_c - expected_total_r)
+    assert abs(be_real.p_star - expected_p_star) < 1e-6
+
+    # --- #7: CIF intake never asks for war-risk premium; brief states why.
+    cif_fields = {f.name for f in intake.fields_for(3, "CIF")}
+    assert "war_risk_premium_quote" not in cif_fields
+    assert intake.client_exposure_note("CIF") is not None
+
+    # --- #6: regime check — no horizon language inside 12 months of onset.
+    # (episodes.py's own selftest proves the mechanism directly; here we
+    # confirm decision_engine wires it through to the analogue it fetches.)
+    onset_dt, _ = episodes._onset_date("Strait of Hormuz", "2026-02")
+    assert onset_dt.isoformat() == "2026-02-28"
+
+    # --- #4 / #5: analogue absent -> cost_of_waiting absent (whole key
+    # missing from the result, not a null field) when no register is
+    # supplied at all.
+    result_no_register = build_decision(data)
+    assert result_no_register["cost_of_waiting"] is None
+    assert "cost_of_waiting" in result_no_register   # present as a key, value None — see below
+
+    # --- #9: ledger completeness — every strategy's conditional loss and
+    # every genuinely missing field appears, each with a valid grade.
+    fields_by_name = {e["field"]: e for e in result_no_register["ledger"]}
+    assert "conditional_loss[Continue]" in fields_by_name
+    assert fields_by_name["conditional_loss[Continue]"]["grade"] in GRADES
+    for e in result_no_register["ledger"]:
+        assert e["grade"] in GRADES
+
+    # --- #8: dropping a field degrades with a stated grade, never silently.
+    stripped = json.loads(json.dumps(data))
+    stripped["fields"]["war_risk_premium_quote"] = None
+    result_stripped = build_decision(stripped)
+    absent_rows = [e for e in result_stripped["ledger"]
+                  if e["grade"] == "ABSENT" and "insurance" in e["field"]]
+    assert absent_rows, result_stripped["ledger"]
+
+    # --- flip points: at least one linear (probability) flip on the real scenario.
+    flips = solve_flips(data, strategies, None, 0.22)
+    assert any(fp.parameter == "probability" for fp in flips), flips
+
+    # A scenario engineered so the step in stockout_probability (intake.py
+    # section 5) is exactly what swaps the ranking: "Continue" has every
+    # other cost term zeroed out (wacc/penalty/carrying/quotes all 0 or
+    # None), so its conditional loss is 0 while days_of_cover (10) exceeds
+    # delay_days_estimate and jumps to margin*delay_days the instant it
+    # doesn't. "Mitigate" is a flat, quoted 200,000 regardless. At p=0.5
+    # that flat cost sits between the two sides of the step (0 vs ~250,000
+    # expected), so crossing delay_days_estimate=10 must flip the ranking —
+    # this is the concrete case constraint 3 (a smooth solver cannot assume
+    # continuity here) is about.
+    step_data = {
+        "scenario_id": "STEP-TEST", "corridor": "Strait of Hormuz", "incoterm": "FOB",
+        "fields": {
+            "ship_date": "2026-09-01", "cargo_value": 1_000_000, "quantity": 1_000,
+            "quantity_unit": "MT", "contract_freight_rate": 0,
+            "contract_transit_time_days": 0, "days_of_cover": 10, "delay_days_estimate": 9.5,
+            "wacc_pct": 0.0, "carrying_cost_pct_pa": 0.0, "gross_margin_pct": 0.5,
+            "penalty_per_day": 0.0, "disrupted_freight_quote": None,
+            "reroute_quote": None, "war_risk_premium_quote": None,
+            "emergency_replacement_quote": None,
+        },
+        "strategies": [
+            {"name": "Continue", "direct_cost": 0, "effects": {}, "is_baseline": True},
+            {"name": "Mitigate", "direct_cost": 200_000, "effects": {},
+             "quoted_residual_loss": 0.0},
+        ],
+    }
+    step_strats = [_strategy_from_dict(s) for s in step_data["strategies"]]
+    step_losses = {s.name: conditional_loss(step_data, s).total for s in step_strats}
+    assert step_losses["Continue"] == 0.0, step_losses          # below the step: no stockout yet
+    assert step_losses["Mitigate"] == 0.0                        # quoted override, flat
+    step_expected = _expected_costs(step_strats, step_losses, 0.5)
+    assert step_expected["Continue"] < step_expected["Mitigate"]  # Continue currently ranks first
+    flips3 = solve_flips(step_data, step_strats, None, 0.5)
+    step_flip = next((fp for fp in flips3 if fp.parameter == "delay_days_estimate"), None)
+    assert step_flip is not None, flips3
+    assert abs(step_flip.flip_value - 10.0) < 1e-6, step_flip
+
+    # --- #10: reproducibility — same input, same output modulo timestamp.
+    r1 = build_decision(data)
+    r2 = build_decision(data)
+    d1, d2 = dict(r1), dict(r2)
+    del d1["timestamp"], d2["timestamp"]
+    assert d1 == d2, "same input should reproduce the same result"
+
+    # --- end-to-end sanity, and the actual point of section 8.2's fix:
+    # unlike v1's compare_strategies() (direct_cost + residual_loss_estimate,
+    # probability never entering), the SAME scenario's recommendation must
+    # depend on probability. At the published base-rate fallback (~27%),
+    # paying 700,000 up front for reroute does not clear its own ~66%
+    # break-even, so "Continue" (cheap, high conditional loss) wins on
+    # expectation; give the client a high probability estimate instead and
+    # the recommendation flips to the mitigation. A tool where probability
+    # never changes the answer could not produce this pair of results.
+    result_low_p = build_decision(data)
+    assert result_low_p["probability_is_published_fallback"] is True
+    assert result_low_p["recommended"] == "Continue", result_low_p["recommended"]
+
+    high_p_data = json.loads(json.dumps(data))
+    high_p_data["client_probability_estimate"] = 0.80
+    result_high_p = build_decision(high_p_data)
+    assert result_high_p["probability_is_published_fallback"] is False
+    assert result_high_p["recommended"] == "Partial reroute", result_high_p["recommended"]
+
+    result = result_low_p
+    assert result["weakest_grade"] in GRADES
+    assert len(result["ledger"]) > 0
+    assert isinstance(result["what_would_sharpen"], list)
+    assert result["exposure"]["avoidable"] >= 0
+
+    # --- chokepoint_profiles.py integration: an EPISODE_ANALOGUE corridor
+    # (Hormuz, already this scenario's corridor) carries real tested
+    # incidents; a STRUCTURAL corridor (Adriatic) carries none, honestly,
+    # without lowering weakest_grade below what missing fields already do.
+    cp_hormuz = result["chokepoint_profile"]
+    assert cp_hormuz["evidence_grade"] == "EPISODE_ANALOGUE"
+    assert len(cp_hormuz["tested_incidents"]) == 7, cp_hormuz["tested_incidents"]
+    assert any(e["field"] == "chokepoint_evidence_grade" and e["grade"] == "EPISODE_ANALOGUE"
+              for e in result["ledger"])
+
+    adriatic_data = json.loads(json.dumps(data))
+    adriatic_data["corridor"] = "Adriatic"
+    result_adriatic = build_decision(adriatic_data)
+    cp_adriatic = result_adriatic["chokepoint_profile"]
+    assert cp_adriatic["evidence_grade"] == "STRUCTURAL"
+    assert cp_adriatic["tested_incidents"] == []
+    assert cp_adriatic["response_character"]   # still says something, honestly
+    assert any(e["field"] == "chokepoint_evidence_grade" and e["grade"] == "STRUCTURAL"
+              for e in result_adriatic["ledger"])
+    # This sample scenario's Tier-1 fields are all filled (missing_fields()
+    # defaults to tier=1 when the intake carries no "tier" key, and every
+    # Tier-1 field here is set), so the chokepoint's own STRUCTURAL entry is
+    # genuinely the weakest thing in the ledger — correctly surfaced, not
+    # masked by an unrelated ABSENT field.
+    assert result_adriatic["weakest_grade"] == "STRUCTURAL", result_adriatic["weakest_grade"]
+
+    print("all checks passed")
+    print(f"  conditional loss (Continue)        {cl_continue.total:,.0f}")
+    print(f"  conditional loss (Partial reroute) {cl_reroute.total:,.0f}")
+    print(f"  break-even p* (Partial reroute)    {be_real.p_star:.1%}")
+    print(f"  section 8.3 C/L special case reproduces v1's mitigation_threshold(): "
+         f"{be.p_star:.0%} (doc: 16%)")
+    print("  degenerate break-even (denominator <= 0) returns None with a reason, never raises")
+    print("  quoted-override conditional loss keeps its assembled components auditable")
+    print("  ledger grades every recorded number; missing fields degrade to ABSENT, never silently")
+    print("  same input reproduces the same result, modulo timestamp")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

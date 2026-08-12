@@ -1,0 +1,18 @@
+DOC API (already-fetched) response ratio -- hormuz / bab_el_mandeb
+(mean volume 30d after / 90d before, same methodology as 19c_attribution_recall.py)
+Source: src/data/doc_cache/*__total__*.csv (GDELT DOC 2.0 API, phrase query +
+threat-or-act word group, fetched 2026-08-05/06). Zero new query cost.
+
+corridor         date        label                                pre    post   ratio  status
+bab_el_mandeb    2016-10-09  Houthi attacks on USS Mason           --      --      --  predates doc_cache coverage (2017-01-01)
+bab_el_mandeb    2018-07-25  Saudi tanker attack, transit halt    26.3   258.4    9.84  usable (>3x)
+bab_el_mandeb    2023-11-19  Galaxy Leader seizure                3.1   105.5   33.77  usable (>3x)
+bab_el_mandeb    2024-02-18  Rubymar struck                      89.1    53.4    0.60  BLIND (<1.5x)
+bab_el_mandeb    2025-07-06  Magic Seas / Eternity C             11.0     7.0    0.64  BLIND (<1.5x)
+hormuz           2019-05-12  Fujairah tanker sabotage           101.8   409.5    4.02  usable (>3x)
+hormuz           2019-06-13  Gulf of Oman attacks               225.7  1745.8    7.73  usable (>3x)
+hormuz           2019-07-19  Stena Impero seizure               885.2  1573.1    1.78  weak (1.5-3x)
+hormuz           2020-01-03  Soleimani strike                    95.9   509.8    5.32  usable (>3x)
+hormuz           2021-07-29  Mercer Street attack                29.2    39.2    1.34  BLIND (<1.5x)
+hormuz           2024-04-13  MSC Aries seizure                   16.8    91.1    5.41  usable (>3x)
+hormuz           2025-06-13  Israel-Iran war onset               21.2   104.6    4.93  usable (>3x)

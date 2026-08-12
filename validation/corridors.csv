@@ -1,0 +1,17 @@
+corridor_id,corridor_name,region,polyline,radius_km,littoral_fips,actor_cameo,portwatch_name,manuscript_panel_unit
+hormuz,Strait of Hormuz,Middle East,26.98:56.85;26.57:56.25;26.20:55.30,150,IR|MU|AE,IRN|USA|SAU|ARE|QAT|BHR|KWT|IRQ|OMN|ISR|GBR,Strait of Hormuz,1
+bab_el_mandeb,Bab-el-Mandeb,Middle East / Horn of Africa,12.35:43.45;13.60:42.90;15.50:41.60,200,YM|DJ|ER,YEM|DJI|ERI|SOM|SAU|ARE|USA|GBR|ISR|EGY,Bab el-Mandeb Strait,1
+suez,Suez Canal,North Africa,29.93:32.55;30.60:32.35;31.26:32.30,120,EG,EGY|ISR|USA,Suez Canal,1
+malacca,Strait of Malacca,Southeast Asia,5.60:97.60;3.50:99.80;1.90:101.80;1.28:103.85,200,ID|MY|SN,IDN|MYS|SGP|THA|CHN|USA,Malacca Strait,1
+taiwan_strait,Taiwan Strait,East Asia,25.60:120.60;24.20:119.20;22.60:118.10,200,TW|CH,TWN|CHN|USA|JPN,Taiwan Strait,1
+black_sea,Black Sea,Europe / Eurasia,43.40:34.00,600,TU|UP|RS|RO|BU|GG,UKR|RUS|TUR|ROU|BGR|GEO|USA,Kerch Strait,1
+adriatic,Adriatic,Europe,45.30:13.20;43.50:15.50;41.50:18.50;40.20:18.90,250,IT|HR|AL|MJ|SI|BK|GR|RI,ITA|HRV|ALB|MNE|SRB|BIH|GRC|YUG|USA,,1
+turkish_straits,Turkish Straits,Europe / Eurasia,41.20:29.13;40.90:28.20;40.40:27.00;40.10:26.20,100,TU,TUR|RUS|UKR|GRC|USA,Bosporus Strait,0
+panama,Panama Canal,Central America,9.37:-79.90;9.10:-79.70;8.93:-79.56,100,PM,PAN|USA|COL,Panama Canal,0
+gibraltar,Strait of Gibraltar,Europe / North Africa,36.10:-5.35;35.90:-5.75,130,SP|MO|GI,ESP|MAR|GBR|USA,Gibraltar Strait,0
+danish_straits,Danish Straits,Europe,55.35:10.90;55.70:11.00;56.10:11.20;55.70:12.65,120,DA|SW,DNK|SWE|DEU|RUS|NOR,Oresund Strait,0
+cape_good_hope,Cape of Good Hope,Southern Africa,-34.35:18.47;-34.80:20.00,300,SF,ZAF,Cape of Good Hope,0
+english_channel,English Channel,Europe,50.05:-2.00;50.30:0.00;50.95:1.45,130,UK|FR,GBR|FRA|BEL|NLD,Dover Strait,0
+mozambique_channel,Mozambique Channel,Southern Africa,-12.50:42.00;-17.00:40.50;-22.00:37.00,400,MZ|MA|CN,MOZ|MDG|COM|TZA|FRA,,0
+lombok,Lombok Strait,Southeast Asia,-8.50:115.80;-8.90:115.70,110,ID,IDN,Lombok Strait,0
+sunda,Sunda Strait,Southeast Asia,-5.85:105.90;-6.05:105.75,110,ID,IDN,Sunda Strait,0

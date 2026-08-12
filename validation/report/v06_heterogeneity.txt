@@ -1,0 +1,40 @@
+CORRIDOR THRESHOLD VALIDATION
+==============================================================================
+score            : tar_resid
+pre-onset window : 30 days
+disruption depth : 20%
+bootstrap        : 2000 resamples, blocked on episode
+
+    corridor_id  episodes  n_days  n_pre_onset   auc  threshold     ci_lo     ci_hi  base_rate
+           suez         3    2422           80 0.595  -0.176967 -0.466567  0.184090     0.0330
+turkish_straits        10    2376          237 0.576  -0.236910 -0.455315  0.383355     0.0997
+ cape_good_hope         1    2705           30 0.567        NaN       NaN       NaN     0.0111
+  bab_el_mandeb         2    2113           58 0.556  -0.288675 -0.734178 -0.227902     0.0274
+ danish_straits         2    2635           60 0.543   0.158654  0.133508  0.268226     0.0228
+         hormuz        10    2091          242 0.521  -0.017643 -1.433711  1.440985     0.1157
+english_channel         1    2737           30 0.491        NaN       NaN       NaN     0.0110
+      gibraltar         1    1769           20 0.477        NaN       NaN       NaN     0.0113
+  taiwan_strait         4    2597          104 0.451  -0.827382 -1.668898  2.172371     0.0400
+      black_sea        17    1274          326 0.450   0.483605 -2.352233       NaN     0.2559
+         panama         3    2156           86 0.428   3.017616 -1.210137  3.017616     0.0399
+         lombok         1     596            3 0.126        NaN       NaN       NaN     0.0050
+
+pooled AUC       : 0.511
+pooled threshold : -0.1449
+
+HETEROGENEITY
+  corridors with an estimable cut : 8
+  whose 95% CI excludes the pooled cut : 2
+  bab_el_mandeb, danish_straits
+
+  VERDICT: at least one corridor differs from the pooled cut.
+  Before reporting this as heterogeneity, check that the corridors
+  involved have >= 3 episodes. With 2 episodes the block bootstrap
+  resamples from two values and its interval is not trustworthy
+  however narrow it looks.
+
+READ THE AUC COLUMN SCEPTICALLY
+  A corridor with 2 episodes has an AUC computed from 2 independent
+  events. It is a description of those two events, not an estimate of
+  out-of-sample performance. Only corridors with >= 4 episodes support
+  a performance claim, and none here will have many more than that.

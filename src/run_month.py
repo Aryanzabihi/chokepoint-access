@@ -103,6 +103,12 @@ def main() -> int:
     if not step(5, "Verify the chain", ["publish.py", "--verify"]):
         return 1
 
+    # Non-blocking, unlike steps 1-5: decision_engine.py's selftest is a
+    # code-health check on the standalone v2 decision tool, not part of
+    # the reading pipeline — a bug there should not withhold this month's
+    # publication.
+    step(6, "Decision engine v2 selftest", ["decision_engine.py", "--selftest"], optional=True)
+
     print("\nDone. Now commit the record so there are two independent timestamps:")
     print("    git add record.jsonl readings.json track-record.html")
     print('    git commit -m "reading: <month>"')

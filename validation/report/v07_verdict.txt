@@ -1,0 +1,75 @@
+SPECIFICATION GRID AND PERMUTATION NULL
+==============================================================================
+
+FULL GRID (all cells, ranked -- reported in full on purpose)
+ depth  horizon              score  n_days  n_pre_onset  episodes      auc  auc_post2024
+    30       30        tar_share_z   16217          634        16 0.520581      0.537679
+    20       30       tar_velocity   25471         1276        18 0.517736      0.519536
+    20       30 tar_velocity_resid   25471         1276        18 0.516853      0.519955
+    20       60 tar_velocity_resid   25471         2298        20 0.512158      0.513458
+    20       30  tar_share_z_resid   25471         1276        18 0.510981      0.510894
+    20       30        tar_share_z   25471         1276        18 0.510479      0.508816
+    20       60       tar_velocity   25471         2298        20 0.510445      0.515129
+    20       90 tar_velocity_resid   25471         3275        21 0.510255      0.510637
+    10       30       tar_velocity   25895         3002        24 0.509983      0.526331
+    20       90       tar_velocity   25471         3275        21 0.509850      0.514621
+    30       30  tar_share_z_resid   16217          634        16 0.507420      0.516534
+    30       90  tar_share_z_resid   16217         1618        19 0.506767      0.523764
+    30       60        tar_share_z   16217         1148        18 0.506502      0.534367
+    30       90        tar_share_z   16217         1618        19 0.506311      0.532260
+    30       30       tar_velocity   16217          634        16 0.504482      0.507167
+    20       60  tar_share_z_resid   25471         2298        20 0.503050      0.502176
+    30       60  tar_share_z_resid   16217         1148        18 0.502987      0.525423
+    10       30        tar_share_z   25895         3002        24 0.501968      0.506688
+    10       90       tar_velocity   25895         7298        24 0.501934      0.509352
+    10       60       tar_velocity   25895         5318        24 0.501896      0.511558
+    10       30  tar_share_z_resid   25895         3002        24 0.501182      0.505378
+    10       30 tar_velocity_resid   25895         3002        24 0.501028      0.516225
+    10       60  tar_share_z_resid   25895         5318        24 0.500973      0.497948
+    30       90 tar_velocity_resid   16217         1618        19 0.499522      0.504027
+    30       90       tar_velocity   16217         1618        19 0.499451      0.515661
+    20       90  tar_share_z_resid   25471         3275        21 0.499139      0.493933
+    10       90 tar_velocity_resid   25895         7298        24 0.498625      0.504755
+    10       90  tar_share_z_resid   25895         7298        24 0.498020      0.492151
+    10       60 tar_velocity_resid   25895         5318        24 0.497097      0.505279
+    10       60        tar_share_z   25895         5318        24 0.495978      0.497627
+    20       60        tar_share_z   25471         2298        20 0.494638      0.496899
+    30       30 tar_velocity_resid   16217          634        16 0.493433      0.490565
+    10       90        tar_share_z   25895         7298        24 0.492066      0.492960
+    30       60       tar_velocity   16217         1148        18 0.491430      0.508965
+    20       90        tar_share_z   25471         3275        21 0.489678      0.487298
+    30       60 tar_velocity_resid   16217         1148        18 0.488829      0.501715
+
+BEST CELL
+  score tar_share_z, horizon 30d, depth 30%
+  AUC 0.521   post-2024 holdout AUC 0.5376794600015233
+
+PERMUTATION NULL ON THE MAXIMUM
+  cells searched          : 36
+  observed best AUC       : 0.521
+  null max, median        : 0.530
+  null max, 95th pct      : 0.547
+  p-value                 : 0.913
+
+  VERDICT: the best cell in the grid is not better than what the same
+  search finds in rotated noise. NO specification is reportable, and
+  that includes the one at the top of the table. Corridor-specific
+  thresholds cannot be estimated because there is no signal to
+  threshold -- this is upstream of the heterogeneity question, which
+  should not be reported at all.
+
+  This is a real, publishable negative result about a 2019-2026
+  transit-disruption outcome. It does NOT overturn the manuscript's
+  event-onset findings, which use a different outcome over a longer
+  sample. Say which claim is being tested.
+
+BEFORE CONCLUDING EITHER WAY, THE THINGS THIS CANNOT RULE OUT
+  1. The sample starts 2019 and the primary series only becomes defined
+     ~2020-07 after the normalisation warm-up. Escalations before then
+     are absent, not tested.
+  2. The transit outcome measures diversion, which is a SHIPPING
+     decision. TAR may lead escalation while lagging the insurers and
+     owners who reroute first. A null here is evidence against TAR as a
+     rerouting predictor, not against TAR as an escalation indicator.
+  3. AIS goes dark under jamming in exactly these corridors, so the
+     outcome itself is measured worst when it matters most.

@@ -1,0 +1,13 @@
+webngrams 5-corridor smoketest -- event response ratio
+(mean volume 30d after / 90d before, same methodology as 19c_attribution_recall.py)
+Source: gdelt-bq.gdeltv2.webngrams via BigQuery, ~90-120 day windows around one
+representative event per corridor (not full history -- narrow windows only, per
+cost constraint). One event per corridor tested; suez/black_sea/taiwan_strait/
+turkish_straits from data/webngrams_5corridor_smoketest.csv (BigQuery, 2026-08-12).
+
+corridor         date        label                              pre    post   ratio  status
+suez             2021-03-23  Ever Given grounding             108.2  1518.6   14.04  usable (>3x)
+black_sea        2022-02-24  Invasion of Ukraine              553.6  1602.4    2.89  weak (1.5-3x)
+taiwan_strait    2022-08-04  Post-Pelosi exercises            167.2   595.8    3.56  usable (>3x)
+turkish_straits  2022-07-22  Grain corridor agreement          62.8   143.5    2.29  weak (1.5-3x)
+malacca          2019-08-01  Singapore Strait robbery wave       --      --      --  NO DATA (search term found zero matches)

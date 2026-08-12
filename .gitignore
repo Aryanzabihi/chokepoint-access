@@ -44,6 +44,22 @@ __pycache__/
 venv/
 .ipynb_checkpoints/
 
+# ---- corridor-validation research (validation/): large/regenerable inputs
+#      and derived panels are not tracked. Scripts, corridors.csv,
+#      doc_queries.csv, and report/ (the actual written analysis --
+#      phase_d_corridor_grades.md and the recall-test writeups) ARE tracked;
+#      those are the deliverable, not something to regenerate silently. ----
+/validation/data/*
+/validation/build/
+
+# ---- keep: these are paid BigQuery query results, not regenerable for
+#      free, and chokepoint_profiles.py cites them directly as its
+#      evidence source. (Must except children of data/, not the directory
+#      itself -- git will not look inside a wholesale-excluded directory
+#      for negation patterns to apply.) ----
+!/validation/data/webngrams_5corridor_smoketest.csv
+!/validation/data/webngrams_blacksea_event2.csv
+
 # ---- backend (Phase 5): secrets never committed ----
 .env
 backend/.env

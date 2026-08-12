@@ -1,0 +1,9 @@
+corridor_id,corridor_query
+hormuz,"""Strait of Hormuz"" OR Hormuz"
+bab_el_mandeb,"""Bab el-Mandeb"" OR ""Bab al-Mandab"" OR ""Bab-el-Mandeb"""
+suez,"""Suez Canal"""
+malacca,"""Strait of Malacca"" OR ""Malacca Strait"""
+taiwan_strait,"""Taiwan Strait"""
+black_sea,"""Black Sea"""
+turkish_straits,"Bosphorus OR Bosporus OR Dardanelles"
+panama,"""Panama Canal"""
