@@ -37,6 +37,15 @@ Two grades of fact live side by side here, and they are graded differently:
     corridors with none. One grade vocabulary for the whole product, not a
     parallel one to reconcile later.
 
+A weak or "blind" tested incident is not necessarily a coverage failure --
+across all 18 tested incidents, every one preceded by an already-elevated
+90-day baseline (>500 mentions/day) scores 1.7-2.9x with no exception,
+including the actual invasion of Ukraine. This response-ratio test measures
+novelty relative to recent coverage, not real-world severity: a corridor
+already mid-crisis will structurally show muted ratios for its next
+incident. See validation/report/response_ratio_pattern.md for the full
+analysis; individual profiles below reference it where it applies.
+
 Usage
 -----
     python chokepoint_profiles.py show --corridor "Strait of Hormuz"
@@ -163,10 +172,20 @@ PROFILES: dict[str, ChokepointProfile] = {
             TestedIncident("2025-07-06", "Magic Seas / Eternity C", 11.0, 7.0, 0.64, "DOC API (fetched)"),
         ],
         response_character=("Based on 4 testable incidents (1 predates coverage), "
-                            "response is bimodal: two incidents show very strong "
-                            "spikes (9.8x, 33.8x), two show none (0.6x, 0.6x). "
-                            "Real signal exists but is inconsistent across "
-                            "incidents, not uniformly reliable."),
+                            "response is bimodal, and the two weak readings have "
+                            "different causes, not one. Rubymar (0.6x) followed "
+                            "Galaxy Leader by 3 months, into an already-elevated "
+                            "baseline (89 mentions/day pre-incident, ~29x this "
+                            "corridor's own pre-crisis level of 3.1) -- a ceiling "
+                            "effect, not a coverage failure: see "
+                            "validation/report/response_ratio_pattern.md. Magic "
+                            "Seas/Eternity C (0.6x) came 20 months into the same "
+                            "crisis against a since-receded baseline (11.0) and "
+                            "still scored low -- that looks like fatigue with a "
+                            "familiar story, not baseline saturation. Saudi "
+                            "tanker attack (9.8x) and Galaxy Leader (33.8x) -- "
+                            "both novel, low-baseline incidents -- are the "
+                            "reliable signal here."),
     ),
 
     "Adriatic": ChokepointProfile(
@@ -222,9 +241,17 @@ PROFILES: dict[str, ChokepointProfile] = {
         response_character=("Based on 3 tested incidents across both sub-"
                             "regions, response is consistently weak -- 1.7x, "
                             "2.3x, 2.9x, none clearing the 3x bar the stronger "
-                            "corridors do. By mid-war the baseline itself was "
-                            "already elevated, muting the relative jump any "
-                            "single new incident produces."),
+                            "corridors do. This matches a pattern that holds "
+                            "across every corridor tested: incidents preceded "
+                            "by an already-elevated 90-day baseline (>500 "
+                            "mentions/day) score 1.7-2.9x with no exception, "
+                            "including the invasion of Ukraine itself -- its "
+                            "own pre-onset window was already saturated with "
+                            "buildup coverage. See "
+                            "validation/report/response_ratio_pattern.md. Not "
+                            "a coverage failure; a structural ceiling on what "
+                            "this test can register once a corridor is "
+                            "already mid-crisis."),
     ),
 
     "Suez Canal": ChokepointProfile(
