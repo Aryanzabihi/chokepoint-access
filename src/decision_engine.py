@@ -42,7 +42,7 @@ import dataclasses
 import json
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -68,10 +68,21 @@ MODEL_VERSION = "decision-engine-2.0"
 
 @dataclass
 class StrategyEffects:
+    """forward_buy_fraction/forward_buy_early_days only add the financing +
+    carrying cost of committing early (forward_buy_cost() below) -- they do
+    not by themselves reduce conditional_loss(). A forward-buy strategy that
+    is meant to remove risk on the secured fraction sets capacity_restored/
+    war_risk_premium_multiplier alongside them, same as any other
+    risk-reducing strategy; the two pairs of fields are independent knobs on
+    purpose, so forward-buy composes with (rather than silently overrides) a
+    strategy that also reroutes or insures."""
     delay_days_delta: float = 0.0
     capacity_restored: float = 0.0                      # fraction 0-1
     war_risk_premium_multiplier: float | None = None    # None = leave the quote as-is
     days_of_cover_delta: float = 0.0
+    forward_buy_fraction: float = 0.0                    # fraction 0-1, secured before the
+                                                          # contract timeline would have required
+    forward_buy_early_days: float = 0.0                  # how many days sooner that fraction is committed
 
 
 @dataclass
@@ -245,6 +256,54 @@ def _expected_costs(strategies: list[Strategy], losses: dict[str, float],
 
 
 # --------------------------------------------------------------------------
+# Forward-buy cost — securing part of an order ahead of the contract
+# timeline. Not a new forecast: the fraction and lead time are the client's
+# own choice (informed by whatever they read off the corridor's current
+# band, base rate and episode analogues below), and the cost is derived
+# entirely from rates the client already supplied (wacc_pct,
+# carrying_cost_pct_pa) for the days that fraction is held sooner than the
+# contract required. No claim about when a future disruption will happen or
+# how severe it will be enters this calculation.
+# --------------------------------------------------------------------------
+
+@dataclass
+class ForwardBuyCost:
+    value: float
+    grade: str    # "DERIVED" or "ABSENT" -- ABSENT when a fraction is set but the client's
+                  # own wacc_pct/cargo_value aren't, so the cost can't be derived, never guessed
+
+
+def forward_buy_cost(intake_data: dict, effects: StrategyEffects) -> ForwardBuyCost:
+    """Financing cost (WACC on the secured fraction, held forward_buy_early_days
+    sooner) plus the extra inventory-carrying cost of holding that fraction
+    that much longer, both at the client's own quoted rates. Zero, DERIVED,
+    when no forward buy is requested (the default -- every strategy that
+    doesn't use this field is unaffected)."""
+    if effects.forward_buy_fraction <= 0 or effects.forward_buy_early_days <= 0:
+        return ForwardBuyCost(0.0, "DERIVED")
+
+    f = intake_data.get("fields", {})
+    cargo_value = f.get("cargo_value")
+    wacc_pct = f.get("wacc_pct")
+    if cargo_value is None or wacc_pct is None:
+        return ForwardBuyCost(0.0, "ABSENT")
+
+    financing = wacc_pct * effects.forward_buy_fraction * cargo_value * (
+        effects.forward_buy_early_days / 365.0)
+
+    extra_carrying = 0.0
+    carrying_pct = f.get("carrying_cost_pct_pa")
+    quantity = f.get("quantity")
+    if carrying_pct is not None and quantity:
+        holding_rate = intake.holding_per_unit_day(carrying_pct, intake.unit_value(cargo_value, quantity))
+        if holding_rate is not None:
+            extra_carrying = (holding_rate.value * effects.forward_buy_fraction * quantity
+                              * effects.forward_buy_early_days)
+
+    return ForwardBuyCost(financing + extra_carrying, "DERIVED")
+
+
+# --------------------------------------------------------------------------
 # Break-even probability (section 8.3 — the generalised threshold)
 # --------------------------------------------------------------------------
 
@@ -314,6 +373,41 @@ def base_rate_context(corridor: str | None = None) -> dict:
             f"fact, not a claim of immunity."
         )
     return result
+
+
+# --------------------------------------------------------------------------
+# Procurement window — how much time actually remains, derived from fields
+# the client already supplied. Not a forecast: today's date plus ship_date
+# and contract_transit_time_days, arithmetic only.
+# --------------------------------------------------------------------------
+
+@dataclass
+class ProcurementWindow:
+    supply_window_days: int | None        # days from today until the material is required
+    procurement_window_days: int | None   # days from today until a normal-schedule purchase
+                                          # decision would need to be made to still meet it
+    grade: str                            # "DERIVED" when both are computable, else "ABSENT"
+
+
+def procurement_window(intake_data: dict, *, today: date | None = None) -> ProcurementWindow:
+    """supply_window = ship_date - today. procurement_window = supply_window
+    - contract_transit_time_days (the point at which a NORMAL-schedule
+    purchase must be placed to still meet ship_date by normal lead time).
+    today defaults to the real current date -- this describes time
+    remaining as of now, unlike the rest of the engine's leak-free
+    historical reconstruction, because a countdown that didn't move with
+    real time would be the wrong kind of honest."""
+    f = intake_data.get("fields", {})
+    ship_date_str = f.get("ship_date")
+    if ship_date_str is None:
+        return ProcurementWindow(None, None, "ABSENT")
+    today = today or datetime.now(timezone.utc).date()
+    supply_window = (date.fromisoformat(ship_date_str) - today).days
+
+    transit_days = f.get("contract_transit_time_days")
+    if transit_days is None:
+        return ProcurementWindow(supply_window, None, "ABSENT")
+    return ProcurementWindow(supply_window, supply_window - int(transit_days), "DERIVED")
 
 
 def inverse_mode_sentence(recommended: BreakEvenResult, base_rate: dict) -> str:
@@ -616,6 +710,35 @@ def what_would_sharpen(missing: list[intake.FieldSpec]) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# Reassess triggers — named conditions under which this result is stale,
+# stated from what's already computed. Never a forecast of when a trigger
+# will fire, only what it is: the engine doesn't watch for these between
+# runs, it names them so a human (or the monthly alert loop) knows what to
+# watch for.
+# --------------------------------------------------------------------------
+
+def reassess_triggers(intake_data: dict, reading: dict | None,
+                      proc_window: ProcurementWindow) -> list[str]:
+    triggers = []
+    if reading is not None and reading.get("band"):
+        triggers.append(f"the corridor's band moves away from {reading['band']!r}")
+
+    f = intake_data.get("fields", {})
+    days_of_cover = f.get("days_of_cover")
+    delay_days = f.get("delay_days_estimate")
+    if days_of_cover is not None and delay_days is not None and days_of_cover > delay_days:
+        triggers.append(f"inventory cover falls below {delay_days:g} days "
+                        f"(currently {days_of_cover:g} days against an estimated "
+                        f"{delay_days:g}-day delay)")
+
+    if proc_window.procurement_window_days is not None and proc_window.procurement_window_days > 0:
+        triggers.append(f"the procurement window closes in {proc_window.procurement_window_days} "
+                        f"days, after which this becomes an expedited rather than normal-schedule decision")
+
+    return triggers
+
+
+# --------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------
 
@@ -636,6 +759,22 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
     baseline = baseline_candidates[0] if baseline_candidates else strategies[0]
 
     ledger = Ledger()
+
+    # Forward-buy strategies: add the financing/carrying cost of securing
+    # part of the order early into that strategy's direct cost, once, here
+    # -- so conditional_loss(), expected_cost(), break_even_probability()
+    # and everything downstream see one consistent, already-graded number
+    # rather than each having to know about forward-buy separately.
+    for s in strategies:
+        if s.effects.forward_buy_fraction > 0:
+            fb = forward_buy_cost(intake_data, s.effects)
+            s.direct_cost += fb.value
+            ledger.record(f"forward_buy_cost[{s.name}]", round(fb.value, 2), unit="currency",
+                         grade=fb.grade,
+                         formula=(f"wacc x {s.effects.forward_buy_fraction:.0%} x cargo_value x "
+                                  f"({s.effects.forward_buy_early_days:g}/365) + carrying x "
+                                  f"{s.effects.forward_buy_fraction:.0%} x quantity x "
+                                  f"{s.effects.forward_buy_early_days:g} days"))
 
     chokepoint = chokepoint_profiles.profile_for(corridor)
     ledger.record("chokepoint_evidence_grade", chokepoint.response_character,
@@ -670,6 +809,11 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
                  source="tar_ingest.ONSETS (main text Table 1)",
                  n=base_rate["corridor_onsets"] or None)
     ranking_probability = probability if probability is not None else base_rate["hit_rate"]
+
+    proc_window = procurement_window(intake_data)
+    ledger.record("procurement_window_days", proc_window.procurement_window_days,
+                 unit="days", grade=proc_window.grade,
+                 formula="ship_date - today - contract_transit_time_days")
 
     strategy_rows = []
     losses: dict[str, float] = {}
@@ -726,6 +870,40 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
                              tuple(intake_data["probability_range"])
                              if intake_data.get("probability_range") else None)
 
+    # Recommendation confidence: don't present a razor-thin or fragile pick
+    # as a strong call. Two independent checks, neither inventing a new
+    # threshold beyond what's already computed --
+    #   1. robustness: does the SAME strategy win at both ends of the
+    #      published probability range regret was just evaluated at
+    #      (EPISODE_HIT_RATE_CI by default, or the client's own range)?
+    #   2. margin: at the single ranking probability actually used, is the
+    #      gap to the next-best strategy trivial relative to its own cost?
+    _ranked = sorted(strategy_rows, key=lambda r: r["expected_cost"])
+    _top, _second = _ranked[0], (_ranked[1] if len(_ranked) > 1 else None)
+    _RAZOR_THIN = 0.03   # disclosed here, not hidden -- 3% of the leading strategy's own cost
+    _margin_ratio = (None if _second is None else
+                     (_second["expected_cost"] - _top["expected_cost"])
+                     / max(abs(_top["expected_cost"]), 1.0))
+    _robust_across_range = regret["low"]["best"] == regret["high"]["best"]
+    razor_thin = _margin_ratio is not None and _margin_ratio < _RAZOR_THIN
+    decision_confidence = "robust" if (_robust_across_range and not razor_thin) else "weak"
+    if decision_confidence == "robust":
+        decision_confidence_note = None
+    elif not _robust_across_range:
+        decision_confidence_note = (
+            f"No economically significant advantage: the better choice flips between "
+            f"{regret['low']['best']!r} and {regret['high']['best']!r} depending on where in the "
+            f"published probability range ({regret['low']['probability']:.0%}-"
+            f"{regret['high']['probability']:.0%}) the true probability sits. {recommended} is "
+            f"shown because it wins at the {ranking_probability:.0%} used for ranking, not because "
+            f"it clearly dominates — maintaining normal procurement is equally defensible.")
+    else:
+        decision_confidence_note = (
+            f"No economically significant advantage: {_top['name']} beats {_second['name']} by "
+            f"only {_second['expected_cost'] - _top['expected_cost']:,.0f} in expected cost "
+            f"({_margin_ratio:.1%} of {_top['name']}'s own expected cost) — within rounding and "
+            f"estimation noise, not a clear win.")
+
     baseline_cb = baseline_costbreakdown(intake_data)
     disrupted_cb = disrupted_costbreakdown(intake_data)
     gap = welfare_gap(disrupted_cb, baseline_cb)
@@ -760,12 +938,17 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         },
         "strategies": strategy_rows,
         "recommended": recommended,
+        "decision_confidence": decision_confidence,
+        "decision_confidence_note": decision_confidence_note,
         "recommended_break_even": asdict(recommended_be) if recommended_be else None,
         "break_even": [asdict(b) for b in break_even],
         "probability_used": ranking_probability,
         "probability_is_published_fallback": probability is None,
         "reading": reading,
         "base_rate": base_rate,
+        "procurement_window": {"supply_window_days": proc_window.supply_window_days,
+                               "procurement_window_days": proc_window.procurement_window_days,
+                               "grade": proc_window.grade},
         "cost_of_waiting": ({"paths": [{"episode_label": p.episode_label, "points": p.points}
                                        for p in cow.paths]} if cow else None),
         "flip_points": [asdict(fp) for fp in flips],
@@ -775,6 +958,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         "ledger": ledger.as_list(),
         "weakest_grade": ledger.weakest(),
         "what_would_sharpen": what_would_sharpen(missing),
+        "reassess_triggers": reassess_triggers(intake_data, reading, proc_window),
         "not_claimed": not_claimed,
         "model_version": MODEL_VERSION,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -834,6 +1018,8 @@ def decision_brief_html(decision: dict, path: Path) -> None:
         decision_line = f"{recommended} — {be['reason']}"
     else:
         decision_line = recommended
+    if decision.get("decision_confidence") == "weak":
+        decision_line = f"{decision['decision_confidence_note']} (nominal pick: {recommended})"
 
     br = decision["base_rate"]
     lo, hi = br["hit_rate_ci_95"]
@@ -911,6 +1097,23 @@ def decision_brief_html(decision: dict, path: Path) -> None:
 
     sharpen_items = "".join(f"<li>{esc(x)}</li>" for x in decision["what_would_sharpen"])
     not_claimed_items = "".join(f"<li>{esc(x)}</li>" for x in decision["not_claimed"])
+    reassess_items = "".join(f"<li>{esc(x)}</li>" for x in decision["reassess_triggers"])
+
+    pw = decision.get("procurement_window") or {}
+    if pw.get("procurement_window_days") is not None:
+        procurement_window_line = (
+            f"{pw['procurement_window_days']} day(s) until a normal-schedule purchase decision "
+            f"would need to be made ({pw['supply_window_days']} day(s) until the material is "
+            f"required, minus the contract transit time)."
+            if pw["procurement_window_days"] >= 0 else
+            f"Already {-pw['procurement_window_days']} day(s) past the point a normal-schedule "
+            f"purchase would need to have been made — any action now is expedited, not routine.")
+    elif pw.get("supply_window_days") is not None:
+        procurement_window_line = (f"{pw['supply_window_days']} day(s) until the material is "
+                                   f"required. Supply contract_transit_time_days to see how much "
+                                   f"of that is still a normal-schedule decision window.")
+    else:
+        procurement_window_line = "not computable — ship_date not supplied."
 
     exposure_note = (f"<p class='note'>{esc(decision['client_exposure_note'])}</p>"
                      if decision.get("client_exposure_note") else "")
@@ -927,9 +1130,12 @@ def decision_brief_html(decision: dict, path: Path) -> None:
 <section><h2>Decision</h2><p>{esc(decision_line)}</p></section>
 <section><h2>Break-even</h2><p>{esc(break_even_line)}</p></section>
 <section><h2>Reading</h2><p>{esc(reading_line)}</p></section>
+<section><h2>Procurement window</h2><p>{esc(procurement_window_line)}</p></section>
 <section><h2>Chokepoint</h2>{chokepoint_html}</section>
 <section><h2>Cost of waiting</h2><p>{esc(cow_line)}</p></section>
 <section><h2>What flips it</h2><p>{esc(flips_line)}</p></section>
+<section><h2>Reassess if</h2>{f"<ul>{reassess_items}</ul>" if reassess_items else
+    "<p>Nothing currently computable to watch for — see WHAT WOULD SHARPEN THIS.</p>"}</section>
 
 <section><h2>Exposure</h2>
 <div class="stats">
@@ -1287,6 +1493,102 @@ def selftest() -> int:
     assert result_suez["chokepoint_profile"]["evidence_grade"] == "EPISODE_ANALOGUE"
     suez_onset_rows = [e for e in result_suez["ledger"] if e["field"] == "corridor_onset_history"]
     assert suez_onset_rows and suez_onset_rows[0]["grade"] == "STRUCTURAL" and suez_onset_rows[0]["value"] == 0
+
+    # --- decision confidence: the real scenario's two strategies are far
+    # apart (1.34M vs 278k conditional loss) -- a robust call, no note.
+    assert result["decision_confidence"] == "robust"
+    assert result["decision_confidence_note"] is None
+
+    # A third strategy quoted with the SAME conditional loss as Continue and
+    # a trivial direct cost (1,000, ~0.3% of Continue's own expected cost)
+    # is razor-thin, not a real win -- must say so plainly rather than
+    # presenting it as a strong recommendation.
+    thin_data = json.loads(json.dumps(data))
+    thin_data["strategies"].append({
+        "name": "Near tie", "direct_cost": 1_000,
+        "quoted_residual_loss": cl_continue.total,
+    })
+    result_thin = build_decision(thin_data)
+    assert result_thin["recommended"] == "Continue"   # still the argmin -- unchanged
+    assert result_thin["decision_confidence"] == "weak"
+    assert "No economically significant advantage" in result_thin["decision_confidence_note"]
+
+    # --- procurement window: pure arithmetic on ship_date/contract_transit_
+    # time_days, no wall-clock dependence in the test (today= pinned).
+    # sample ship_date is 2026-09-01, contract_transit_time_days is 25.
+    pw = procurement_window(data, today=date(2026, 8, 13))
+    assert pw.supply_window_days == 19, pw.supply_window_days   # 2026-09-01 minus 2026-08-13
+    assert pw.procurement_window_days == 19 - 25, pw.procurement_window_days   # already past normal lead time
+    assert pw.grade == "DERIVED"
+
+    no_ship_date = json.loads(json.dumps(data))
+    no_ship_date["fields"]["ship_date"] = None
+    assert procurement_window(no_ship_date).grade == "ABSENT"
+
+    result_pw = build_decision(data)   # end to end: wired into the result and the ledger
+    assert result_pw["procurement_window"]["supply_window_days"] is not None
+    pw_ledger_rows = [e for e in result_pw["ledger"] if e["field"] == "procurement_window_days"]
+    assert pw_ledger_rows and pw_ledger_rows[0]["grade"] == "DERIVED"
+
+    # --- reassess triggers: named plainly from state already computed,
+    # never a new prediction of when they'll fire. The sample scenario has
+    # a reading=None (no gpr_source/reading passed) so the band trigger is
+    # absent; days_of_cover (10) < delay_days_estimate (11), so the
+    # inventory trigger is also correctly absent (already past that point,
+    # not a future one to watch for) -- only the procurement-window trigger
+    # should fire, since it's negative (already past) in this scenario per
+    # the pw assertion above... use reading= to also exercise the band case.
+    result_triggers = build_decision(data, reading={"tar": 1.5, "band": "Procurement Watch"})
+    assert any("Procurement Watch" in t for t in result_triggers["reassess_triggers"])
+    assert not any("inventory cover" in t for t in result_triggers["reassess_triggers"])
+
+    cover_data = json.loads(json.dumps(data))
+    cover_data["fields"]["days_of_cover"] = 20   # now exceeds delay_days_estimate (11)
+    result_cover = build_decision(cover_data)
+    assert any("inventory cover falls below 11" in t for t in result_cover["reassess_triggers"])
+
+    # --- forward-buy cost: hand-worked oracle against the documented
+    # formula (financing on the secured fraction + extra carrying cost of
+    # holding it forward_buy_early_days sooner), both at the client's own
+    # rates -- no forecast of when or how severe a future disruption is.
+    fb_effects = StrategyEffects(forward_buy_fraction=0.4, forward_buy_early_days=30)
+    expected_financing = 0.08 * 0.4 * 5_000_000 * (30 / 365.0)
+    expected_carrying = (0.18 / 365.0) * (5_000_000 / 50_000) * 0.4 * 50_000 * 30
+    fb = forward_buy_cost(data, fb_effects)
+    assert fb.grade == "DERIVED"
+    assert abs(fb.value - (expected_financing + expected_carrying)) < 0.01, fb.value
+
+    # forward_buy_fraction=0 (the default) costs nothing -- every existing
+    # strategy that doesn't use this field is unaffected.
+    assert forward_buy_cost(data, StrategyEffects()).value == 0.0
+
+    # ABSENT, not a silent zero, when a fraction is requested but the
+    # client's own wacc_pct isn't supplied.
+    no_wacc = json.loads(json.dumps(data))
+    no_wacc["fields"]["wacc_pct"] = None
+    assert forward_buy_cost(no_wacc, fb_effects).grade == "ABSENT"
+
+    # end to end: a forward-buy strategy's direct_cost in build_decision()'s
+    # own output includes the forward-buy cost (not just the strategy's
+    # quoted direct_cost), the ledger records it under a DERIVED grade, and
+    # break-even/expected-cost downstream see the combined number -- one
+    # consistent figure, not two the reader has to add up themselves.
+    fb_data = json.loads(json.dumps(data))
+    fb_data["strategies"].append({
+        "name": "Forward-buy 40%", "direct_cost": 5_000,
+        "effects": {"forward_buy_fraction": 0.4, "forward_buy_early_days": 30,
+                   "capacity_restored": 0.4, "war_risk_premium_multiplier": 0.6},
+    })
+    result_fb = build_decision(fb_data)
+    fb_row = next(r for r in result_fb["strategies"] if r["name"] == "Forward-buy 40%")
+    assert fb_row["direct_cost"] > 5_000 + expected_financing + expected_carrying - 1, fb_row
+    fb_ledger_rows = [e for e in result_fb["ledger"] if e["field"] == "forward_buy_cost[Forward-buy 40%]"]
+    assert fb_ledger_rows and fb_ledger_rows[0]["grade"] == "DERIVED"
+    # its conditional loss is lower than Continue's -- the risk-reducing
+    # effects (capacity_restored/war_risk_premium_multiplier) actually bit,
+    # confirming forward-buy composes with them rather than being ignored
+    continue_row = next(r for r in result_fb["strategies"] if r["name"] == "Continue")
+    assert fb_row["conditional_loss"] < continue_row["conditional_loss"], fb_row
 
     print("all checks passed")
     print(f"  conditional loss (Continue)        {cl_continue.total:,.0f}")

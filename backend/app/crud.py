@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 
 from .models import (
     AlertSubscription, ApiKey, AuditEvent, Client, Decision, EconomicScenario,
-    EconomicScenarioSubscription, Exposure, StrategyDecision, User,
+    EconomicScenarioSubscription, Exposure, StrategyDecision, StrategyDecisionSubscription, User,
 )
 
 
@@ -70,6 +70,16 @@ def get_client_owned(session: Session, user: User, client_id: int) -> Client | N
 def list_exposures(session: Session, client: Client) -> list[Exposure]:
     return list(session.exec(
         select(Exposure).where(Exposure.client_id == client.id)
+        .order_by(Exposure.created_at.desc())))
+
+
+def list_exposures_for_user(session: Session, user: User) -> list[tuple[Exposure, Client]]:
+    """Every exposure across every client this user owns, each paired with
+    its client (the home dashboard needs the client name on each row, and
+    this avoids a separate lookup per exposure)."""
+    return list(session.exec(
+        select(Exposure, Client)
+        .where(Exposure.client_id == Client.id, Client.owner_user_id == user.id)
         .order_by(Exposure.created_at.desc())))
 
 
@@ -204,6 +214,33 @@ def latest_strategy_decision_for_exposure(session: Session,
     return session.exec(
         select(StrategyDecision).where(StrategyDecision.exposure_id == exposure_id)
         .order_by(StrategyDecision.created_at.desc())).first()
+
+
+def is_subscribed_strategy_decision(session: Session, user: User, strategy_decision_id: int) -> bool:
+    return session.exec(
+        select(StrategyDecisionSubscription).where(
+            StrategyDecisionSubscription.user_id == user.id,
+            StrategyDecisionSubscription.strategy_decision_id == strategy_decision_id)
+    ).first() is not None
+
+
+def toggle_strategy_decision_subscription(session: Session, user: User,
+                                           strategy_decision_id: int) -> bool:
+    """Returns the new state (True = now subscribed). Mirrors
+    toggle_economic_scenario_subscription() above, for StrategyDecision."""
+    existing = session.exec(
+        select(StrategyDecisionSubscription).where(
+            StrategyDecisionSubscription.user_id == user.id,
+            StrategyDecisionSubscription.strategy_decision_id == strategy_decision_id)
+    ).first()
+    if existing:
+        session.delete(existing)
+        session.commit()
+        return False
+    session.add(StrategyDecisionSubscription(user_id=user.id,
+                                               strategy_decision_id=strategy_decision_id))
+    session.commit()
+    return True
 
 
 # -------------------------------------------------------------- api keys ---

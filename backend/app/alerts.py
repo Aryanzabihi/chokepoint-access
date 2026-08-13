@@ -5,7 +5,7 @@ GitHub Actions monthly workflow (which stays untouched and keeps publishing
 readings.json / record.jsonl exactly as before). This just reads the result
 of that pipeline.
 
-Two independent loops, one per saved-analysis type:
+Three independent loops, one per saved-analysis type:
 
   run() -- Decision rows (the simple alpha-ratio tool). For every
   subscribed exposure: recompute its decision at the same alpha and window
@@ -19,7 +19,12 @@ Two independent loops, one per saved-analysis type:
   reading, save a new row if the month has moved on, email only if the
   recommended strategy or threshold status actually changed.
 
-Both are safe to run as many times as you like in a month -- neither
+  run_strategy_decision() -- StrategyDecision rows (the TAR v2 engine,
+  enginev2.md). Same shape again: recompute the saved intake against the
+  current reading, save a new row if the month has moved on, email only if
+  the recommended strategy actually changed.
+
+All three are safe to run as many times as you like in a month -- neither
 duplicates a row already saved for the current as_of, and neither re-sends
 an email for a result that was already the most recent one.
 
@@ -34,11 +39,12 @@ import logging
 
 from sqlmodel import Session, select
 
-from . import crud, economic, engine
+from . import crud, economic, engine, strategy_decision
 from .db import engine as db_engine
 from .email import send_email
 from .models import (
-    AlertSubscription, EconomicScenario, EconomicScenarioSubscription, Exposure, User,
+    AlertSubscription, EconomicScenario, EconomicScenarioSubscription, Exposure,
+    StrategyDecision, StrategyDecisionSubscription, User,
 )
 
 logger = logging.getLogger("chokepoint.alerts")
@@ -151,9 +157,64 @@ def run_economic() -> int:
     return sent
 
 
+def run_strategy_decision() -> int:
+    sent = 0
+    with Session(db_engine) as session:
+        subs = session.exec(select(StrategyDecisionSubscription)).all()
+        for sub in subs:
+            prior = session.get(StrategyDecision, sub.strategy_decision_id)
+            user = session.get(User, sub.user_id)
+            if prior is None or user is None:
+                continue
+
+            input_data = json.loads(prior.input_json)
+            prior_result = json.loads(prior.result_json)
+
+            new_result = strategy_decision.compute_decision(input_data)
+            new_reading = new_result.get("reading")
+            if new_reading is None:
+                logger.warning("no reading for corridor %s, skipping strategy decision %s",
+                                prior.corridor, prior.scenario_id)
+                continue
+            new_as_of = new_reading["as_of"]
+            prior_reading = prior_result.get("reading")
+            prior_as_of = prior_reading["as_of"] if prior_reading else None
+            if new_as_of == prior_as_of:
+                continue  # already computed for this month
+
+            changed = new_result.get("recommended") != prior_result.get("recommended")
+
+            new_row = crud.create_strategy_decision(
+                session, user, scenario_id=prior.scenario_id, corridor=prior.corridor,
+                input_data=input_data, result=new_result,
+                client_id=prior.client_id, exposure_id=prior.exposure_id)
+
+            # point the subscription at the new row, so next month compares
+            # against this one rather than the original forever
+            sub.strategy_decision_id = new_row.id
+            session.add(sub)
+            session.commit()
+
+            if changed:
+                esc = html.escape
+                ok = send_email(
+                    user.email,
+                    f"{prior.corridor}: {prior.scenario_id} recommendation changed",
+                    f"<p>Your saved strategy decision <strong>{esc(prior.scenario_id)}</strong> on "
+                    f"<strong>{esc(prior.corridor)}</strong> changed from "
+                    f"<strong>{esc(prior_result.get('recommended') or '—')}</strong> to "
+                    f"<strong>{esc(new_result.get('recommended') or '—')}</strong>.</p>"
+                    f"<p>Log in to review: /strategy-decisions/{new_row.id}</p>",
+                )
+                if ok:
+                    sent += 1
+    return sent
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     n1 = run()
     n2 = run_economic()
-    logger.info("alerts run complete, %d decision email(s), %d economic scenario email(s)",
-                n1, n2)
+    n3 = run_strategy_decision()
+    logger.info("alerts run complete, %d decision email(s), %d economic scenario email(s), "
+                "%d strategy decision email(s)", n1, n2, n3)

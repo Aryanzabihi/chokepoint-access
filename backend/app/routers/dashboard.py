@@ -31,7 +31,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent
 
 @router.get("/")
 def index(user: User | None = Depends(current_user_optional)):
-    return RedirectResponse("/clients" if user else "/login", status_code=303)
+    return RedirectResponse("/home" if user else "/login", status_code=303)
 
 
 # ------------------------------------------------------------------ auth ---
@@ -51,7 +51,7 @@ def signup(request: Request, email: str = Form(...), password: str = Form(...),
         return templates.TemplateResponse(request, "signup.html",
             {"error": "An account with that email already exists."}, status_code=422)
     user = crud.create_user(session, email, hash_password(password))
-    resp = RedirectResponse("/clients", status_code=303)
+    resp = RedirectResponse("/home", status_code=303)
     resp.set_cookie(SESSION_COOKIE, make_session_cookie(user.id),
                      httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
     return resp
@@ -69,7 +69,7 @@ def login(request: Request, email: str = Form(...), password: str = Form(...),
     if user is None or not verify_password(password, user.password_hash):
         return templates.TemplateResponse(request, "login.html",
             {"error": "Wrong email or password."}, status_code=401)
-    resp = RedirectResponse("/clients", status_code=303)
+    resp = RedirectResponse("/home", status_code=303)
     resp.set_cookie(SESSION_COOKIE, make_session_cookie(user.id),
                      httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
     return resp
@@ -80,6 +80,43 @@ def logout():
     resp = RedirectResponse("/login", status_code=303)
     resp.delete_cookie(SESSION_COOKIE)
     return resp
+
+
+# ------------------------------------------------------------------ home ---
+
+@router.get("/home", response_class=HTMLResponse)
+def home_page(request: Request, user: User = Depends(current_user),
+              session: Session = Depends(get_session)):
+    """Every exposure across every client this user owns, one row each,
+    worst corridor first. Answers "what needs my attention right now"
+    instead of requiring a click into each client to find out. No new
+    scoring formula -- urgency is read directly off the same band/regime
+    the corridor's live reading already carries, "in episode" ranked above
+    every band since an ongoing disruption outranks any alarm level."""
+    pairs = crud.list_exposures_for_user(session, user)
+    band_severity = {label: i for i, (_, label, _, _) in enumerate(engine.BANDS)}
+
+    rows = []
+    for exposure, client in pairs:
+        try:
+            reading = engine.current_reading(exposure.corridor)
+        except (FileNotFoundError, ValueError):
+            reading = None
+        latest_sd = crud.latest_strategy_decision_for_exposure(session, exposure.id)
+        sd_result = json.loads(latest_sd.result_json) if latest_sd else None
+        rows.append({"exposure": exposure, "client": client, "reading": reading,
+                     "strategy_decision": latest_sd, "sd_result": sd_result})
+
+    def _urgency(row):
+        reading = row["reading"]
+        if reading is None:
+            return (-1, "")
+        if reading.get("regime") == "in episode":
+            return (len(engine.BANDS), reading.get("as_of", ""))
+        return (band_severity.get(reading.get("band"), 0), reading.get("as_of", ""))
+
+    rows.sort(key=_urgency, reverse=True)
+    return templates.TemplateResponse(request, "home.html", {"user": user, "rows": rows})
 
 
 # --------------------------------------------------------------- clients ---

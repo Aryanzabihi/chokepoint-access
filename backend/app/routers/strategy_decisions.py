@@ -194,9 +194,20 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
     ledger_by_grade: dict[str, int] = {}
     for e in result["ledger"]:
         ledger_by_grade[e["grade"]] = ledger_by_grade.get(e["grade"], 0) + 1
+    subscribed = crud.is_subscribed_strategy_decision(session, user, row.id)
     return templates.TemplateResponse(request, "strategy_decision_detail.html",
         {"user": user, "row": row, "result": result,
-         "ledger_by_grade": sorted(ledger_by_grade.items())})
+         "ledger_by_grade": sorted(ledger_by_grade.items()), "subscribed": subscribed})
+
+
+@router.post("/strategy-decisions/{decision_id}/subscribe")
+def subscribe_page(decision_id: int, user: User = Depends(current_user),
+                    session: Session = Depends(get_session)):
+    row = crud.get_strategy_decision_owned(session, user, decision_id)
+    if row is None:
+        raise HTTPException(404, "decision not found")
+    crud.toggle_strategy_decision_subscription(session, user, row.id)
+    return RedirectResponse(f"/strategy-decisions/{row.id}", status_code=303)
 
 
 @router.get("/strategy-decisions/{decision_id}/report", response_class=HTMLResponse)

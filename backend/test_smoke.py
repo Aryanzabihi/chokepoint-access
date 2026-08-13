@@ -62,7 +62,7 @@ def test_full_walkthrough(client):
                                       "password": "correct horse battery staple"},
                      follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == "/clients"
+    assert r.headers["location"] == "/home"
     assert client.cookies.get("cx_session")
 
     # duplicate signup is rejected
@@ -559,3 +559,107 @@ def test_alerts_run_economic_against_real_db():
         assert new_scenario is not None
         new_result = json.loads(new_scenario.result_json)
         assert new_result["historical_context"]["reading"]["as_of"] != "1999-01-01"
+
+
+def test_alerts_run_strategy_decision_against_real_db():
+    """run_strategy_decision() -- mirrors test_alerts_run_economic_against_real_db
+    exactly, for the v2 engine's alert loop (closes the gap where
+    StrategyDecision had no monthly re-check at all)."""
+    import sys
+    from pathlib import Path
+
+    from sqlmodel import SQLModel
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    from app import alerts, strategy_decision as sd
+    from app.db import engine as file_engine
+    from app.models import StrategyDecision, StrategyDecisionSubscription, User
+
+    SQLModel.metadata.create_all(file_engine)
+    sample = _sample_intake()
+    stale_result = sd.compute_decision(sample)
+    # force a different as_of than whatever's actually current, so
+    # run_strategy_decision() is guaranteed to see this as "a new month"
+    stale_result["reading"]["as_of"] = "1999-01-01"
+
+    with Session(file_engine) as session:
+        user = User(email="alerts-strategy-test@example.com", password_hash="x")
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+        decision = StrategyDecision(
+            owner_user_id=user.id, scenario_id=sample["scenario_id"],
+            corridor=sample["corridor"],
+            input_json=json.dumps(sample), result_json=json.dumps(stale_result))
+        session.add(decision)
+        session.commit()
+        session.refresh(decision)
+
+        sub = StrategyDecisionSubscription(user_id=user.id, strategy_decision_id=decision.id)
+        session.add(sub)
+        session.commit()
+        session.refresh(sub)
+        sub_id, original_decision_id = sub.id, decision.id
+
+    sent = alerts.run_strategy_decision()
+    assert sent >= 0  # doesn't crash; whether it emailed depends on RESEND_API_KEY
+
+    with Session(file_engine) as session:
+        refreshed_sub = session.get(StrategyDecisionSubscription, sub_id)
+        # the subscription now points at a freshly-computed row, not the
+        # stale one -- proves run_strategy_decision() actually recomputed and
+        # re-pointed it, not just read the old data back
+        assert refreshed_sub.strategy_decision_id != original_decision_id
+        new_decision = session.get(StrategyDecision, refreshed_sub.strategy_decision_id)
+        assert new_decision is not None
+        new_result = json.loads(new_decision.result_json)
+        assert new_result["reading"]["as_of"] != "1999-01-01"
+
+
+def test_home_dashboard(client):
+    """Every exposure across every client shows up on /home, in one row
+    each -- an exposure with no strategy decision yet says so plainly
+    (build-one CTA), one with a saved decision shows its recommendation."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "home-dashboard@example.com",
+                                  "password": "correct horse battery staple"})
+
+    client.post("/clients", data={"name": "Client A"})
+    client.post("/clients", data={"name": "Client B"})
+    clients_by_name = {c["name"]: c["id"] for c in client.get("/api/v1/clients").json()}
+    client_a_id, client_b_id = clients_by_name["Client A"], clients_by_name["Client B"]
+
+    client.post(f"/clients/{client_a_id}/exposures",
+                data={"corridor": "Strait of Hormuz", "crisis_replacement_cost": "100000"})
+    client.post(f"/clients/{client_b_id}/exposures",
+                data={"corridor": "Suez Canal", "crisis_replacement_cost": "50000"})
+
+    hormuz_exp = client.get(f"/api/v1/exposures?client_id={client_a_id}").json()[0]
+    suez_exp = client.get(f"/api/v1/exposures?client_id={client_b_id}").json()[0]
+
+    # before any decision exists, both rows show the "build one" CTA
+    r = client.get("/home")
+    assert r.status_code == 200
+    assert "Client A" in r.text and "Client B" in r.text
+    assert "Strait of Hormuz" in r.text and "Suez Canal" in r.text
+    assert r.text.count("no decision yet") == 2
+
+    # build a strategy decision for the Hormuz exposure via the dashboard form
+    sample = _sample_intake()
+    form = _decision_form(sample, exposure_id=hormuz_exp["id"])
+    r = client.post("/strategy-decisions", data=form, follow_redirects=False)
+    assert r.status_code == 303, r.text
+
+    r = client.get("/home")
+    assert r.status_code == 200
+    assert r.text.count("no decision yet") == 1   # Suez still has none
+    assert "Continue" in r.text or "Partial reroute" in r.text  # the recommended strategy shows somewhere
+    assert suez_exp["corridor"] == "Suez Canal"   # sanity: the untouched exposure is the right one

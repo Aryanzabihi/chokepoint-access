@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Home — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">All clients</div>
+  <h1>Home</h1>
+  <p class="thesis">Every exposure you're watching, across every client, worst corridor
+  first. An exposure with no strategy decision yet just says so &mdash; nothing here is
+  computed until you ask for it.</p>
+</header>
+
+<section class="panel" style="margin-top:0">
+  <h2>Exposures ({{ rows|length }})</h2>
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Client</th><th>Corridor</th><th>Reading</th>
+      <th>Recommended strategy</th><th>Weakest grade</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="/clients/{{ r.client.id }}">{{ r.client.name }}</a></td>
+          <td><a href="/clients/{{ r.client.id }}/exposures/{{ r.exposure.id }}">{{ r.exposure.corridor }}</a></td>
+          {% if r.reading %}
+            <td><span class="badge {{ 'hot' if r.reading.regime == 'in episode' or r.reading.band in ('Critical transition', 'Crisis regime') else 'ok' }}">
+              {% if r.reading.regime == 'in episode' %}In episode
+              {% else %}{{ r.reading.band }}{% endif %}
+            </span></td>
+          {% else %}
+            <td><span class="hint">no reading available</span></td>
+          {% endif %}
+          {% if r.strategy_decision %}
+            <td><a href="/strategy-decisions/{{ r.strategy_decision.id }}">{{ r.sd_result.recommended or "—" }}</a></td>
+            <td>{{ r.sd_result.weakest_grade }}</td>
+          {% else %}
+            <td colspan="2"><span class="empty">no decision yet &mdash;
+              <a href="/strategy-decisions/new?exposure_id={{ r.exposure.id }}">build one</a></span></td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No exposures yet. <a href="/clients">Add a client</a> and an exposure
+  to get started.</p>
+  {% endif %}
+</section>
+{% endblock %}

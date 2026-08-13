@@ -157,3 +157,14 @@ class StrategyDecision(SQLModel, table=True):
     input_json: str
     result_json: str
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class StrategyDecisionSubscription(SQLModel, table=True):
+    """The same idea as EconomicScenarioSubscription, for StrategyDecision
+    instead of EconomicScenario. Closes the gap where StrategyDecision --
+    the newest, richest engine -- had no monthly re-check loop while the
+    other two saved-analysis types already did."""
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    strategy_decision_id: int = Field(foreign_key="strategydecision.id", index=True)
+    created_at: datetime = Field(default_factory=utcnow)

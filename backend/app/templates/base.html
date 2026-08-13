@@ -11,6 +11,7 @@
 <body>
 <div class="wrap">
 <nav class="nav">
+  <a href="/home" class="{{ 'here' if active == 'home' else '' }}">Home</a>
   <a href="/clients" class="{{ 'here' if active == 'clients' else '' }}">Portfolio</a>
   <a href="/economic-scenarios" class="{{ 'here' if active == 'economic' else '' }}">Economic scenarios</a>
   <a href="/strategy-decisions" class="{{ 'here' if active == 'strategy-decisions' else '' }}">Strategy decisions</a>

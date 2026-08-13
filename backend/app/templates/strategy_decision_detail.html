@@ -23,12 +23,23 @@
     {{ result.weakest_grade }}</div></div>
 </div>
 
+{% if result.decision_confidence == "weak" %}
+<p class="note hot" style="margin-top:var(--s4)">{{ result.decision_confidence_note }}</p>
+{% endif %}
+
 <div class="row" style="margin:var(--s4) 0">
   <a class="btn ghost" href="/strategy-decisions/{{ row.id }}/report" target="_blank">Full report</a>
+  <form method="post" action="/strategy-decisions/{{ row.id }}/subscribe" style="margin:0">
+    <button class="btn {{ 'ghost' if subscribed else '' }}" type="submit">
+      {{ "Turn off monthly re-check" if subscribed else "Re-check this monthly" }}</button>
+  </form>
 </div>
 <p class="hint" style="margin:0 0 var(--s4)">The full report explains the decision and break-even
 in plain sentences, with cost-of-waiting and flip-point detail. This page is the structured
-summary.</p>
+summary.
+{% if subscribed %}You'll get an email if next month's reading changes the recommended strategy.
+{% else %}Monthly re-check is off. Turn it on to get an email if this decision's recommendation
+changes as new readings come in.{% endif %}</p>
 
 <section class="panel" style="margin-top:0">
   <h2>Strategy comparison</h2>
@@ -84,6 +95,28 @@ summary.</p>
 </section>
 {% endif %}
 
+{% set pw = result.procurement_window %}
+<section class="panel">
+  <h2>Procurement window</h2>
+  {% if pw.procurement_window_days is not none %}
+    {% if pw.procurement_window_days >= 0 %}
+    <p>{{ pw.procurement_window_days }} day(s) until a normal-schedule purchase decision would
+    need to be made ({{ pw.supply_window_days }} day(s) until the material is required, minus
+    the contract transit time).</p>
+    {% else %}
+    <p class="hint">Already {{ -pw.procurement_window_days }} day(s) past the point a
+    normal-schedule purchase would need to have been made &mdash; any action now is expedited,
+    not routine.</p>
+    {% endif %}
+  {% elif pw.supply_window_days is not none %}
+    <p>{{ pw.supply_window_days }} day(s) until the material is required. Supply
+    contract_transit_time_days to see how much of that is still a normal-schedule decision
+    window.</p>
+  {% else %}
+    <p class="hint">Not computable &mdash; ship date not supplied.</p>
+  {% endif %}
+</section>
+
 <section class="panel">
   <h2>Historical base rate</h2>
   <p class="m">{{ result.base_rate.episodes_with_disruption }} of
@@ -98,6 +131,17 @@ summary.</p>
   <p class="hint">Every number that fed this result, graded by how it was known &mdash; see the
   full report for the complete field-by-field ledger.</p>
 </section>
+
+{% if result.reassess_triggers %}
+<section class="panel">
+  <h2>Reassess if</h2>
+  <ul>
+    {% for x in result.reassess_triggers %}<li>{{ x }}</li>{% endfor %}
+  </ul>
+  <p class="hint">Named conditions worth watching for, from what's already computed above &mdash;
+  not a prediction of when any of them will happen.</p>
+</section>
+{% endif %}
 
 {% if result.what_would_sharpen %}
 <section class="panel">
