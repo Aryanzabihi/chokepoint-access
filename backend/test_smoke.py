@@ -387,6 +387,111 @@ def test_economic_scenario_detail_survives_pre_v2_data(client):
     assert "Partial reroute" in r.text
 
 
+_PCT_INTAKE_FIELDS = {"wacc_pct", "carrying_cost_pct_pa", "gross_margin_pct"}
+
+
+def _decision_form(sample: dict, *, exposure_id: int | None = None) -> dict:
+    """Converts an intake.py-shaped document (what decision_engine.py's own
+    _sample_intake() and the JSON API's template both return) into the flat
+    field names the "new decision" dashboard form posts -- the inverse of
+    app/routers/strategy_decisions.py's _form_to_intake()."""
+    fields = {"scenario_id": sample["scenario_id"], "corridor": sample["corridor"],
+              "incoterm": sample["incoterm"], "tier": 3}
+    for name, v in sample.get("fields", {}).items():
+        if v is None:
+            continue
+        fields[f"field_{name}"] = v * 100 if name in _PCT_INTAKE_FIELDS else v
+    strategies = sample.get("strategies", [])
+    baseline_idx = next((i for i, s in enumerate(strategies) if s.get("is_baseline")), 0)
+    fields["baseline_strategy"] = baseline_idx
+    for i, s in enumerate(strategies):
+        fields[f"strategy_{i}_name"] = s["name"]
+        fields[f"strategy_{i}_direct_cost"] = s["direct_cost"]
+        effects = s.get("effects", {}) or {}
+        fields[f"strategy_{i}_delay_days_delta"] = effects.get("delay_days_delta", 0)
+        fields[f"strategy_{i}_capacity_restored"] = (effects.get("capacity_restored") or 0) * 100
+        wrpm = effects.get("war_risk_premium_multiplier")
+        if wrpm is not None:
+            fields[f"strategy_{i}_war_risk_premium_multiplier"] = wrpm * 100
+        fields[f"strategy_{i}_days_of_cover_delta"] = effects.get("days_of_cover_delta", 0)
+        fields[f"strategy_{i}_notes"] = s.get("notes", "")
+    if exposure_id is not None:
+        fields["exposure_id"] = exposure_id
+    return {k: str(v) for k, v in fields.items() if v is not None}
+
+
+def test_strategy_decision_walkthrough(client):
+    """Mirrors test_economic_scenario_walkthrough for the v2 engine: JSON
+    template -> compute -> dashboard form -> detail -> report, plus
+    validation and cross-user isolation."""
+    client.post("/signup", data={"email": "hormuz-analyst@example.com",
+                                  "password": "correct horse battery staple"})
+
+    # the template is the same blank shape intake.py's own template() writes
+    r = client.get("/api/v1/strategy-decisions/template")
+    assert r.status_code == 200
+    blank = r.json()
+    assert {"cargo_value", "wacc_pct", "war_risk_premium_quote"} <= set(blank["fields"])
+
+    # a blank template has no strategies -- rejected before it's ever saved,
+    # not a 500 (build_decision() raises ValueError, caught as 422)
+    blank["corridor"] = "Strait of Hormuz"
+    r = client.post("/api/v1/strategy-decisions", json=blank)
+    assert r.status_code == 422
+
+    # a real intake reproduces decision_engine.py's own selftest scenario
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+    sample = _sample_intake()
+
+    r = client.post("/api/v1/strategy-decisions", json=sample)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    result = body["result"]
+    assert result["corridor"] == "Strait of Hormuz"
+    assert result["recommended"] in ("Continue", "Partial reroute")
+    decision_id = body["id"]
+
+    # an unknown corridor is rejected before build_decision() ever runs
+    bad = dict(sample, corridor="Not A Real Strait")
+    r = client.post("/api/v1/strategy-decisions", json=bad)
+    assert r.status_code == 422
+
+    # the dashboard form flow: labeled/tiered fields, compute, land on detail
+    r = client.get("/strategy-decisions/new")
+    assert r.status_code == 200
+    assert 'name="field_cargo_value"' in r.text and 'name="strategy_0_name"' in r.text
+
+    form = _decision_form(sample)
+    r = client.post("/strategy-decisions", data=form, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    detail_url = r.headers["location"]
+
+    r = client.get(detail_url)
+    assert r.status_code == 200
+    assert result["recommended"] in r.text
+
+    r = client.get(detail_url + "/report")
+    assert r.status_code == 200
+    assert "Decision engine v2" in r.text
+
+    # an unknown corridor via the form is rejected with a helpful error, not a 500
+    bad_fields = dict(form)
+    bad_fields["corridor"] = "Not A Real Strait"
+    r = client.post("/strategy-decisions", data=bad_fields)
+    assert r.status_code == 422
+    assert "ValueError" in r.text or "error" in r.text.lower()
+
+    # cross-user isolation holds for strategy decisions too
+    other = TestClient(app)
+    other.post("/signup", data={"email": "other-hormuz-analyst@example.com",
+                                 "password": "a different password"})
+    r = other.get(f"/api/v1/strategy-decisions/{decision_id}")
+    assert r.status_code == 404
+
+
 def test_alerts_job_runs_without_error(client):
     """alerts.run() opens its own session against app.db.engine, which in
     this process points at DATABASE_URL (the sqlite file), not the

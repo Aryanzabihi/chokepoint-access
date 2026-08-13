@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Strategy decisions — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">TAR Decision Engine v2</div>
+  <h1>Strategy decisions</h1>
+  <p class="thesis">Per-chokepoint evidence, not a generic band: enter what your own procurement,
+  treasury and logistics teams already know, and compare named strategies by expected cost &mdash;
+  graded line by line so you can see exactly which numbers are yours, which are derived, and
+  which are missing.</p>
+</header>
+
+<div class="row" style="margin-bottom:var(--s4)">
+  <a class="btn" href="/strategy-decisions/new">New decision</a>
+</div>
+
+<section class="panel" style="margin-top:0">
+  <h2>Decisions ({{ decisions|length }})</h2>
+  {% if decisions %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Scenario</th><th>Corridor</th><th>Recommended strategy</th>
+      <th class="m">Computed</th></tr></thead>
+      <tbody>
+      {% for d in decisions %}
+        <tr>
+          <td><a href="/strategy-decisions/{{ d.id }}">{{ d.scenario_id }}</a></td>
+          <td>{{ d.corridor }}</td>
+          <td>{{ d.recommended or "—" }}</td>
+          <td class="m">{{ d.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No decisions yet. <a href="/strategy-decisions/new">Build one</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}

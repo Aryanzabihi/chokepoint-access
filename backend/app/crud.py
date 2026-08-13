@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 
 from .models import (
     AlertSubscription, ApiKey, AuditEvent, Client, Decision, EconomicScenario,
-    EconomicScenarioSubscription, Exposure, User,
+    EconomicScenarioSubscription, Exposure, StrategyDecision, User,
 )
 
 
@@ -165,6 +165,45 @@ def latest_economic_scenario_for_exposure(session: Session,
     return session.exec(
         select(EconomicScenario).where(EconomicScenario.exposure_id == exposure_id)
         .order_by(EconomicScenario.created_at.desc())).first()
+
+
+# -------------------------------------------------------- strategy decisions ---
+
+def list_strategy_decisions(session: Session, user: User) -> list[StrategyDecision]:
+    return list(session.exec(
+        select(StrategyDecision).where(StrategyDecision.owner_user_id == user.id)
+        .order_by(StrategyDecision.created_at.desc())))
+
+
+def get_strategy_decision_owned(session: Session, user: User,
+                                 decision_id: int) -> StrategyDecision | None:
+    d = session.get(StrategyDecision, decision_id)
+    if d is None or d.owner_user_id != user.id:
+        return None
+    return d
+
+
+def create_strategy_decision(session: Session, user: User, *, scenario_id: str, corridor: str,
+                              input_data: dict, result: dict,
+                              client_id: int | None = None,
+                              exposure_id: int | None = None) -> StrategyDecision:
+    row = StrategyDecision(owner_user_id=user.id, client_id=client_id, exposure_id=exposure_id,
+                            scenario_id=scenario_id, corridor=corridor,
+                            input_json=json.dumps(input_data), result_json=json.dumps(result))
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    audit(session, user.id, "strategy_decision", row.id, "computed",
+          f"{corridor} {scenario_id} -> {result.get('recommended')}")
+    session.commit()
+    return row
+
+
+def latest_strategy_decision_for_exposure(session: Session,
+                                           exposure_id: int) -> StrategyDecision | None:
+    return session.exec(
+        select(StrategyDecision).where(StrategyDecision.exposure_id == exposure_id)
+        .order_by(StrategyDecision.created_at.desc())).first()
 
 
 # -------------------------------------------------------------- api keys ---

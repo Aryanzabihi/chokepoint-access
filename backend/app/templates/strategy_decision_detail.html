@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ row.scenario_id }} — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/strategy-decisions" style="color:inherit">Strategy decisions</a>
+  &middot; {{ row.corridor }} &middot; {{ result.incoterm }}</div>
+  <h1>{{ row.scenario_id }}</h1>
+</header>
+
+{% if result.client_exposure_note %}<p class="note">{{ result.client_exposure_note }}</p>{% endif %}
+
+<div class="status">
+  <div class="cell"><div class="k">Recommended strategy</div>
+    <div class="v big">{{ result.recommended or "—" }}</div></div>
+  <div class="cell"><div class="k">Avoidable exposure</div>
+    <div class="v">{{ "{:,.0f}".format(result.exposure.avoidable) }}</div></div>
+  <div class="cell"><div class="k">Probability used</div>
+    <div class="v">{{ "{:.0%}".format(result.probability_used) }}
+    {% if result.probability_is_published_fallback %}<span class="hint">(published base rate, not yours)</span>
+    {% else %}<span class="hint">(your estimate)</span>{% endif %}</div></div>
+  <div class="cell"><div class="k">Weakest grade feeding this</div>
+    <div class="v {{ 'ok' if result.weakest_grade in ('CLIENT_QUOTED', 'CLIENT_SYSTEM', 'DERIVED') else 'hot' }}">
+    {{ result.weakest_grade }}</div></div>
+</div>
+
+<div class="row" style="margin:var(--s4) 0">
+  <a class="btn ghost" href="/strategy-decisions/{{ row.id }}/report" target="_blank">Full report</a>
+</div>
+<p class="hint" style="margin:0 0 var(--s4)">The full report explains the decision and break-even
+in plain sentences, with cost-of-waiting and flip-point detail. This page is the structured
+summary.</p>
+
+<section class="panel" style="margin-top:0">
+  <h2>Strategy comparison</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Strategy</th><th class="m">Direct cost</th><th class="m">Conditional loss</th>
+    <th class="m">Expected cost</th><th>Grade</th></tr></thead>
+    <tbody>
+    {% for r in result.strategies %}
+      <tr{{ ' style="font-weight:600"' | safe if r.name == result.recommended else "" }}>
+        <td>{{ r.name }}{% if r.is_baseline %} <span class="hint">(baseline)</span>{% endif %}</td>
+        <td class="m">{{ "{:,.0f}".format(r.direct_cost) }}</td>
+        <td class="m">{{ "{:,.0f}".format(r.conditional_loss) }}</td>
+        <td class="m">{{ "{:,.0f}".format(r.expected_cost) }}</td>
+        <td>{{ r.grade }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Chokepoint: {{ row.corridor }}</h2>
+  <p>{{ result.chokepoint_profile.geography }}</p>
+  <p><b>Width:</b> {{ result.chokepoint_profile.width }} &middot;
+  <b>Traffic:</b> {{ result.chokepoint_profile.traffic_character }}</p>
+  <p><b>Alternate route:</b> {{ result.chokepoint_profile.alternate_route or "none" }}</p>
+  <p class="hint">Geography/traffic figures: {{ result.chokepoint_profile.fact_grade }} &mdash;
+  general/public knowledge, not independently cited. Evidence grade for the response character
+  below: {{ result.chokepoint_profile.evidence_grade }}.</p>
+  <p>{{ result.chokepoint_profile.response_character }}</p>
+  {% if result.chokepoint_profile.tested_incidents %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Date</th><th>Incident</th><th class="m">Response</th><th>Source</th></tr></thead>
+      <tbody>
+      {% for i in result.chokepoint_profile.tested_incidents %}
+        <tr><td class="m">{{ i.date }}</td><td>{{ i.label }}</td>
+        <td class="m">{{ "%.2fx"|format(i.response_ratio) if i.response_ratio is not none else "—" }}</td>
+        <td>{{ i.source }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+{% if result.reading %}
+<section class="panel">
+  <h2>Current reading</h2>
+  <p>TAR {{ result.reading.tar }}{% if result.reading.band %}, {{ result.reading.band }}{% endif %}</p>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Historical base rate</h2>
+  <p class="m">{{ result.base_rate.episodes_with_disruption }} of
+  {{ result.base_rate.alarm_episodes }} alarm episodes since 1985 preceded a real disruption
+  ({{ "{:.0%}".format(result.base_rate.hit_rate) }}, 95% CI
+  {{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[0]) }}&ndash;{{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[1]) }}).</p>
+</section>
+
+<section class="panel">
+  <h2>Ledger</h2>
+  <p class="m">{% for grade, n in ledger_by_grade %}{{ n }} {{ grade }}{{ ", " if not loop.last else "" }}{% endfor %}</p>
+  <p class="hint">Every number that fed this result, graded by how it was known &mdash; see the
+  full report for the complete field-by-field ledger.</p>
+</section>
+
+{% if result.what_would_sharpen %}
+<section class="panel">
+  <h2>What would sharpen this</h2>
+  <ol class="explain">
+    {% for x in result.what_would_sharpen %}<li>{{ x }}</li>{% endfor %}
+  </ol>
+</section>
+{% endif %}
+
+<p class="note">Model {{ result.model_version }}. Computed {{ result.timestamp }}.</p>
+{% endblock %}

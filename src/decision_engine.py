@@ -592,7 +592,7 @@ def what_would_sharpen(missing: list[intake.FieldSpec]) -> list[str]:
 # --------------------------------------------------------------------------
 
 def build_decision(intake_data: dict, *, as_of: str | None = None,
-                   gpr_source: Path | None = None,
+                   gpr_source: Path | None = None, reading: dict | None = None,
                    warrisk_path: Path | None = None, jwc_path: Path | None = None) -> dict:
     problems = intake.validate_intake(intake_data)
     if problems:
@@ -615,8 +615,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
                  source=chokepoint.evidence_source,
                  n=len(chokepoint.tested_incidents) or None)
 
-    reading = None
-    if gpr_source is not None and as_of:
+    if reading is None and gpr_source is not None and as_of:
         try:
             reading = point_in_time(gpr_source, as_of, corridor)
         except SystemExit:
@@ -1085,6 +1084,17 @@ def selftest() -> int:
     result_no_register = build_decision(data)
     assert result_no_register["cost_of_waiting"] is None
     assert "cost_of_waiting" in result_no_register   # present as a key, value None — see below
+
+    # --- reading= bypasses point_in_time()/gpr_source entirely (the path a
+    # deployed backend uses, since it has no access to the gitignored GPR
+    # vintage — see economic_engine.compute()'s identical historical_reading=
+    # precedent). A caller-supplied reading populates the ledger exactly
+    # like a gpr_source-derived one would, and gpr_source is never touched.
+    fake_reading = {"tar": 0.19, "grade": "PUBLISHED"}
+    result_with_reading = build_decision(data, reading=fake_reading)
+    assert result_with_reading["reading"] == fake_reading
+    reading_rows = [e for e in result_with_reading["ledger"] if e["field"] == "reading_tar"]
+    assert reading_rows and reading_rows[0]["grade"] == "PUBLISHED"
 
     # --- #9: ledger completeness — every strategy's conditional loss and
     # every genuinely missing field appears, each with a valid grade.

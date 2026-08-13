@@ -134,3 +134,26 @@ class EconomicScenarioSubscription(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id", index=True)
     economic_scenario_id: int = Field(foreign_key="economicscenario.id", index=True)
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class StrategyDecision(SQLModel, table=True):
+    """A saved run of src/decision_engine.py (the TAR v2 engine) — a third
+    lens alongside Decision (the global band/alpha verdict) and
+    EconomicScenario (the v1 cost engine). Named for the engine's own
+    vocabulary (Strategy, recommended, break_even) to avoid colliding with
+    either. Scoped directly to the owning user, same as EconomicScenario;
+    client_id/exposure_id are optional links for organising it once one exists.
+
+    input_json is the intake.py shape (see intake.template()); result_json is
+    build_decision()'s full output, so a report generated later reproduces
+    from stored inputs alone (same MVP criterion #14 EconomicScenario cites).
+    """
+    id: int | None = Field(default=None, primary_key=True)
+    owner_user_id: int = Field(foreign_key="user.id", index=True)
+    client_id: int | None = Field(default=None, foreign_key="client.id", index=True)
+    exposure_id: int | None = Field(default=None, foreign_key="exposure.id", index=True)
+    scenario_id: str
+    corridor: str
+    input_json: str
+    result_json: str
+    created_at: datetime = Field(default_factory=utcnow)

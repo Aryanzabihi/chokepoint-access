@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}New strategy decision — Chokepoint Access{% endblock %}
+{% block content %}
+{% macro field_input(field, value) %}
+  <div class="field" style="width:210px">
+    <label for="field_{{ field.name }}">{{ field.name.replace('_', ' ')|title }}</label>
+    {% if field.unit in ('fraction_pa', 'fraction') %}
+      <input type="number" id="field_{{ field.name }}" name="field_{{ field.name }}" step="0.01"
+             value="{{ (value * 100)|round(2) if value is not none else '' }}">
+      <p class="hint">% &mdash; {{ field.system_of_record }}</p>
+    {% elif field.unit == 'text' %}
+      <input type="text" id="field_{{ field.name }}" name="field_{{ field.name }}"
+             value="{{ value if value is not none else '' }}">
+      <p class="hint">{{ field.system_of_record }}</p>
+    {% elif field.unit == 'date_iso' %}
+      <input type="date" id="field_{{ field.name }}" name="field_{{ field.name }}"
+             value="{{ value if value is not none else '' }}">
+      <p class="hint">{{ field.system_of_record }}</p>
+    {% else %}
+      <input type="number" id="field_{{ field.name }}" name="field_{{ field.name }}" step="any"
+             value="{{ value if value is not none else '' }}">
+      <p class="hint">{{ field.unit }} &mdash; {{ field.system_of_record }}</p>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+<header class="masthead">
+  <div class="eyebrow"><a href="/strategy-decisions" style="color:inherit">Strategy decisions</a>
+  &middot; new</div>
+  <h1>Build a decision</h1>
+  <p class="thesis">Answer what your own teams already hold &mdash; a field left blank is reported
+  as missing, with who owns it, never silently defaulted. Fields above your tier are optional:
+  fill in as much as you have. Probability is never estimated for you unless you leave it blank,
+  in which case the published historical base rate is used as a stated fallback, not a guess.</p>
+</header>
+
+{% if error %}<p class="note hot"><strong>Could not compute this decision.</strong> {{ error }}</p>{% endif %}
+
+{% if linked_exposure %}
+<p class="hint">This decision will be linked to your <strong>{{ linked_exposure.corridor }}</strong>
+exposure &mdash; it'll show up on that client's portfolio page.</p>
+{% endif %}
+
+<form method="post" action="/strategy-decisions">
+  {% if exposure_id %}<input type="hidden" name="exposure_id" value="{{ exposure_id }}">{% endif %}
+
+  <section class="panel">
+    <h2>Basics</h2>
+    <div class="row">
+      <div class="field" style="min-width:200px;flex:1">
+        <label for="scenario_id">Scenario name</label>
+        <input type="text" id="scenario_id" name="scenario_id" value="{{ t.scenario_id }}" required>
+      </div>
+      <div class="field" style="min-width:220px;flex:1">
+        <label for="corridor">Chokepoint</label>
+        <select id="corridor" name="corridor" required>
+          <option value="" {{ "selected" if not t.corridor else "" }} disabled>Choose a corridor&hellip;</option>
+          {% for c in corridors %}
+          <option value="{{ c }}" {{ "selected" if c == t.corridor else "" }}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field" style="width:140px">
+        <label for="incoterm">Incoterm</label>
+        <select id="incoterm" name="incoterm">
+          <option value="">&mdash;</option>
+          {% for i in incoterms %}
+          <option value="{{ i }}" {{ "selected" if i == t.incoterm else "" }}>{{ i }}</option>
+          {% endfor %}
+        </select>
+        <p class="hint">decides which fields you're asked for</p>
+      </div>
+      <div class="field" style="width:110px">
+        <label for="tier">Tier</label>
+        <select id="tier" name="tier">
+          <option value="1" selected>1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+        <p class="hint">how much you can supply</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Probability</h2>
+    <div class="row">
+      <div class="field" style="width:200px">
+        <label for="client_probability_estimate">Your probability estimate</label>
+        <input type="number" id="client_probability_estimate" name="client_probability_estimate"
+               min="0" max="100" step="0.1" value="">
+        <p class="hint">% &mdash; leave blank to use the published historical base rate instead</p>
+      </div>
+      <div class="field" style="width:160px">
+        <label for="probability_range_low">Range, low end</label>
+        <input type="number" id="probability_range_low" name="probability_range_low"
+               min="0" max="100" step="0.1" value="">
+        <p class="hint">% &mdash; optional, for a regret check</p>
+      </div>
+      <div class="field" style="width:160px">
+        <label for="probability_range_high">Range, high end</label>
+        <input type="number" id="probability_range_high" name="probability_range_high"
+               min="0" max="100" step="0.1" value="">
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Tier 1 &mdash; procurement &amp; logistics</h2>
+    <p class="hint" style="margin-top:0">What a procurement or logistics team already holds for
+    this shipment.</p>
+    <div class="row">
+      {% for field in fields_by_tier[1] %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Tier 2 &mdash; treasury, controlling &amp; legal</h2>
+    <p class="hint" style="margin-top:0">Board-approved rates and contract terms. Optional if you
+    only hold Tier 1 &mdash; leave blank and it's reported as missing, not guessed.</p>
+    <div class="row">
+      {% for field in fields_by_tier[2] %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Tier 3 &mdash; live quotes</h2>
+    <p class="hint" style="margin-top:0">A carrier, broker or underwriter quote in hand right now.
+    The most valuable tier when you have it, and the least often available.</p>
+    <div class="row">
+      {% for field in fields_by_tier[3] %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Strategies</h2>
+    <p class="hint" style="margin-top:0">What each option costs directly, and how it changes your
+    exposure. Pick one as the baseline (usually "do nothing differently") &mdash; the others are
+    compared against it. Leave a row's name blank to skip it.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Baseline</th><th>Name</th><th class="m">Direct cost</th>
+        <th class="m">Delay days, change</th><th class="m">Capacity restored</th>
+        <th class="m">War-risk premium &times;</th><th class="m">Days of cover, change</th>
+        <th>Notes</th></tr></thead>
+        <tbody>
+        {% for row in t.strategies %}
+          <tr>
+            <td><input type="radio" name="baseline_strategy" value="{{ loop.index0 }}"
+                {{ "checked" if row.is_baseline else "" }}></td>
+            <td><input type="text" name="strategy_{{ loop.index0 }}_name" style="width:150px"
+                value="{{ row.name }}"></td>
+            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_direct_cost"
+                step="1000" style="width:120px" value="{{ row.direct_cost }}"></td>
+            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_delay_days_delta"
+                step="0.5" style="width:90px" value="{{ row.effects.delay_days_delta }}"></td>
+            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_capacity_restored"
+                min="0" max="100" step="1" style="width:80px"
+                value="{{ (row.effects.capacity_restored * 100)|round(0) if row.effects.capacity_restored else 0 }}"> %</td>
+            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_war_risk_premium_multiplier"
+                min="0" max="100" step="1" style="width:80px"
+                value="{{ (row.effects.war_risk_premium_multiplier * 100)|round(0) if row.effects.war_risk_premium_multiplier is not none else '' }}"> %</td>
+            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_days_of_cover_delta"
+                step="0.5" style="width:90px" value="{{ row.effects.days_of_cover_delta }}"></td>
+            <td><input type="text" name="strategy_{{ loop.index0 }}_notes" style="width:140px"
+                value="{{ row.notes }}"></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Capacity restored and war-risk premium &times; are fractions of the baseline
+    (e.g. 40% capacity restored, 25% of the baseline war-risk premium). Leave war-risk premium
+    &times; blank to leave the quote as-is.</p>
+  </section>
+
+  <div class="row" style="margin-top:var(--s5)">
+    <button class="btn" type="submit">Compute</button>
+  </div>
+</form>
+{% endblock %}
