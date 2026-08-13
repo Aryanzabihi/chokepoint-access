@@ -30,6 +30,7 @@ attestation*.html
 # ---- keep: these ARE the asset ----
 !/src/record.jsonl
 !/src/outcomes.csv
+!/src/warrisk.csv
 !/src/warrisk_jwc.csv
 !/src/jwc_snapshots.csv
 !/src/tar_reference.json

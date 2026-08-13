@@ -255,7 +255,7 @@ def metrics(rows: list[dict]) -> tuple[list[str], list[str]]:
         mult = peak / base
         lines.append(f"    observations {len(post)} post-onset, baseline {base:g} "
                      f"(median of pre-onset window)")
-        lines.append(f"    peak {peak:g} at day {day} → {mult:.1f}x baseline")
+        lines.append(f"    peak {peak:g} at day {day} -> {mult:.1f}x baseline")
         lines.append(f"    published: {ep.multiple:.0f}x over {ep.days} days")
 
         dm = abs(mult - ep.multiple) / ep.multiple
