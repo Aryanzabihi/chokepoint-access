@@ -56,7 +56,7 @@ from economic_engine import (  # noqa: E402
     TransportInputs, InsuranceInputs,
     ALARM_EPISODES, EPISODES_WITH_DISRUPTION, EPISODE_HIT_RATE_CI,
 )
-from tar_ingest import CORRIDORS, POST_ONSET_MONTHS, regime  # noqa: E402
+from tar_ingest import CORRIDORS, POST_ONSET_MONTHS, regime, ONSETS, BENCHMARK_START  # noqa: E402
 from services import point_in_time  # noqa: E402
 
 MODEL_VERSION = "decision-engine-2.0"
@@ -276,16 +276,44 @@ def break_even_probability(strategy: Strategy, baseline: Strategy,
     return BreakEvenResult(strategy.name, baseline.name, numer / denom, None)
 
 
-def base_rate_context() -> dict:
+def base_rate_context(corridor: str | None = None) -> dict:
     """Wraps economic_engine's own published constants — reused, not
     duplicated, since economic_engine.py already exposes them as named
-    module-level constants."""
-    return {
+    module-level constants. These three numbers are GLOBAL, pooled across
+    every corridor, and stay that way here (main text Section 5.6 tested a
+    corridor-specific version of this and got a pooled AUC of 0.466 against
+    real transit episodes -- worse than chance; there is no signal to
+    threshold per corridor).
+
+    What Section 5.6 recommends instead is a single global threshold read
+    against corridor-specific BASE RATES, not a corridor-specific
+    threshold. When corridor is supplied, this adds exactly that: a raw
+    historical onset COUNT for this corridor from tar_ingest.ONSETS (main
+    text Table 1) -- a frequency fact, never a recalibrated probability.
+    tar_ingest.ONSETS is reused rather than re-entered so this can never
+    drift from the same data regime() already uses live."""
+    result = {
         "alarm_episodes": ALARM_EPISODES,
         "episodes_with_disruption": EPISODES_WITH_DISRUPTION,
         "hit_rate": round(EPISODES_WITH_DISRUPTION / ALARM_EPISODES, 3),
         "hit_rate_ci_95": EPISODE_HIT_RATE_CI,
     }
+    if corridor is not None:
+        onsets = ONSETS.get(corridor, [])
+        n = len(onsets)
+        result["corridor_onsets"] = n
+        result["corridor_onset_dates"] = onsets
+        result["corridor_onset_grade"] = "EPISODE_ANALOGUE" if n else "STRUCTURAL"
+        result["corridor_note"] = (
+            f"{corridor} has recorded {n} of the sample's 8 headline onsets "
+            f"since {BENCHMARK_START} — a historical frequency, not a "
+            f"recalibrated probability."
+            if n else
+            f"{corridor} has recorded no headline onset in the historical "
+            f"sample ({BENCHMARK_START}–2026). Treat this as a coverage-era "
+            f"fact, not a claim of immunity."
+        )
+    return result
 
 
 def inverse_mode_sentence(recommended: BreakEvenResult, base_rate: dict) -> str:
@@ -636,7 +664,11 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
                      n=premium_analogue.n)
 
     probability = intake_data.get("client_probability_estimate")
-    base_rate = base_rate_context()
+    base_rate = base_rate_context(corridor)
+    ledger.record("corridor_onset_history", base_rate["corridor_onsets"], unit="count",
+                 grade=base_rate["corridor_onset_grade"],
+                 source="tar_ingest.ONSETS (main text Table 1)",
+                 n=base_rate["corridor_onsets"] or None)
     ranking_probability = probability if probability is not None else base_rate["hit_rate"]
 
     strategy_rows = []
@@ -811,8 +843,23 @@ def decision_brief_html(decision: dict, path: Path) -> None:
         if be and be.get("p_star") is not None else "not solvable — see WHAT FLIPS IT")
 
     reading = decision.get("reading")
-    reading_line = (f"TAR {reading['tar']}, {reading.get('band', '')}"
-                    if reading else "no current reading supplied")
+    if reading:
+        reading_line = f"TAR {reading['tar']}, {reading.get('band', '')}"
+        if reading.get("horizon"):
+            # The band -- and the horizon estimate that comes with it -- is a
+            # global reading, identical at every corridor by construction
+            # (tar_ingest.py's own selftest hard-asserts this). Pairing it
+            # with the corridor's own onset history says plainly why the
+            # timing estimate can't be corridor-specific, right where a
+            # reader would otherwise wonder why every corridor shows the
+            # same window.
+            reading_line += (f" ({reading['horizon']}). Band is a global reading — "
+                             f"it does not indicate which theatre is moving, and the "
+                             f"same horizon estimate applies at every corridor.")
+        if br.get("corridor_note"):
+            reading_line += " " + br["corridor_note"]
+    else:
+        reading_line = "no current reading supplied"
 
     cp = decision["chokepoint_profile"]
     incidents = cp["tested_incidents"]
@@ -1211,6 +1258,35 @@ def selftest() -> int:
     # genuinely the weakest thing in the ledger — correctly surfaced, not
     # masked by an unrelated ABSENT field.
     assert result_adriatic["weakest_grade"] == "STRUCTURAL", result_adriatic["weakest_grade"]
+
+    # --- corridor-specific base rates (Section 5.6: "a single global
+    # threshold applied with corridor-specific base rates, not a
+    # corridor-specific threshold"). A raw historical onset COUNT from
+    # tar_ingest.ONSETS, never a recalibrated probability -- the global
+    # alarm_episodes/hit_rate stay untouched by corridor.
+    assert base_rate_context()["alarm_episodes"] == ALARM_EPISODES  # no corridor: unchanged
+    assert "corridor_onsets" not in base_rate_context()
+
+    br_hormuz = base_rate_context("Strait of Hormuz")
+    assert br_hormuz["alarm_episodes"] == ALARM_EPISODES  # global figure untouched
+    assert br_hormuz["corridor_onsets"] == 4, br_hormuz["corridor_onsets"]
+    assert br_hormuz["corridor_onset_grade"] == "EPISODE_ANALOGUE"
+    onset_rows = [e for e in result_no_register["ledger"] if e["field"] == "corridor_onset_history"]
+    assert onset_rows and onset_rows[0]["grade"] == "EPISODE_ANALOGUE" and onset_rows[0]["value"] == 4
+
+    # Suez has zero recorded onsets in tar_ingest.ONSETS -- STRUCTURAL here
+    # -- even though chokepoint_profiles.py grades Suez's media-response
+    # evidence EPISODE_ANALOGUE. The two facts answer different questions
+    # (has a real onset happened here vs. does coverage respond to one)
+    # and are allowed to disagree; Adriatic disagrees the other way (2
+    # onsets, EPISODE_ANALOGUE here, but STRUCTURAL for chokepoint response
+    # since its onsets predate GDELT coverage).
+    suez_data = json.loads(json.dumps(data))
+    suez_data["corridor"] = "Suez Canal"
+    result_suez = build_decision(suez_data)
+    assert result_suez["chokepoint_profile"]["evidence_grade"] == "EPISODE_ANALOGUE"
+    suez_onset_rows = [e for e in result_suez["ledger"] if e["field"] == "corridor_onset_history"]
+    assert suez_onset_rows and suez_onset_rows[0]["grade"] == "STRUCTURAL" and suez_onset_rows[0]["value"] == 0
 
     print("all checks passed")
     print(f"  conditional loss (Continue)        {cl_continue.total:,.0f}")
