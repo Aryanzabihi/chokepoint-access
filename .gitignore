@@ -59,6 +59,7 @@ venv/
 #      for negation patterns to apply.) ----
 !/validation/data/webngrams_5corridor_smoketest.csv
 !/validation/data/webngrams_blacksea_event2.csv
+!/validation/data/webngrams_suez2_taiwan2.csv
 
 # ---- backend (Phase 5): secrets never committed ----
 .env

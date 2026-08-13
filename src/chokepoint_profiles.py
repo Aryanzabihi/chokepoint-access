@@ -99,10 +99,13 @@ class ChokepointProfile:
 # re-derived -- same convention economic_engine.py already uses for
 # duplicating services.py's published figures:
 #   validation/report/doc_api_hormuz_babelmandeb_recall.txt  (Hormuz, Bab-el-Mandeb)
-#   validation/report/webngrams_5corridor_smoketest.txt      (Suez, Taiwan Strait,
-#                                                              Black Sea event 1,
-#                                                              Turkish Straits)
+#   validation/report/webngrams_5corridor_smoketest.txt      (Suez event 1, Taiwan
+#                                                              Strait event 1, Black
+#                                                              Sea event 1, Turkish
+#                                                              Straits)
 #   validation/data/webngrams_blacksea_event2.csv             (Black Sea event 2)
+#   validation/report/webngrams_suez2_taiwan2.txt              (Suez event 2, Taiwan
+#                                                              Strait event 2)
 # --------------------------------------------------------------------------
 
 PROFILES: dict[str, ChokepointProfile] = {
@@ -240,11 +243,12 @@ PROFILES: dict[str, ChokepointProfile] = {
         evidence_grade="EPISODE_ANALOGUE",
         tested_incidents=[
             TestedIncident("2021-03-23", "Ever Given grounding", 108.2, 1518.6, 14.04, "webngrams via BigQuery"),
+            TestedIncident("2023-12-18", "Red Sea diversion wave", 173.4, 716.8, 4.13, "webngrams via BigQuery"),
         ],
-        response_character=("Based on 1 tested incident, response is very "
-                            "strong and clean -- 14.0x baseline within days of "
-                            "the Ever Given grounding. A single data point, but "
-                            "an unambiguous one."),
+        response_character=("Based on 2 tested incidents, response is "
+                            "consistently strong -- 14.0x and 4.1x baseline. "
+                            "Both incidents clear the usable bar; this is the "
+                            "most reliable corridor tested so far."),
     ),
 
     "Strait of Malacca": ChokepointProfile(
@@ -296,12 +300,14 @@ PROFILES: dict[str, ChokepointProfile] = {
         evidence_grade="EPISODE_ANALOGUE",
         tested_incidents=[
             TestedIncident("2022-08-04", "Post-Pelosi exercises", 167.2, 595.8, 3.56, "webngrams via BigQuery"),
+            TestedIncident("2024-05-23", "Joint Sword 2024A", 94.7, 151.8, 1.60, "webngrams via BigQuery"),
         ],
-        response_character=("Based on 1 tested incident, response is usable "
-                            "but right at the threshold -- 3.6x baseline "
-                            "following the August 2022 exercises. A single "
-                            "data point at the edge of the usable band, not a "
-                            "strong margin like Suez's."),
+        response_character=("Based on 2 tested incidents, response is mixed -- "
+                            "3.6x (usable) for the August 2022 exercises, 1.6x "
+                            "(weak) for Joint Sword 2024A. Unlike Suez, the "
+                            "second test did not confirm the first; treat this "
+                            "corridor's signal as inconsistent across "
+                            "incidents, not reliably strong."),
     ),
 }
 
@@ -409,8 +415,13 @@ def selftest() -> int:
     assert abs(stena.response_ratio - 1.78) < 1e-9, stena
 
     suez = profile_for("Suez Canal")
-    assert len(suez.tested_incidents) == 1
-    assert abs(suez.tested_incidents[0].response_ratio - 14.04) < 1e-9
+    assert len(suez.tested_incidents) == 2, len(suez.tested_incidents)
+    assert all(i.response_ratio >= 3.0 for i in suez.tested_incidents), suez.tested_incidents
+
+    taiwan = profile_for("Taiwan Strait")
+    assert len(taiwan.tested_incidents) == 2, len(taiwan.tested_incidents)
+    taiwan_ratios = sorted(i.response_ratio for i in taiwan.tested_incidents)
+    assert abs(taiwan_ratios[0] - 1.60) < 1e-9 and abs(taiwan_ratios[1] - 3.56) < 1e-9, taiwan_ratios
 
     bab = profile_for("Bab-el-Mandeb")
     predates = [i for i in bab.tested_incidents if i.response_ratio is None]

@@ -1,0 +1,7 @@
+Second tested event -- suez and taiwan_strait
+(mean volume 30d after / 90d before, same methodology throughout)
+Source: gdelt-bq.gdeltv2.webngrams via BigQuery, 2026-08-13.
+
+corridor              date        label                            pre    post   ratio  status
+suez_event2           2023-12-18  Red Sea diversion wave         173.4   716.8    4.13  usable (>3x) (n_pre=90, n_post=30)
+taiwan_strait_event2  2024-05-23  Joint Sword 2024A               94.7   151.8    1.60  weak (1.5-3x) (n_pre=90, n_post=30)
