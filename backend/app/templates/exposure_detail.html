@@ -18,80 +18,27 @@ exposure-management notes below, but the cost-ratio test does not apply.</p>
 {% endif %}
 
 <div class="grid split">
-  <div>
-    <form class="panel" method="post"
-          action="/clients/{{ client.id }}/exposures/{{ exposure.id }}/decide" style="margin-top:0">
-      <h2>Compute a decision</h2>
-      <div class="field">
-        <label for="alpha_pct">What early action costs, against crisis prices</label>
-        <input type="number" id="alpha_pct" name="alpha_pct" min="0.1" max="60" step="0.1"
-               value="12" required>
-        <p class="hint">% of the {{ exposure.currency }}
-        {{ "{:,.0f}".format(exposure.crisis_replacement_cost) }} crisis replacement cost.</p>
-      </div>
-      <div class="field">
-        <label for="window_months">Window</label>
-        <select id="window_months" name="window_months">
-          <option value="3">3 months</option>
-          <option value="6" selected>6 months</option>
-          <option value="12">12 months</option>
-        </select>
-      </div>
-      <button class="btn" type="submit" {{ "disabled" if reading_error else "" }}>
-        Compute and save</button>
-    </form>
-
-    <form class="panel" method="post"
-          action="/clients/{{ client.id }}/exposures/{{ exposure.id }}/subscribe">
-      <h2>Alerts</h2>
-      <p class="hint" style="margin:0 0 var(--s3)">
-        {% if subscribed %}You get a monthly email if this exposure's decision changes.
-        {% else %}Off. Turn on to get a monthly email if this exposure's decision changes.{% endif %}
-      </p>
-      <button class="btn {{ 'ghost' if subscribed else '' }}" type="submit">
-        {{ "Turn off alerts" if subscribed else "Turn on alerts" }}</button>
-    </form>
-
-    <section class="panel">
-      <h2>Economic scenario</h2>
-      <p class="hint" style="margin:0 0 var(--s3)">A more detailed lens than the cost ratio above
-      &mdash; transport, insurance, delay, inventory and commodity cost, each priced separately,
-      with named strategies compared by expected total cost.</p>
-      <a class="btn ghost" href="/economic-scenarios/new?exposure_id={{ exposure.id }}">
-        Build an economic scenario for this exposure</a>
-    </section>
-
-    <section class="panel">
-      <h2>Strategy decision</h2>
-      <p class="hint" style="margin:0 0 var(--s3)">Per-chokepoint evidence, tiered client-fact
-      intake and a graded ledger &mdash; the TAR Decision Engine v2's own lens on this exposure.</p>
-      <a class="btn ghost" href="/strategy-decisions/new?exposure_id={{ exposure.id }}">
-        Build a strategy decision for this exposure</a>
-    </section>
-  </div>
+  <section class="panel" style="margin-top:0">
+    <h2>Strategy decision</h2>
+    <p class="hint" style="margin:0 0 var(--s3)">Per-chokepoint evidence, tiered client-fact
+    intake and a graded ledger &mdash; enter what your own teams know about this shipment and
+    get a strategy comparison with break-even, cost-of-waiting and a reassess-if list.</p>
+    <a class="btn" href="/strategy-decisions/new?exposure_id={{ exposure.id }}">
+      Build a strategy decision for this exposure</a>
+  </section>
 
   <section class="panel" style="margin-top:0">
-    <h2>Decision history ({{ decisions|length }})</h2>
-    {% if decisions %}
+    <h2>Decision history ({{ strategy_decisions|length }})</h2>
+    {% if strategy_decisions %}
     <div class="scroll">
       <table>
-        <thead><tr><th class="m">Computed</th><th class="m">As of</th><th class="m">Window</th>
-        <th class="m">Cost</th><th class="m">TAR</th><th>Band</th><th>Decision</th><th></th></tr></thead>
+        <thead><tr><th class="m">Computed</th><th>Scenario</th><th>Recommended</th></tr></thead>
         <tbody>
-        {% for d in decisions %}
+        {% for d in strategy_decisions %}
           <tr>
-            <td class="m">{{ d.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-            <td class="m">{{ d.as_of }}</td>
-            <td class="m">{{ d.window_months }} mo</td>
-            <td class="m">{{ "%.1f"|format(d.alpha * 100) }}%</td>
-            <td class="m">{{ d.tar }}</td>
-            <td>{{ d.band }}</td>
-            <td><strong>{{ d.decision_level|upper }}</strong>
-              {% if d.decision_margin_pp is not none %}
-              <span class="hint" style="display:inline">({{ "%.1f"|format(d.decision_margin_pp) }} pp)</span>
-              {% endif %}
-            </td>
-            <td><a href="/api/v1/decisions/{{ d.id }}/report/standdown" target="_blank">report</a></td>
+            <td class="m">{{ d.row.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td><a href="/strategy-decisions/{{ d.row.id }}">{{ d.row.scenario_id }}</a></td>
+            <td>{{ d.recommended or "—" }}</td>
           </tr>
         {% endfor %}
         </tbody>

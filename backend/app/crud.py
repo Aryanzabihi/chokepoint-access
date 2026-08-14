@@ -216,6 +216,13 @@ def latest_strategy_decision_for_exposure(session: Session,
         .order_by(StrategyDecision.created_at.desc())).first()
 
 
+def list_strategy_decisions_for_exposure(session: Session,
+                                          exposure_id: int) -> list[StrategyDecision]:
+    return list(session.exec(
+        select(StrategyDecision).where(StrategyDecision.exposure_id == exposure_id)
+        .order_by(StrategyDecision.created_at.desc())))
+
+
 def is_subscribed_strategy_decision(session: Session, user: User, strategy_decision_id: int) -> bool:
     return session.exec(
         select(StrategyDecisionSubscription).where(

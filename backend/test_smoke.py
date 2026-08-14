@@ -271,8 +271,10 @@ def test_economic_scenario_walkthrough(client):
 
 
 def test_economic_scenario_v2_features(client):
-    """Uncertainty ranges, the per-strategy TAR band check, subscribe/
-    unsubscribe, and the portfolio page's corridor-overlap note."""
+    """Uncertainty ranges, the per-strategy TAR band check, and subscribe/
+    unsubscribe. Portfolio-page aggregation is tested against
+    StrategyDecision instead, in test_strategy_decision_walkthrough --
+    the portfolio page reads that engine now, not this one."""
     client.post("/signup", data={"email": "v2-analyst@example.com",
                                   "password": "correct horse battery staple"})
 
@@ -323,32 +325,6 @@ def test_economic_scenario_v2_features(client):
     r = client.post(f"{detail_url}/subscribe", follow_redirects=False)
     assert r.status_code == 303
     assert "Re-check this monthly" in client.get(detail_url).text
-
-    # portfolio page: two exposures on the same corridor should trigger
-    # the overlap note, and each exposure's latest scenario should roll
-    # into the per-currency totals
-    client.post("/clients", data={"name": "Portfolio Test Ltd"}, follow_redirects=False)
-    client_id = client.get("/api/v1/clients").json()[0]["id"]
-
-    exposure_ids = []
-    for _ in range(2):
-        r = client.post(f"/api/v1/exposures?client_id={client_id}", json={
-            "corridor": "Bab-el-Mandeb", "crisis_replacement_cost": 5_000_000, "currency": "EUR",
-        })
-        exposure_ids.append(r.json()["id"])
-
-    for exp_id in exposure_ids:
-        scenario = dict(template)
-        scenario["disruption"] = dict(template["disruption"], corridor="Bab-el-Mandeb")
-        r = client.post("/economic-scenarios",
-                         data=_scenario_form(scenario, exposure_id=exp_id), follow_redirects=False)
-        assert r.status_code == 303
-
-    r = client.get(f"/clients/{client_id}/portfolio")
-    assert r.status_code == 200
-    assert "Bab-el-Mandeb" in r.text
-    assert "affect all of them together" in r.text  # the overlap note
-    assert "EUR 1,692,000" in r.text or "1,692,000" in r.text  # 846,000 x 2 exposures
 
 
 def test_economic_scenario_detail_survives_pre_v2_data(client):
@@ -490,6 +466,39 @@ def test_strategy_decision_walkthrough(client):
                                  "password": "a different password"})
     r = other.get(f"/api/v1/strategy-decisions/{decision_id}")
     assert r.status_code == 404
+
+    from app import strategy_decision as sd
+
+    # portfolio page: two exposures on the same corridor should trigger the
+    # overlap note, and each exposure's latest strategy decision should
+    # roll into the per-currency totals -- the portfolio page reads
+    # StrategyDecision now, not EconomicScenario (see
+    # test_economic_scenario_v2_features's docstring).
+    client.post("/clients", data={"name": "Portfolio Test Ltd"})
+    client_id = next(c["id"] for c in client.get("/api/v1/clients").json()
+                     if c["name"] == "Portfolio Test Ltd")
+
+    exposure_ids = []
+    for _ in range(2):
+        r = client.post(f"/api/v1/exposures?client_id={client_id}", json={
+            "corridor": "Bab-el-Mandeb", "crisis_replacement_cost": 5_000_000, "currency": "EUR",
+        })
+        exposure_ids.append(r.json()["id"])
+
+    bab_sample = dict(sample, corridor="Bab-el-Mandeb")
+    for exp_id in exposure_ids:
+        r = client.post("/strategy-decisions", data=_decision_form(bab_sample, exposure_id=exp_id),
+                         follow_redirects=False)
+        assert r.status_code == 303, r.text
+
+    r = client.get(f"/clients/{client_id}/portfolio")
+    assert r.status_code == 200
+    assert "Bab-el-Mandeb" in r.text
+    assert "affect all of them together" in r.text  # the overlap note
+    # two identical decisions -> exactly double one decision's own avoidable figure
+    bab_result = sd.compute_decision(bab_sample)
+    expected_avoidable = round(bab_result["exposure"]["avoidable"] * 2)
+    assert f"{expected_avoidable:,}" in r.text, (expected_avoidable, r.text)
 
 
 def test_alerts_job_runs_without_error(client):
