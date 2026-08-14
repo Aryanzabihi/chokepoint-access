@@ -42,7 +42,7 @@ import dataclasses
 import json
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -161,6 +161,11 @@ class ConditionalLoss:
     total: float
     grade: str                              # "CLIENT_QUOTED" (quoted override) or "DERIVED"
     absent_components: list[str] = field(default_factory=list)
+    effective_days_of_cover: float | None = None   # days_of_cover + this strategy's
+                                                    # days_of_cover_delta -- "coverage after
+                                                    # strategy" (section 10-style transparency:
+                                                    # already computed to derive delay/stockout
+                                                    # above, surfaced here rather than discarded)
 
 
 def conditional_loss(intake_data: dict, strategy: Strategy,
@@ -233,9 +238,11 @@ def conditional_loss(intake_data: dict, strategy: Strategy,
     if strategy.quoted_residual_loss is not None:
         return ConditionalLoss(strategy=strategy.name, components=components,
                                total=strategy.quoted_residual_loss, grade="CLIENT_QUOTED",
-                               absent_components=absent)
+                               absent_components=absent,
+                               effective_days_of_cover=effective_days_of_cover)
     return ConditionalLoss(strategy=strategy.name, components=components, total=computed_total,
-                           grade="DERIVED", absent_components=absent)
+                           grade="DERIVED", absent_components=absent,
+                           effective_days_of_cover=effective_days_of_cover)
 
 
 # --------------------------------------------------------------------------
@@ -408,6 +415,21 @@ def procurement_window(intake_data: dict, *, today: date | None = None) -> Procu
     if transit_days is None:
         return ProcurementWindow(supply_window, None, "ABSENT")
     return ProcurementWindow(supply_window, supply_window - int(transit_days), "DERIVED")
+
+
+def demand_supply_stockout_date(days_of_cover: float | None, *, today: date | None = None) -> str | None:
+    """today + days_of_cover, floored at 0 -- the one wall-clock-dependent
+    step of intake.demand_supply_netting()'s result, kept out of intake.py
+    for the same reason procurement_window() above lives here rather than
+    there: a countdown that didn't move with real time would be the wrong
+    kind of honest, but intake.py's own derivations stay deterministic (see
+    its module docstring and enginev2.md selftest criterion #10 -- same
+    input, same output, modulo timestamp). None when days_of_cover itself
+    is None -- nothing computable, not a fabricated date."""
+    if days_of_cover is None:
+        return None
+    today = today or datetime.now(timezone.utc).date()
+    return (today + timedelta(days=max(0.0, days_of_cover))).isoformat()
 
 
 def inverse_mode_sentence(recommended: BreakEvenResult, base_rate: dict) -> str:
@@ -815,6 +837,52 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
                  unit="days", grade=proc_window.grade,
                  formula="ship_date - today - contract_transit_time_days")
 
+    # Demand & supply netting (forecast + inventory + inbound + safety
+    # stock -> days of cover, stockout date, demand/quantity at risk) --
+    # computed from the fields as the client actually supplied them, before
+    # any fallback substitution below.
+    f0 = intake_data.get("fields", {})
+    netting = intake.demand_supply_netting(f0, delay_days=f0.get("delay_days_estimate"))
+    if netting.daily_demand_rate is not None:
+        ledger.record("daily_demand_rate", round(netting.daily_demand_rate.value, 3),
+                     unit="units/day", grade="DERIVED", formula=netting.daily_demand_rate.formula)
+    if netting.net_available_cover is not None:
+        ledger.record("net_available_cover", round(netting.net_available_cover, 2),
+                     unit="units", grade="DERIVED",
+                     formula="current_inventory + inbound_confirmed_quantity - safety_stock")
+    if netting.days_of_cover is not None:
+        ledger.record("days_of_cover_derived", round(netting.days_of_cover, 2),
+                     unit="days", grade="DERIVED", formula="net_available_cover / daily_demand_rate")
+    if netting.quantity_at_risk is not None:
+        ledger.record("quantity_at_risk", round(netting.quantity_at_risk, 2),
+                     unit="units", grade="DERIVED",
+                     formula="max(0, daily_demand_rate * delay_days_estimate - net_available_cover)")
+    if netting.demand_at_risk_value is not None:
+        ledger.record("demand_at_risk_value", round(netting.demand_at_risk_value, 2),
+                     unit="currency", grade="DERIVED",
+                     formula="quantity_at_risk * unit_value(cargo_value, quantity)")
+
+    # A client who supplies the finer-grained netting inputs but leaves the
+    # direct days_of_cover field blank gets the derived figure USED, not
+    # just displayed -- the same "client value wins, derived is the graded
+    # fallback" pattern as ranking_probability above (client_probability_
+    # estimate vs. base_rate['hit_rate']). Rewriting intake_data here, before
+    # any conditional_loss() call, means every downstream function that
+    # reads days_of_cover (that one, reassess_triggers, solve_flips,
+    # missing_fields...) sees one consistent value with no signature
+    # changes -- the same override mechanism cost_of_waiting() already uses
+    # via _with_field().
+    days_of_cover_is_derived_fallback = (f0.get("days_of_cover") is None
+                                         and netting.days_of_cover is not None)
+    if days_of_cover_is_derived_fallback:
+        intake_data = _with_field(intake_data, "days_of_cover", netting.days_of_cover)
+
+    effective_days_of_cover_used = intake_data.get("fields", {}).get("days_of_cover")
+    stockout_date = demand_supply_stockout_date(effective_days_of_cover_used)
+    if stockout_date is not None:
+        ledger.record("stockout_date", stockout_date, unit="date", grade="DERIVED",
+                     formula="today + days_of_cover")
+
     strategy_rows = []
     losses: dict[str, float] = {}
     for s in strategies:
@@ -832,6 +900,8 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
             "expected_cost": round(expected_cost(s.direct_cost, ranking_probability, cl.total), 2),
             "components": {k: round(v, 2) for k, v in cl.components.items()},
             "grade": cl.grade, "is_baseline": s.is_baseline,
+            "coverage_after_strategy": (round(cl.effective_days_of_cover, 2)
+                                        if cl.effective_days_of_cover is not None else None),
         })
 
     recommended = min(strategy_rows, key=lambda r: r["expected_cost"])["name"]
@@ -949,6 +1019,21 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         "procurement_window": {"supply_window_days": proc_window.supply_window_days,
                                "procurement_window_days": proc_window.procurement_window_days,
                                "grade": proc_window.grade},
+        "demand_supply": {
+            "daily_demand_rate": (round(netting.daily_demand_rate.value, 3)
+                                  if netting.daily_demand_rate is not None else None),
+            "net_available_cover": (round(netting.net_available_cover, 2)
+                                    if netting.net_available_cover is not None else None),
+            "days_of_cover_derived": (round(netting.days_of_cover, 2)
+                                      if netting.days_of_cover is not None else None),
+            "days_of_cover_used": effective_days_of_cover_used,
+            "days_of_cover_is_derived_fallback": days_of_cover_is_derived_fallback,
+            "stockout_date": stockout_date,
+            "quantity_at_risk": (round(netting.quantity_at_risk, 2)
+                                 if netting.quantity_at_risk is not None else None),
+            "demand_at_risk_value": (round(netting.demand_at_risk_value, 2)
+                                     if netting.demand_at_risk_value is not None else None),
+        },
         "cost_of_waiting": ({"paths": [{"episode_label": p.episode_label, "points": p.points}
                                        for p in cow.paths]} if cow else None),
         "flip_points": [asdict(fp) for fp in flips],
@@ -1236,6 +1321,14 @@ def _sample_intake() -> dict:
             "ship_date": "2026-09-01", "cargo_value": 5_000_000, "quantity": 50_000,
             "quantity_unit": "MT", "contract_freight_rate": 400_000,
             "contract_transit_time_days": 25, "days_of_cover": 10, "delay_days_estimate": 11,
+            # Demand & supply netting: 45,000 MT forecast over 90 days (500/day),
+            # 3,000 on hand + 1,500 confirmed inbound - 1,000 safety stock =
+            # 3,500 net available -> derives to 7 days of cover, DIFFERENT from
+            # the direct days_of_cover=10 above on purpose (see selftest: the
+            # direct field must win over the derived one when both are present).
+            "forecast_quantity": 45_000, "forecast_window_days": 90,
+            "current_inventory": 3_000, "inbound_confirmed_quantity": 1_500,
+            "safety_stock": 1_000,
             "wacc_pct": 0.08, "carrying_cost_pct_pa": 0.18, "gross_margin_pct": 0.12,
             "penalty_per_day": 5_000, "disrupted_freight_quote": 650_000,
             "reroute_quote": None, "war_risk_premium_quote": 340_000,
@@ -1546,6 +1639,69 @@ def selftest() -> int:
     cover_data["fields"]["days_of_cover"] = 20   # now exceeds delay_days_estimate (11)
     result_cover = build_decision(cover_data)
     assert any("inventory cover falls below 11" in t for t in result_cover["reassess_triggers"])
+
+    # --- demand & supply netting, wired end to end. The sample's direct
+    # days_of_cover=10 coexists with netting inputs that derive to 7 (see
+    # _sample_intake()'s comment) -- the direct field must win, exactly like
+    # ranking_probability favours client_probability_estimate over the
+    # published base rate.
+    ds = result["demand_supply"]
+    assert ds["daily_demand_rate"] == 500.0
+    assert ds["net_available_cover"] == 3_500.0
+    assert ds["days_of_cover_derived"] == 7.0
+    assert ds["days_of_cover_used"] == 10           # direct field wins
+    assert ds["days_of_cover_is_derived_fallback"] is False
+    assert ds["quantity_at_risk"] == 2_000.0
+    assert ds["demand_at_risk_value"] == 200_000.0
+    assert ds["stockout_date"] is not None
+    ds_ledger_field_names = {e["field"] for e in result["ledger"]}
+    assert {"daily_demand_rate", "net_available_cover", "days_of_cover_derived",
+           "quantity_at_risk", "demand_at_risk_value", "stockout_date"} <= ds_ledger_field_names
+
+    # "coverage after strategy": conditional_loss() already computes
+    # days_of_cover + this strategy's days_of_cover_delta internally to
+    # derive delay cost -- confirm it survives into ConditionalLoss and into
+    # build_decision()'s strategy_rows, not just used and discarded. The
+    # sample's two strategies both leave days_of_cover_delta at 0, so use a
+    # freshly-built strategy with a nonzero delta to prove the column
+    # actually reflects the effect, not just echoing the input.
+    plus_five_cover = dataclasses.replace(continue_s, effects=StrategyEffects(days_of_cover_delta=5.0))
+    cl_plus_five = conditional_loss(data, plus_five_cover)
+    assert cl_plus_five.effective_days_of_cover == 15.0, cl_plus_five.effective_days_of_cover
+    assert result["strategies"][0]["coverage_after_strategy"] == 10.0   # Continue: delta 0
+
+    # A client who leaves days_of_cover blank but supplies the netting
+    # inputs gets the derived 7 USED, not just displayed -- and it actually
+    # feeds the kernel (higher conditional loss for Continue: less cover
+    # means more margin at risk during the same 11-day delay).
+    no_direct_cover = json.loads(json.dumps(data))
+    no_direct_cover["fields"]["days_of_cover"] = None
+    result_fallback = build_decision(no_direct_cover)
+    ds_fb = result_fallback["demand_supply"]
+    assert ds_fb["days_of_cover_is_derived_fallback"] is True
+    assert ds_fb["days_of_cover_used"] == 7.0
+    dgm_fb = 5_000_000 * 0.12 / 7
+    delay_rate_fb = (0.08 / 365) * 5_000_000 + 5_000 + 1.0 * dgm_fb   # stockout=1: 7 <= 11 too
+    expected_total_fb = (delay_rate_fb * 11) + expected_inventory_c + expected_transport_c + expected_insurance_c
+    continue_row_fb = next(r for r in result_fallback["strategies"] if r["name"] == "Continue")
+    assert abs(continue_row_fb["conditional_loss"] - expected_total_fb) < 1e-2, (
+        continue_row_fb["conditional_loss"], expected_total_fb)
+    assert continue_row_fb["conditional_loss"] > cl_continue.total   # less cover, more at risk
+    assert continue_row_fb["coverage_after_strategy"] == 7.0
+
+    # Missing every netting input -> the whole sub-object degrades to Nones,
+    # never a fabricated figure, and no netting rows enter the ledger.
+    no_netting = json.loads(json.dumps(data))
+    for name in ("forecast_quantity", "forecast_window_days", "current_inventory",
+                "inbound_confirmed_quantity", "safety_stock"):
+        no_netting["fields"][name] = None
+    result_no_netting = build_decision(no_netting)
+    ds_none = result_no_netting["demand_supply"]
+    assert ds_none["daily_demand_rate"] is None and ds_none["days_of_cover_derived"] is None
+    assert ds_none["quantity_at_risk"] is None and ds_none["demand_at_risk_value"] is None
+    assert ds_none["days_of_cover_used"] == 10   # direct field still present in this variant
+    no_netting_ledger_fields = {e["field"] for e in result_no_netting["ledger"]}
+    assert "daily_demand_rate" not in no_netting_ledger_fields
 
     # --- forward-buy cost: hand-worked oracle against the documented
     # formula (financing on the secured fraction + extra carrying cost of

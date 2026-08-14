@@ -3,7 +3,10 @@
 {% block content %}
 {% macro field_input(field, value) %}
   <div class="field" style="width:210px">
-    <label for="field_{{ field.name }}">{{ field.name.replace('_', ' ')|title }}</label>
+    <label for="field_{{ field.name }}" style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+      <span>{{ field.name.replace('_', ' ')|title }}</span>
+      <span class="badge" title="Tier {{ field.tier }} — {{ field.department }}">T{{ field.tier }}</span>
+    </label>
     {% if field.unit in ('fraction_pa', 'fraction') %}
       <input type="number" id="field_{{ field.name }}" name="field_{{ field.name }}" step="0.01"
              value="{{ (value * 100)|round(2) if value is not none else '' }}">
@@ -45,7 +48,11 @@ exposure &mdash; it'll show up on that client's portfolio page.</p>
   {% if exposure_id %}<input type="hidden" name="exposure_id" value="{{ exposure_id }}">{% endif %}
 
   <section class="panel">
-    <h2>Basics</h2>
+    <h2>1 &middot; Exposure basics</h2>
+    <p class="hint" style="margin-top:0">The shipment itself &mdash; what's moving, under what
+    terms, on what schedule. Incoterm decides which fields further down the form you're even
+    asked for; a CIF or DDP buyer never sees a freight or war-risk field, because the seller
+    carries that exposure.</p>
     <div class="row">
       <div class="field" style="min-width:200px;flex:1">
         <label for="scenario_id">Scenario name</label>
@@ -80,16 +87,43 @@ exposure &mdash; it'll show up on that client's portfolio page.</p>
         <p class="hint">how much you can supply</p>
       </div>
     </div>
+    <div class="row" style="margin-top:var(--s3)">
+      {% for key, label, fields in field_groups if key == "exposure_basics" %}
+        {% for field in fields %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+      {% endfor %}
+    </div>
   </section>
 
   <section class="panel">
-    <h2>Probability</h2>
+    <h2>2 &middot; Demand &amp; supply</h2>
+    <p class="hint" style="margin-top:0">If you already know your days of cover from your WMS,
+    just supply that. If not, supply the forecast, on-hand, inbound and safety-stock figures
+    below instead and the engine derives it &mdash; a demand forecast over a stated window
+    (e.g. "45,000 MT over the next 90 days"), not a per-day rate, since that's what a demand
+    forecast usually looks like. Inbound should include this shipment itself. When both are
+    supplied, the direct days-of-cover figure wins; the derived one is still shown alongside it
+    as a cross-check.</p>
     <div class="row">
+      {% for key, label, fields in field_groups if key == "demand_supply" %}
+        {% for field in fields %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>3 &middot; Disruption assumptions</h2>
+    <p class="hint" style="margin-top:0">How long a disruption would delay this shipment, and how
+    likely you think it is. Leave probability blank to use the published historical base rate
+    instead of a guess.</p>
+    <div class="row">
+      {% for key, label, fields in field_groups if key == "disruption_assumptions" %}
+        {% for field in fields %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+      {% endfor %}
       <div class="field" style="width:200px">
         <label for="client_probability_estimate">Your probability estimate</label>
         <input type="number" id="client_probability_estimate" name="client_probability_estimate"
                min="0" max="100" step="0.1" value="">
-        <p class="hint">% &mdash; leave blank to use the published historical base rate instead</p>
+        <p class="hint">% &mdash; leave blank to use the published base rate</p>
       </div>
       <div class="field" style="width:160px">
         <label for="probability_range_low">Range, low end</label>
@@ -106,34 +140,27 @@ exposure &mdash; it'll show up on that client's portfolio page.</p>
   </section>
 
   <section class="panel">
-    <h2>Tier 1 &mdash; procurement &amp; logistics</h2>
-    <p class="hint" style="margin-top:0">What a procurement or logistics team already holds for
-    this shipment.</p>
+    <h2>4 &middot; Economic exposure</h2>
+    <p class="hint" style="margin-top:0">Rates and contract terms turn the disruption into a
+    number; a live quote sharpens it further and is the tier most often unavailable. Optional
+    beyond Tier 1 &mdash; leave any of these blank and it's reported as missing, with who owns
+    it, never guessed.</p>
     <div class="row">
-      {% for field in fields_by_tier[1] %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+      {% for key, label, fields in field_groups if key == "economic_exposure" %}
+        {% for field in fields|selectattr("tier", "equalto", 2) %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+      {% endfor %}
+    </div>
+    <p class="hint" style="margin:var(--s4) 0 0">Tier 3 &mdash; a carrier, broker or underwriter
+    quote in hand right now:</p>
+    <div class="row" style="margin-top:var(--s3)">
+      {% for key, label, fields in field_groups if key == "economic_exposure" %}
+        {% for field in fields|selectattr("tier", "equalto", 3) %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+      {% endfor %}
     </div>
   </section>
 
   <section class="panel">
-    <h2>Tier 2 &mdash; treasury, controlling &amp; legal</h2>
-    <p class="hint" style="margin-top:0">Board-approved rates and contract terms. Optional if you
-    only hold Tier 1 &mdash; leave blank and it's reported as missing, not guessed.</p>
-    <div class="row">
-      {% for field in fields_by_tier[2] %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>Tier 3 &mdash; live quotes</h2>
-    <p class="hint" style="margin-top:0">A carrier, broker or underwriter quote in hand right now.
-    The most valuable tier when you have it, and the least often available.</p>
-    <div class="row">
-      {% for field in fields_by_tier[3] %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>Strategies</h2>
+    <h2>5 &middot; Strategies</h2>
     <p class="hint" style="margin-top:0">What each option costs directly, and how it changes your
     exposure. Pick one as the baseline (usually "do nothing differently") &mdash; the others are
     compared against it. Leave a row's name blank to skip it.</p>
@@ -171,7 +198,9 @@ exposure &mdash; it'll show up on that client's portfolio page.</p>
     </div>
     <p class="hint">Capacity restored and war-risk premium &times; are fractions of the baseline
     (e.g. 40% capacity restored, 25% of the baseline war-risk premium). Leave war-risk premium
-    &times; blank to leave the quote as-is.</p>
+    &times; blank to leave the quote as-is. Days of cover, change applies on top of whichever
+    days-of-cover figure section 2 resolves to &mdash; direct if you supplied it, derived
+    otherwise.</p>
   </section>
 
   <div class="row" style="margin-top:var(--s5)">

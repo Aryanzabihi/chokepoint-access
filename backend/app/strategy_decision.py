@@ -33,7 +33,7 @@ import chokepoint_profiles  # noqa: E402
 import decision_engine  # noqa: E402
 import intake  # noqa: E402
 from decision_engine import build_decision, decision_brief_html  # noqa: E402
-from intake import FIELDS, INCOTERM_GROUPS, fields_for, template  # noqa: E402
+from intake import FIELDS, INCOTERM_GROUPS, fields_by_group, fields_for, template  # noqa: E402
 
 from . import engine  # noqa: E402
 

@@ -106,6 +106,23 @@ def client_exposure_note(incoterm: str) -> str | None:
 # Field schema (section 4.2, 4.3)
 # --------------------------------------------------------------------------
 
+#  Display grouping (independent of tier): tier answers "who needs to be
+#  asked and how confidently", group answers "what is this fact ABOUT" --
+#  the two cut across each other on purpose (days_of_cover is Tier 1 but
+#  groups with the Tier-2/3-adjacent "demand_supply" story, penalty_per_day
+#  is Tier 2 but groups with "economic_exposure" alongside Tier-3 quotes).
+#  GROUPS is the single source of truth for section order and label; a
+#  template iterates this, not a hand-written list, so a field can never be
+#  silently dropped from the form.
+GROUPS: list[tuple[str, str]] = [
+    ("exposure_basics", "Exposure basics"),
+    ("demand_supply", "Demand & supply"),
+    ("disruption_assumptions", "Disruption assumptions"),
+    ("economic_exposure", "Economic exposure"),
+]
+_GROUP_KEYS = frozenset(k for k, _ in GROUPS)
+
+
 @dataclass(frozen=True)
 class FieldSpec:
     name: str
@@ -113,6 +130,7 @@ class FieldSpec:
     department: str
     system_of_record: str
     unit: str                  # enforces section 4.3: currency / days / fraction_pa / fraction / text / date_iso / count
+    group: str = "exposure_basics"   # a key from GROUPS -- what this fact is about, for display
 
 
 # The 8 Tier-1 fields from section 4.2's table, plus one addition:
@@ -130,26 +148,73 @@ class FieldSpec:
 # `quantity` (section 4.2's "Quantity + unit" row) is split into
 # `quantity` and `quantity_unit` so each can be validated independently.
 FIELDS: list[FieldSpec] = [
-    FieldSpec("ship_date", 1, "procurement", "PO / shipping schedule", "date_iso"),
-    FieldSpec("cargo_value", 1, "procurement", "commercial invoice / PO", "currency"),
-    FieldSpec("quantity", 1, "procurement", "PO", "count"),
-    FieldSpec("quantity_unit", 1, "procurement", "PO", "text"),
-    FieldSpec("contract_freight_rate", 1, "procurement", "freight contract / last invoice", "currency"),
-    FieldSpec("contract_transit_time_days", 1, "procurement", "freight contract", "days"),
-    FieldSpec("days_of_cover", 1, "logistics", "ERP / WMS", "days"),
-    FieldSpec("delay_days_estimate", 1, "procurement", "shipping schedule / broker estimate", "days"),
+    FieldSpec("ship_date", 1, "procurement", "PO / shipping schedule", "date_iso",
+             group="exposure_basics"),
+    FieldSpec("cargo_value", 1, "procurement", "commercial invoice / PO", "currency",
+             group="exposure_basics"),
+    FieldSpec("quantity", 1, "procurement", "PO", "count", group="exposure_basics"),
+    FieldSpec("quantity_unit", 1, "procurement", "PO", "text", group="exposure_basics"),
+    FieldSpec("contract_freight_rate", 1, "procurement", "freight contract / last invoice",
+             "currency", group="exposure_basics"),
+    FieldSpec("contract_transit_time_days", 1, "procurement", "freight contract", "days",
+             group="exposure_basics"),
+    FieldSpec("days_of_cover", 1, "logistics", "ERP / WMS", "days", group="demand_supply"),
+    FieldSpec("delay_days_estimate", 1, "procurement", "shipping schedule / broker estimate",
+             "days", group="disruption_assumptions"),
 
-    FieldSpec("wacc_pct", 2, "treasury", "treasury, board-approved", "fraction_pa"),
-    FieldSpec("carrying_cost_pct_pa", 2, "controlling", "controlling", "fraction_pa"),
-    FieldSpec("gross_margin_pct", 2, "controlling", "controlling", "fraction"),
-    FieldSpec("penalty_per_day", 2, "legal", "customer contract / legal", "currency"),
+    # Demand & supply netting (forecast + inventory + inbound + safety
+    # stock -> days of cover, stockout date, demand/quantity at risk --
+    # see demand_supply_netting() below). All Tier 1: a logistics/demand-
+    # planning function holds these without needing another department,
+    # same answerability bar as days_of_cover above. inbound_confirmed_
+    # quantity is read as INCLUDING this shipment's own `quantity`, not
+    # additional to it -- stated here once rather than left ambiguous
+    # (section 4.3: reject unit ambiguity at the door).
+    FieldSpec("forecast_quantity", 1, "logistics", "demand forecast / S&OP", "count",
+             group="demand_supply"),
+    FieldSpec("forecast_window_days", 1, "logistics", "demand forecast / S&OP", "days",
+             group="demand_supply"),
+    FieldSpec("current_inventory", 1, "logistics", "WMS -- on-hand at destination", "count",
+             group="demand_supply"),
+    FieldSpec("inbound_confirmed_quantity", 1, "logistics",
+             "ERP -- confirmed inbound, including this shipment", "count", group="demand_supply"),
+    FieldSpec("safety_stock", 1, "logistics", "inventory policy -- minimum buffer", "count",
+             group="demand_supply"),
 
-    FieldSpec("disrupted_freight_quote", 3, "procurement", "carrier / broker quote", "currency"),
-    FieldSpec("reroute_quote", 3, "procurement", "carrier / broker quote", "currency"),
-    FieldSpec("war_risk_premium_quote", 3, "procurement", "underwriter / broker quote", "currency"),
-    FieldSpec("emergency_replacement_quote", 3, "procurement", "supplier quote", "currency"),
+    FieldSpec("wacc_pct", 2, "treasury", "treasury, board-approved", "fraction_pa",
+             group="economic_exposure"),
+    FieldSpec("carrying_cost_pct_pa", 2, "controlling", "controlling", "fraction_pa",
+             group="economic_exposure"),
+    FieldSpec("gross_margin_pct", 2, "controlling", "controlling", "fraction",
+             group="economic_exposure"),
+    FieldSpec("penalty_per_day", 2, "legal", "customer contract / legal", "currency",
+             group="economic_exposure"),
+
+    FieldSpec("disrupted_freight_quote", 3, "procurement", "carrier / broker quote", "currency",
+             group="economic_exposure"),
+    FieldSpec("reroute_quote", 3, "procurement", "carrier / broker quote", "currency",
+             group="economic_exposure"),
+    FieldSpec("war_risk_premium_quote", 3, "procurement", "underwriter / broker quote", "currency",
+             group="economic_exposure"),
+    FieldSpec("emergency_replacement_quote", 3, "procurement", "supplier quote", "currency",
+             group="economic_exposure"),
 ]
 _FIELDS_BY_NAME = {f.name: f for f in FIELDS}
+assert all(f.group in _GROUP_KEYS for f in FIELDS), "every field must use a GROUPS key"
+
+
+def fields_by_group(fields: list[FieldSpec]) -> list[tuple[str, str, list[FieldSpec]]]:
+    """Buckets an already-selected field list (typically fields_for()'s
+    output) into GROUPS's 4 display sections, in GROUPS's order. A group
+    with none of the supplied fields is omitted rather than shown empty.
+    Pure regrouping, decoupled from tier/Incoterm filtering, so it composes
+    with whatever selection the caller already made."""
+    out = []
+    for key, label in GROUPS:
+        fs = [f for f in fields if f.group == key]
+        if fs:
+            out.append((key, label, fs))
+    return out
 
 
 def fields_for(tier: int, incoterm: str | None = None) -> list[FieldSpec]:
@@ -276,6 +341,84 @@ def unit_value(cargo_value: float | None, quantity: float | None) -> float | Non
     if cargo_value is None or quantity is None or quantity == 0:
         return None
     return cargo_value / quantity
+
+
+# --------------------------------------------------------------------------
+# Demand & supply netting — forecast quantity + inventory + inbound +
+# safety stock -> days of cover and demand/quantity at risk. Pure
+# arithmetic on client-held facts, same family as the derivations above
+# (no episode or probability input, no wall-clock dependency — "today" for
+# a stockout date is computed one layer up, in decision_engine.py, next to
+# procurement_window(), the one other derivation in this codebase that
+# needs it; see that function's docstring for why the split).
+# --------------------------------------------------------------------------
+
+@dataclass
+class DemandSupplyNetting:
+    """Every field is None (never 0 or a default) when an input it needs
+    is missing, matching daily_gross_margin/holding_per_unit_day above.
+    `days_of_cover` here is the DERIVED figure from these five inputs — a
+    cross-check against the directly-supplied `days_of_cover` field, not a
+    replacement for it; decision_engine.build_decision() decides whether it
+    is used as a fallback when the direct field is absent."""
+    daily_demand_rate: DerivedRate | None
+    net_available_cover: float | None     # current_inventory + inbound_confirmed_quantity
+                                          # - safety_stock; can be negative (already below buffer)
+    days_of_cover: float | None
+    quantity_at_risk: float | None        # units of forecast demand during the delay window
+                                          # that available cover would not meet
+    demand_at_risk_value: float | None    # quantity_at_risk priced at this shipment's own
+                                          # unit_value (cargo_value / quantity); None if that
+                                          # unit price isn't derivable
+
+
+def demand_supply_netting(fields: dict, *, delay_days: float | None) -> DemandSupplyNetting:
+    """forecast_quantity/forecast_window_days -> a daily demand rate (a
+    period forecast is what a demand-planning function actually holds; a
+    raw per-day rate is not asked for directly, same reasoning as every
+    other derived rate in this module). current_inventory +
+    inbound_confirmed_quantity - safety_stock -> net_available_cover.
+    days_of_cover = net_available_cover / daily_demand_rate.
+    quantity_at_risk = max(0, daily_demand_rate * delay_days -
+    net_available_cover) — the portion of demand during the delay window
+    that available cover would not meet, using the same step logic as
+    stockout_probability() (a shortfall either exists or it doesn't; a
+    probability curve over it would be invented)."""
+    forecast_quantity = fields.get("forecast_quantity")
+    forecast_window_days = fields.get("forecast_window_days")
+    current_inventory = fields.get("current_inventory")
+    inbound = fields.get("inbound_confirmed_quantity")
+    safety_stock = fields.get("safety_stock")
+
+    daily_demand_rate = None
+    if forecast_quantity is not None and forecast_window_days:
+        daily_demand_rate = DerivedRate(
+            value=forecast_quantity / forecast_window_days,
+            formula="forecast_quantity / forecast_window_days",
+            components_used=["forecast_quantity", "forecast_window_days"])
+
+    net_available_cover = None
+    if current_inventory is not None and inbound is not None and safety_stock is not None:
+        net_available_cover = current_inventory + inbound - safety_stock
+
+    days_of_cover = None
+    if (daily_demand_rate is not None and daily_demand_rate.value > 0
+            and net_available_cover is not None):
+        days_of_cover = net_available_cover / daily_demand_rate.value
+
+    quantity_at_risk = None
+    if (daily_demand_rate is not None and delay_days is not None
+            and net_available_cover is not None):
+        quantity_at_risk = max(0.0, daily_demand_rate.value * delay_days - net_available_cover)
+
+    demand_at_risk_value = None
+    if quantity_at_risk is not None:
+        uv = unit_value(fields.get("cargo_value"), fields.get("quantity"))
+        if uv is not None:
+            demand_at_risk_value = quantity_at_risk * uv
+
+    return DemandSupplyNetting(daily_demand_rate, net_available_cover, days_of_cover,
+                               quantity_at_risk, demand_at_risk_value)
 
 
 # --------------------------------------------------------------------------
@@ -504,9 +647,24 @@ def selftest() -> int:
     t2 = {f.name for f in fields_for(2)}
     t3 = {f.name for f in fields_for(3)}
     assert t1 < t2 < t3, (len(t1), len(t2), len(t3))
-    assert len(t1) == 8, sorted(t1)          # section 4.2's 8 Tier-1 fields (quantity split in two)
-    assert len(t2) == 12, sorted(t2)         # + 4 Tier-2 fields
-    assert len(t3) == 16, sorted(t3)         # + 4 Tier-3 fields
+    # section 4.2's 8 Tier-1 fields (quantity split in two) + 5 demand/supply
+    # netting fields (forecast_quantity, forecast_window_days,
+    # current_inventory, inbound_confirmed_quantity, safety_stock)
+    assert len(t1) == 13, sorted(t1)
+    assert len(t2) == 17, sorted(t2)         # + 4 Tier-2 fields
+    assert len(t3) == 21, sorted(t3)         # + 4 Tier-3 fields
+
+    # fields_by_group: every field appears in exactly one group, in
+    # GROUPS's order, and no group is shown empty.
+    grouped = fields_by_group(fields_for(3))
+    assert [key for key, _, _ in grouped] == [k for k, _ in GROUPS]
+    regrouped_names = [f.name for _, _, fs in grouped for f in fs]
+    assert sorted(regrouped_names) == sorted(t3)
+    assert len(regrouped_names) == len(set(regrouped_names))   # no field listed twice
+    demand_supply_group = next(fs for key, _, fs in grouped if key == "demand_supply")
+    assert {f.name for f in demand_supply_group} == {
+        "days_of_cover", "forecast_quantity", "forecast_window_days",
+        "current_inventory", "inbound_confirmed_quantity", "safety_stock"}
 
     # Unknown Incoterm / tier are rejected, not silently accepted.
     try:
@@ -573,6 +731,68 @@ def selftest() -> int:
     assert unit_value(5_000_000, 0) is None
     assert unit_value(None, 50_000) is None
 
+    # demand_supply_netting: forecast quantity + inventory + inbound +
+    # safety stock -> days of cover and demand/quantity at risk. Hand-worked
+    # oracle: 45,000 units forecast over 90 days = 500/day; 3,000 on hand +
+    # 1,500 confirmed inbound - 1,000 safety stock = 3,500 net available;
+    # 3,500 / 500 = 7 days of cover; at an 11-day delay, 500*11=5,500 units
+    # of demand fall inside the delay window against 3,500 available, so
+    # 2,000 units are at risk, priced at this shipment's own unit_value
+    # (5,000,000 / 50,000 = 100) = 200,000.
+    net = demand_supply_netting(
+        {"forecast_quantity": 45_000, "forecast_window_days": 90,
+         "current_inventory": 3_000, "inbound_confirmed_quantity": 1_500,
+         "safety_stock": 1_000, "cargo_value": 5_000_000, "quantity": 50_000},
+        delay_days=11)
+    assert net.daily_demand_rate is not None
+    assert abs(net.daily_demand_rate.value - 500.0) < 1e-9
+    assert net.net_available_cover == 3_500.0
+    assert net.days_of_cover == 7.0
+    assert net.quantity_at_risk == 2_000.0
+    assert net.demand_at_risk_value == 200_000.0
+
+    # Missing forecast_window_days -> daily_demand_rate is None (not 0),
+    # which cascades to days_of_cover and quantity_at_risk -- the same "no
+    # partial answer" convention as daily_gross_margin/holding_per_unit_day.
+    no_window = demand_supply_netting(
+        {"forecast_quantity": 45_000, "forecast_window_days": None,
+         "current_inventory": 3_000, "inbound_confirmed_quantity": 1_500,
+         "safety_stock": 1_000}, delay_days=11)
+    assert no_window.daily_demand_rate is None
+    assert no_window.days_of_cover is None
+    assert no_window.quantity_at_risk is None
+
+    # net_available_cover can be negative (already below safety stock) --
+    # a real, reportable fact, not clamped away. days_of_cover follows it
+    # negative too (already past cover); quantity_at_risk still clamps at 0
+    # on its own axis (a shortfall either exists or it doesn't).
+    below_safety = demand_supply_netting(
+        {"forecast_quantity": 45_000, "forecast_window_days": 90,
+         "current_inventory": 500, "inbound_confirmed_quantity": 0,
+         "safety_stock": 1_000}, delay_days=11)
+    assert below_safety.net_available_cover == -500.0
+    assert below_safety.days_of_cover == -1.0
+    assert below_safety.quantity_at_risk == 6_000.0   # 500*11 - (-500)
+
+    # quantity_at_risk clamps at 0 when cover comfortably exceeds the delay
+    # window's demand -- the step's other side.
+    comfortable = demand_supply_netting(
+        {"forecast_quantity": 900, "forecast_window_days": 90,
+         "current_inventory": 3_000, "inbound_confirmed_quantity": 0,
+         "safety_stock": 0}, delay_days=5)
+    assert comfortable.daily_demand_rate.value == 10.0
+    assert comfortable.quantity_at_risk == 0.0        # 10*5=50, well under 3,000 available
+
+    # demand_at_risk_value is None (not 0) when this shipment's own
+    # unit_value isn't derivable (no cargo_value/quantity supplied) --
+    # quantity_at_risk is still reported in units regardless.
+    no_unit_value = demand_supply_netting(
+        {"forecast_quantity": 45_000, "forecast_window_days": 90,
+         "current_inventory": 3_000, "inbound_confirmed_quantity": 1_500,
+         "safety_stock": 1_000}, delay_days=11)
+    assert no_unit_value.quantity_at_risk == 2_000.0
+    assert no_unit_value.demand_at_risk_value is None
+
     # validate_intake: unit-ambiguity rejection (an integer percentage typed
     # where a fraction is expected must be caught, not silently accepted).
     bad = template(2, "FOB")
@@ -620,6 +840,9 @@ def selftest() -> int:
     print("  CIF/DDP intake never asks for war-risk premium; CFR keeps it")
     print("  stockout_probability is a step, not a curve; missing inputs -> None")
     print("  delay_cost_per_day's terms are independently omittable, never silently defaulted")
+    print("  fields_by_group covers every field exactly once, in GROUPS's order")
+    print("  demand_supply_netting: forecast/inventory/inbound/safety stock -> "
+         "7 days cover, 2,000 units at risk (200,000) on the worked example")
     print("  Tier 4 coverage counting matches client_profile.py's MIN_MONTHS_PER_SIDE=3 rule")
     return 0
 

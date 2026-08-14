@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block title %}{{ row.scenario_id }} — Chokepoint Access{% endblock %}
 {% block content %}
+
+{% macro field_recap(field, value) %}
+  <div class="stat">
+    <b>{% if value is none %}—{% elif field.unit == 'currency' %}{{ "{:,.0f}".format(value) }}{% elif field.unit in ('fraction', 'fraction_pa') %}{{ "{:.1%}".format(value) }}{% elif field.unit in ('days', 'count') %}{{ "{:,.0f}".format(value) }}{% else %}{{ value }}{% endif %}</b>
+    <span>{{ field.name.replace('_', ' ')|title }}</span>
+  </div>
+{% endmacro %}
+
+{% macro flip_display(param, value) %}{% if param in ('probability', 'war_risk_premium_multiplier') %}{{ "{:.1%}".format(value) }}{% elif param == 'direct_cost' %}{{ "{:,.0f}".format(value) }}{% else %}{{ "%.3g"|format(value) }}{% endif %}{% endmacro %}
+
 <header class="masthead">
   <div class="eyebrow"><a href="/strategy-decisions" style="color:inherit">Strategy decisions</a>
   &middot; {{ row.corridor }} &middot; {{ result.incoterm }}</div>
@@ -27,32 +37,134 @@
 <p class="note hot" style="margin-top:var(--s4)">{{ result.decision_confidence_note }}</p>
 {% endif %}
 
-<div class="row" style="margin:var(--s4) 0">
-  <a class="btn ghost" href="/strategy-decisions/{{ row.id }}/report" target="_blank">Full report</a>
-  <form method="post" action="/strategy-decisions/{{ row.id }}/subscribe" style="margin:0">
-    <button class="btn {{ 'ghost' if subscribed else '' }}" type="submit">
-      {{ "Turn off monthly re-check" if subscribed else "Re-check this monthly" }}</button>
-  </form>
-</div>
-<p class="hint" style="margin:0 0 var(--s4)">The full report explains the decision and break-even
-in plain sentences, with cost-of-waiting and flip-point detail. This page is the structured
-summary.
-{% if subscribed %}You'll get an email if next month's reading changes the recommended strategy.
-{% else %}Monthly re-check is off. Turn it on to get an email if this decision's recommendation
-changes as new readings come in.{% endif %}</p>
+<section class="panel" style="margin-top:var(--s5)">
+  <h2>1 &middot; Exposure basics</h2>
+  <div class="stats">
+    {% for key, label, fields in field_groups if key == "exposure_basics" %}
+      {% for field in fields %}{{ field_recap(field, input.fields.get(field.name)) }}{% endfor %}
+    {% endfor %}
+  </div>
+  <details style="margin-top:var(--s4)">
+    <summary>Chokepoint: {{ row.corridor }}</summary>
+    <div class="inner">
+      <p>{{ result.chokepoint_profile.geography }}</p>
+      <p><b>Width:</b> {{ result.chokepoint_profile.width }} &middot;
+      <b>Traffic:</b> {{ result.chokepoint_profile.traffic_character }}</p>
+      <p><b>Alternate route:</b> {{ result.chokepoint_profile.alternate_route or "none" }}</p>
+      <p class="hint">Geography/traffic figures: {{ result.chokepoint_profile.fact_grade }} &mdash;
+      general/public knowledge, not independently cited. Evidence grade for the response character
+      below: {{ result.chokepoint_profile.evidence_grade }}.</p>
+      <p>{{ result.chokepoint_profile.response_character }}</p>
+      {% if result.chokepoint_profile.tested_incidents %}
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Date</th><th>Incident</th><th class="m">Response</th><th>Source</th></tr></thead>
+          <tbody>
+          {% for i in result.chokepoint_profile.tested_incidents %}
+            <tr><td class="m">{{ i.date }}</td><td>{{ i.label }}</td>
+            <td class="m">{{ "%.2fx"|format(i.response_ratio) if i.response_ratio is not none else "—" }}</td>
+            <td>{{ i.source }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+  </details>
+</section>
 
-<section class="panel" style="margin-top:0">
-  <h2>Strategy comparison</h2>
+<section class="panel">
+  <h2>2 &middot; Demand &amp; supply</h2>
+  <div class="stats">
+    {% for key, label, fields in field_groups if key == "demand_supply" %}
+      {% for field in fields %}{{ field_recap(field, input.fields.get(field.name)) }}{% endfor %}
+    {% endfor %}
+  </div>
+  {% set ds = result.get('demand_supply') %}
+  {% if ds and (ds.days_of_cover_used is not none or ds.days_of_cover_derived is not none) %}
+  <div class="stats" style="margin-top:var(--s3)">
+    {% if ds.days_of_cover_used is not none %}
+    <div class="stat"><b>{{ "%g"|format(ds.days_of_cover_used) }}</b>
+      <span>days of cover used{% if ds.days_of_cover_is_derived_fallback %} &mdash; derived,
+      no direct figure supplied{% else %} &mdash; your direct figure{% endif %}</span></div>
+    {% endif %}
+    {% if ds.days_of_cover_derived is not none and not ds.days_of_cover_is_derived_fallback %}
+    <div class="stat"><b>{{ "%g"|format(ds.days_of_cover_derived) }}</b>
+      <span>days of cover, derived from the netting above &mdash; shown as a cross-check only,
+      your direct figure was used instead</span></div>
+    {% endif %}
+    {% if ds.stockout_date %}
+    <div class="stat"><b>{{ ds.stockout_date }}</b><span>stockout date, if nothing more arrives</span></div>
+    {% endif %}
+    {% if ds.quantity_at_risk is not none %}
+    <div class="stat"><b>{{ "{:,.0f}".format(ds.quantity_at_risk) }}</b>
+      <span>quantity at risk during the delay window</span></div>
+    {% endif %}
+    {% if ds.demand_at_risk_value is not none %}
+    <div class="stat"><b>{{ "{:,.0f}".format(ds.demand_at_risk_value) }}</b>
+      <span>demand at risk, valued at this shipment's own unit price</span></div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="empty">No days-of-cover figure, direct or derived &mdash; supply either your WMS
+  figure or the forecast/inventory/inbound/safety-stock set above to see this.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>3 &middot; Disruption assumptions</h2>
+  <div class="stats">
+    {% for key, label, fields in field_groups if key == "disruption_assumptions" %}
+      {% for field in fields %}{{ field_recap(field, input.fields.get(field.name)) }}{% endfor %}
+    {% endfor %}
+    <div class="stat"><b>{{ "{:.0%}".format(result.probability_used) }}</b>
+      <span>probability used {% if result.probability_is_published_fallback %}&mdash; published
+      base rate, not yours{% else %}&mdash; your estimate{% endif %}</span></div>
+    {% if input.probability_range %}
+    <div class="stat"><b>{{ "{:.0%}".format(input.probability_range[0]) }}&ndash;{{ "{:.0%}".format(input.probability_range[1]) }}</b>
+      <span>your supplied probability range, for the regret check below</span></div>
+    {% endif %}
+  </div>
+
+  {% if result.reading %}
+  <p style="margin-top:var(--s4)">Current reading: <span class="m">TAR {{ result.reading.tar }}</span>
+  {%- if result.reading.band %}, {{ result.reading.band }}{% endif %}.</p>
+  {% endif %}
+
+  <p class="m" style="margin-top:var(--s3)">{{ result.base_rate.episodes_with_disruption }} of
+  {{ result.base_rate.alarm_episodes }} alarm episodes since 1985 preceded a real disruption
+  ({{ "{:.0%}".format(result.base_rate.hit_rate) }}, 95% CI
+  {{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[0]) }}&ndash;{{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[1]) }}).
+  {%- if result.base_rate.corridor_note %} {{ result.base_rate.corridor_note }}{% endif %}</p>
+</section>
+
+<section class="panel">
+  <h2>4 &middot; Economic exposure</h2>
+  <div class="stats">
+    {% for key, label, fields in field_groups if key == "economic_exposure" %}
+      {% for field in fields %}{{ field_recap(field, input.fields.get(field.name)) }}{% endfor %}
+    {% endfor %}
+  </div>
+  <div class="stats" style="margin-top:var(--s3)">
+    <div class="stat"><b>{{ "{:,.0f}".format(result.exposure.baseline) }}</b><span>baseline, no disruption</span></div>
+    <div class="stat"><b>{{ "{:,.0f}".format(result.exposure.disrupted) }}</b><span>disrupted, unmitigated</span></div>
+    <div class="stat"><b>{{ "{:,.0f}".format(result.exposure.avoidable) }}</b><span>avoidable</span></div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>5 &middot; Strategies</h2>
   <div class="scroll">
   <table>
     <thead><tr><th>Strategy</th><th class="m">Direct cost</th><th class="m">Conditional loss</th>
-    <th class="m">Expected cost</th><th>Grade</th></tr></thead>
+    <th class="m">Coverage after, days</th><th class="m">Expected cost</th><th>Grade</th></tr></thead>
     <tbody>
     {% for r in result.strategies %}
       <tr{{ ' style="font-weight:600"' | safe if r.name == result.recommended else "" }}>
         <td>{{ r.name }}{% if r.is_baseline %} <span class="hint">(baseline)</span>{% endif %}</td>
         <td class="m">{{ "{:,.0f}".format(r.direct_cost) }}</td>
         <td class="m">{{ "{:,.0f}".format(r.conditional_loss) }}</td>
+        <td class="m">{{ "%g"|format(r.get('coverage_after_strategy')) if r.get('coverage_after_strategy') is not none else "—" }}</td>
         <td class="m">{{ "{:,.0f}".format(r.expected_cost) }}</td>
         <td>{{ r.grade }}</td>
       </tr>
@@ -60,97 +172,190 @@ changes as new readings come in.{% endif %}</p>
     </tbody>
   </table>
   </div>
+  <div class="row" style="margin-top:var(--s4);flex-direction:column;align-items:stretch">
+  {% for r in result.strategies %}
+    <details>
+      <summary>Cost breakdown &mdash; {{ r.name }}</summary>
+      <div class="inner">
+        <div class="stats">
+          <div class="stat"><b>{{ "{:,.0f}".format(r.components.transport) }}</b><span>transport</span></div>
+          <div class="stat"><b>{{ "{:,.0f}".format(r.components.insurance) }}</b><span>insurance</span></div>
+          <div class="stat"><b>{{ "{:,.0f}".format(r.components.delay) }}</b><span>delay</span></div>
+          <div class="stat"><b>{{ "{:,.0f}".format(r.components.inventory) }}</b><span>inventory</span></div>
+          <div class="stat"><b>{{ "{:,.0f}".format(r.components.commodity) }}</b><span>commodity</span></div>
+        </div>
+      </div>
+    </details>
+  {% endfor %}
+  </div>
 </section>
 
 <section class="panel">
-  <h2>Chokepoint: {{ row.corridor }}</h2>
-  <p>{{ result.chokepoint_profile.geography }}</p>
-  <p><b>Width:</b> {{ result.chokepoint_profile.width }} &middot;
-  <b>Traffic:</b> {{ result.chokepoint_profile.traffic_character }}</p>
-  <p><b>Alternate route:</b> {{ result.chokepoint_profile.alternate_route or "none" }}</p>
-  <p class="hint">Geography/traffic figures: {{ result.chokepoint_profile.fact_grade }} &mdash;
-  general/public knowledge, not independently cited. Evidence grade for the response character
-  below: {{ result.chokepoint_profile.evidence_grade }}.</p>
-  <p>{{ result.chokepoint_profile.response_character }}</p>
-  {% if result.chokepoint_profile.tested_incidents %}
-  <div class="scroll">
-    <table>
-      <thead><tr><th>Date</th><th>Incident</th><th class="m">Response</th><th>Source</th></tr></thead>
-      <tbody>
-      {% for i in result.chokepoint_profile.tested_incidents %}
-        <tr><td class="m">{{ i.date }}</td><td>{{ i.label }}</td>
-        <td class="m">{{ "%.2fx"|format(i.response_ratio) if i.response_ratio is not none else "—" }}</td>
-        <td>{{ i.source }}</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
+  <h2>6 &middot; Decision</h2>
+  <div class="verdict {{ 'pos' if result.decision_confidence == 'robust' else 'warn' }}">
+    <div class="tag">Recommended</div>
+    <div class="call">{{ result.recommended }}</div>
+    {% if result.decision_confidence_note %}
+    <p>{{ result.decision_confidence_note }}</p>
+    {% elif result.recommended_break_even and result.recommended_break_even.reason %}
+    <p>{{ result.recommended_break_even.reason }}</p>
+    {% else %}
+    <p>Lowest expected cost at the {{ "{:.0%}".format(result.probability_used) }} probability used
+    above.</p>
+    {% endif %}
+  </div>
+
+  {% set be = result.recommended_break_even %}
+  {% if be and be.p_star is not none %}
+  <div class="stats" style="margin-top:var(--s4)">
+    <div class="stat"><b>{{ "{:.0%}".format(be.p_star) }}</b>
+      <span>break-even probability, {{ be.strategy }} vs {{ be.baseline }}</span></div>
+    <div class="stat"><b>{{ "{:.0%}".format(result.base_rate.hit_rate) }}</b>
+      <span>published base rate, for context (95% CI
+      {{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[0]) }}&ndash;{{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[1]) }},
+      n={{ result.base_rate.alarm_episodes }})</span></div>
   </div>
   {% endif %}
-</section>
 
-{% if result.reading %}
-<section class="panel">
-  <h2>Current reading</h2>
-  <p>TAR {{ result.reading.tar }}{% if result.reading.band %}, {{ result.reading.band }}{% endif %}</p>
-</section>
-{% endif %}
-
-{% set pw = result.procurement_window %}
-<section class="panel">
-  <h2>Procurement window</h2>
-  {% if pw.procurement_window_days is not none %}
-    {% if pw.procurement_window_days >= 0 %}
-    <p>{{ pw.procurement_window_days }} day(s) until a normal-schedule purchase decision would
-    need to be made ({{ pw.supply_window_days }} day(s) until the material is required, minus
-    the contract transit time).</p>
-    {% else %}
-    <p class="hint">Already {{ -pw.procurement_window_days }} day(s) past the point a
-    normal-schedule purchase would need to have been made &mdash; any action now is expedited,
-    not routine.</p>
-    {% endif %}
-  {% elif pw.supply_window_days is not none %}
-    <p>{{ pw.supply_window_days }} day(s) until the material is required. Supply
-    contract_transit_time_days to see how much of that is still a normal-schedule decision
-    window.</p>
+  <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
+    border-bottom:1px solid var(--rule-soft)">What would change this decision</h3>
+  {% if result.flip_points %}
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Parameter</th><th class="m">Current</th><th class="m">Flips at</th><th>Effect</th></tr></thead>
+    <tbody>
+    {% for fp in result.flip_points %}
+      <tr>
+        <td>{{ fp.parameter.replace('_', ' ')|capitalize }}{% if fp.strategy %} ({{ fp.strategy }}){% endif %}</td>
+        <td class="m">{{ flip_display(fp.parameter, fp.current_value) }}</td>
+        <td class="m">{{ flip_display(fp.parameter, fp.flip_value) }}</td>
+        <td>{{ fp.direction }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
   {% else %}
-    <p class="hint">Not computable &mdash; ship date not supplied.</p>
+  <p class="empty">No in-range flip points &mdash; the recommendation doesn't change within any
+  parameter's plausible range.</p>
   {% endif %}
+
+  <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
+    border-bottom:1px solid var(--rule-soft)">Cost of waiting</h3>
+  {% if result.cost_of_waiting %}
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Episode analogue</th>
+    {% for d, _ in result.cost_of_waiting.paths[0].points %}<th class="m">Day {{ d }}</th>{% endfor %}
+    </tr></thead>
+    <tbody>
+    {% for p in result.cost_of_waiting.paths %}
+      <tr><td>{{ p.episode_label }}</td>
+      {% for d, v in p.points %}<td class="m">{{ "{:+,.0f}".format(v) }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint">Change in expected cost of the recommended strategy if you wait, taken from
+  observed episode analogues at each day offset &mdash; never a fitted curve.</p>
+  {% else %}
+  <p class="empty">Not shown &mdash; insufficient episode register coverage for a cost-of-waiting
+  trajectory.</p>
+  {% endif %}
+
+  {% if result.regret %}
+  <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
+    border-bottom:1px solid var(--rule-soft)">Regret at the probability range</h3>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Strategy</th>
+    <th class="m">Regret @ {{ "{:.0%}".format(result.regret.low.probability) }}</th>
+    <th class="m">Regret @ {{ "{:.0%}".format(result.regret.high.probability) }}</th></tr></thead>
+    <tbody>
+    {% for r in result.strategies %}
+      <tr>
+        <td>{{ r.name }}
+          {%- if r.name == result.regret.low.best %} <span class="badge ok">cheapest, low</span>{% endif %}
+          {%- if r.name == result.regret.high.best %} <span class="badge ok">cheapest, high</span>{% endif %}</td>
+        <td class="m">{{ "{:,.0f}".format(result.regret.low.regret[r.name]) }}</td>
+        <td class="m">{{ "{:,.0f}".format(result.regret.high.regret[r.name]) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint">Extra expected cost versus the cheapest choice at each end of the published or
+  supplied probability range &mdash; how much it would cost to have picked wrong.</p>
+  {% endif %}
+
+  <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
+    border-bottom:1px solid var(--rule-soft)">Not claimed</h3>
+  <ul>
+    {% for x in result.not_claimed %}<li>{{ x }}</li>{% endfor %}
+  </ul>
 </section>
 
 <section class="panel">
-  <h2>Historical base rate</h2>
-  <p class="m">{{ result.base_rate.episodes_with_disruption }} of
-  {{ result.base_rate.alarm_episodes }} alarm episodes since 1985 preceded a real disruption
-  ({{ "{:.0%}".format(result.base_rate.hit_rate) }}, 95% CI
-  {{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[0]) }}&ndash;{{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[1]) }}).</p>
-</section>
+  <h2>7 &middot; Monitor</h2>
 
-<section class="panel">
-  <h2>Ledger</h2>
-  <p class="m">{% for grade, n in ledger_by_grade %}{{ n }} {{ grade }}{{ ", " if not loop.last else "" }}{% endfor %}</p>
-  <p class="hint">Every number that fed this result, graded by how it was known &mdash; see the
-  full report for the complete field-by-field ledger.</p>
-</section>
+  {% set pw = result.procurement_window %}
+  <p>
+  {%- if pw.procurement_window_days is not none -%}
+    {%- if pw.procurement_window_days >= 0 -%}
+    <strong>{{ pw.procurement_window_days }} day(s)</strong> until a normal-schedule purchase
+    decision would need to be made ({{ pw.supply_window_days }} day(s) until the material is
+    required, minus the contract transit time).
+    {%- else -%}
+    <span class="hint">Already {{ -pw.procurement_window_days }} day(s) past the point a
+    normal-schedule purchase would need to have been made &mdash; any action now is expedited,
+    not routine.</span>
+    {%- endif -%}
+  {%- elif pw.supply_window_days is not none -%}
+    <strong>{{ pw.supply_window_days }} day(s)</strong> until the material is required. Supply
+    contract_transit_time_days to see how much of that is still a normal-schedule decision window.
+  {%- else -%}
+    <span class="hint">Procurement window not computable &mdash; ship date not supplied.</span>
+  {%- endif -%}
+  </p>
 
-{% if result.reassess_triggers %}
-<section class="panel">
-  <h2>Reassess if</h2>
+  {% if result.reassess_triggers %}
+  <p style="margin-top:var(--s4)"><strong>Reassess if:</strong></p>
   <ul>
     {% for x in result.reassess_triggers %}<li>{{ x }}</li>{% endfor %}
   </ul>
   <p class="hint">Named conditions worth watching for, from what's already computed above &mdash;
   not a prediction of when any of them will happen.</p>
-</section>
-{% endif %}
+  {% endif %}
 
-{% if result.what_would_sharpen %}
-<section class="panel">
-  <h2>What would sharpen this</h2>
+  {% if result.what_would_sharpen %}
+  <p style="margin-top:var(--s4)"><strong>What would sharpen this:</strong></p>
   <ol class="explain">
     {% for x in result.what_would_sharpen %}<li>{{ x }}</li>{% endfor %}
   </ol>
+  {% endif %}
+
+  <p class="m" style="margin-top:var(--s4)">Ledger:
+    {% for grade, n in ledger_by_grade %}{{ n }} {{ grade }}{{ ", " if not loop.last else "" }}{% endfor %}
+    &middot; weakest grade
+    <span class="badge {{ 'ok' if result.weakest_grade in ('CLIENT_QUOTED', 'CLIENT_SYSTEM', 'DERIVED') else 'hot' }}">{{ result.weakest_grade }}</span></p>
+
+  <div class="row" style="margin-top:var(--s4)">
+    <a class="btn ghost" href="/strategy-decisions/{{ row.id }}/report" target="_blank">Full report</a>
+    <form method="post" action="/strategy-decisions/{{ row.id }}/subscribe" style="margin:0">
+      <button class="btn {{ 'ghost' if subscribed else '' }}" type="submit">
+        {{ "Turn off monthly re-check" if subscribed else "Re-check this monthly" }}</button>
+    </form>
+  </div>
+  <p class="hint" style="margin:var(--s3) 0 0">The full report explains the decision and
+  break-even in plain sentences, with the complete field-by-field ledger.
+  {% if subscribed %}You'll get an email if next month's reading changes the recommended strategy.
+  {% else %}Monthly re-check is off. Turn it on to get an email if this decision's recommendation
+  changes as new readings come in.{% endif %}</p>
 </section>
-{% endif %}
 
 <p class="note">Model {{ result.model_version }}. Computed {{ result.timestamp }}.</p>
 {% endblock %}

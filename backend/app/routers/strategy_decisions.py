@@ -35,7 +35,8 @@ from ..db import get_session
 from ..deps import current_principal, current_user
 from ..models import User
 from ..strategy_decision import (
-    CORRIDORS, FIELDS, INCOTERM_GROUPS, compute_decision, decision_brief_html, template,
+    CORRIDORS, FIELDS, INCOTERM_GROUPS, compute_decision, decision_brief_html, fields_by_group,
+    template,
 )
 
 router = APIRouter()
@@ -149,10 +150,9 @@ def list_page(request: Request, user: User = Depends(current_user),
 def new_page(request: Request, user: User = Depends(current_user),
              session: Session = Depends(get_session), exposure_id: int | None = None):
     linked_exposure = crud.get_exposure_owned(session, user, exposure_id) if exposure_id else None
-    fields_by_tier = {tier: [f for f in FIELDS if f.tier == tier] for tier in (1, 2, 3)}
     return templates.TemplateResponse(request, "strategy_decision_new.html",
         {"user": user, "t": _template_context(), "corridors": sorted(CORRIDORS),
-         "incoterms": sorted(INCOTERM_GROUPS), "fields_by_tier": fields_by_tier,
+         "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(FIELDS),
          "error": None, "exposure_id": linked_exposure.id if linked_exposure else None,
          "linked_exposure": linked_exposure})
 
@@ -165,12 +165,11 @@ async def create_page(request: Request, exposure_id: int | None = Form(None),
     try:
         result = compute_decision(data)
     except (KeyError, ValueError, TypeError) as exc:
-        fields_by_tier = {tier: [f for f in FIELDS if f.tier == tier] for tier in (1, 2, 3)}
         t = dict(data)
         t.setdefault("currency", "EUR")
         return templates.TemplateResponse(request, "strategy_decision_new.html",
             {"user": user, "t": t, "corridors": sorted(CORRIDORS),
-             "incoterms": sorted(INCOTERM_GROUPS), "fields_by_tier": fields_by_tier,
+             "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(FIELDS),
              "error": f"{type(exc).__name__}: {exc}", "exposure_id": exposure_id,
              "linked_exposure": None}, status_code=422)
     exposure = crud.get_exposure_owned(session, user, exposure_id) if exposure_id else None
@@ -189,6 +188,7 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
     if row is None:
         raise HTTPException(404, "decision not found")
     result = json.loads(row.result_json)
+    input_data = json.loads(row.input_json)
     # Same grade-tally decision_brief_html() uses for its own LEDGER line --
     # computed here rather than duplicated as Jinja aggregation logic.
     ledger_by_grade: dict[str, int] = {}
@@ -196,7 +196,8 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
         ledger_by_grade[e["grade"]] = ledger_by_grade.get(e["grade"], 0) + 1
     subscribed = crud.is_subscribed_strategy_decision(session, user, row.id)
     return templates.TemplateResponse(request, "strategy_decision_detail.html",
-        {"user": user, "row": row, "result": result,
+        {"user": user, "row": row, "result": result, "input": input_data,
+         "field_groups": fields_by_group(FIELDS),
          "ledger_by_grade": sorted(ledger_by_grade.items()), "subscribed": subscribed})
 
 
