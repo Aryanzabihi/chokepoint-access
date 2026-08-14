@@ -198,9 +198,11 @@ def create_strategy_decision(session: Session, user: User, *, scenario_id: str, 
                               input_data: dict, result: dict,
                               client_id: int | None = None,
                               exposure_id: int | None = None,
-                              order_id: int | None = None) -> StrategyDecision:
+                              order_id: int | None = None,
+                              previous_decision_id: int | None = None) -> StrategyDecision:
     row = StrategyDecision(owner_user_id=user.id, client_id=client_id, exposure_id=exposure_id,
-                            order_id=order_id, scenario_id=scenario_id, corridor=corridor,
+                            order_id=order_id, previous_decision_id=previous_decision_id,
+                            scenario_id=scenario_id, corridor=corridor,
                             input_json=json.dumps(input_data), result_json=json.dumps(result))
     session.add(row)
     session.commit()
@@ -211,20 +213,40 @@ def create_strategy_decision(session: Session, user: User, *, scenario_id: str, 
     return row
 
 
-def approve_strategy_decision(session: Session, user: User,
-                               decision: StrategyDecision) -> StrategyDecision:
-    """The one direct mutation of an otherwise create-only StrategyDecision --
-    same lifecycle-state-mutates-via-POST-action pattern as revoke_api_key()
-    above, not a new exception to it. The AuditEvent row this writes is the
-    approval record (who, when) -- no separate approved_by/approved_at
-    columns, reusing existing infrastructure instead of duplicating it."""
-    decision.status = "approved"
+def _set_strategy_decision_status(session: Session, user: User, decision: StrategyDecision,
+                                   status: str, action: str) -> StrategyDecision:
+    """Shared body for approve/reject/execute -- the one direct mutation of
+    an otherwise create-only StrategyDecision, same lifecycle-state-
+    mutates-via-POST-action pattern as revoke_api_key() above, not a new
+    exception to it. The AuditEvent row this writes is the record of who/
+    when -- no separate approved_by/approved_at-style columns, reusing
+    existing infrastructure instead of duplicating it. Not enforced as a
+    strict state machine here (e.g. rejecting an already-executed decision
+    is not blocked) -- matches this file's existing permissiveness
+    elsewhere; the dashboard only ever offers the buttons that make sense
+    for the decision's current status (see strategy_decision_detail.html)."""
+    decision.status = status
     session.add(decision)
     session.commit()
-    audit(session, user.id, "strategy_decision", decision.id, "approved")
+    audit(session, user.id, "strategy_decision", decision.id, action)
     session.commit()
     session.refresh(decision)
     return decision
+
+
+def approve_strategy_decision(session: Session, user: User,
+                               decision: StrategyDecision) -> StrategyDecision:
+    return _set_strategy_decision_status(session, user, decision, "approved", "approved")
+
+
+def reject_strategy_decision(session: Session, user: User,
+                              decision: StrategyDecision) -> StrategyDecision:
+    return _set_strategy_decision_status(session, user, decision, "rejected", "rejected")
+
+
+def execute_strategy_decision(session: Session, user: User,
+                               decision: StrategyDecision) -> StrategyDecision:
+    return _set_strategy_decision_status(session, user, decision, "executed", "executed")
 
 
 def latest_strategy_decision_for_exposure(session: Session,

@@ -153,11 +153,13 @@ class StrategyDecision(SQLModel, table=True):
     client_id: int | None = Field(default=None, foreign_key="client.id", index=True)
     exposure_id: int | None = Field(default=None, foreign_key="exposure.id", index=True)
     order_id: int | None = Field(default=None, foreign_key="procurementorder.id", index=True)
+    previous_decision_id: int | None = Field(default=None, foreign_key="strategydecision.id",
+                                             index=True)
     scenario_id: str
     corridor: str
     input_json: str
     result_json: str
-    status: str = Field(default="draft")   # draft | approved
+    status: str = Field(default="draft")   # draft | approved | rejected | executed
     created_at: datetime = Field(default_factory=utcnow)
 
 

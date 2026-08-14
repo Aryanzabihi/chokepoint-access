@@ -46,6 +46,13 @@ _STRATEGY_SLOT_COUNT = 3   # fixed slots (mirrors economic's fixed _STRATEGY_DEF
                           # dynamic add/remove-row JS) -- every stage's default set in
                           # strategy_decision.default_strategies_for_stage() has exactly this many
 
+# The Tier-3 "live market data" fields (workflow.md step 5) -- the only
+# fields the recalculate loop ("go to market -> reassess with TAR") ever
+# overrides. Everything else about the decision (strategies, probability,
+# every other field) stays exactly as originally entered.
+_QUOTE_FIELDS = ("disrupted_freight_quote", "reroute_quote", "war_risk_premium_quote",
+                 "emergency_replacement_quote")
+
 
 def _num(form: FormData, key: str, default: float | None = None) -> float | None:
     v = form.get(key)
@@ -237,12 +244,22 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
     subscribed = crud.is_subscribed_strategy_decision(session, user, row.id)
     linked_order = crud.get_procurement_order_owned(session, user, row.order_id) \
         if row.order_id else None
+    previous_decision = None
+    previous_recommended = None
+    recommendation_changed = None
+    if row.previous_decision_id:
+        previous_decision = crud.get_strategy_decision_owned(session, user, row.previous_decision_id)
+        if previous_decision is not None:
+            previous_recommended = json.loads(previous_decision.result_json).get("recommended")
+            recommendation_changed = previous_recommended != result.get("recommended")
     return templates.TemplateResponse(request, "strategy_decision_detail.html",
         {"user": user, "row": row, "result": result, "input": input_data,
          "field_groups": fields_by_group(FIELDS),
          "ledger_by_grade": sorted(ledger_by_grade.items()), "subscribed": subscribed,
          "linked_order": linked_order,
-         "decision_framing": decision_framing_for_stage(linked_order.stage if linked_order else None)})
+         "decision_framing": decision_framing_for_stage(linked_order.stage if linked_order else None),
+         "previous_decision": previous_decision, "previous_recommended": previous_recommended,
+         "recommendation_changed": recommendation_changed})
 
 
 @router.post("/strategy-decisions/{decision_id}/subscribe")
@@ -263,6 +280,69 @@ def approve_page(decision_id: int, user: User = Depends(current_user),
         raise HTTPException(404, "decision not found")
     crud.approve_strategy_decision(session, user, row)
     return RedirectResponse(f"/strategy-decisions/{row.id}", status_code=303)
+
+
+@router.post("/strategy-decisions/{decision_id}/reject")
+def reject_page(decision_id: int, user: User = Depends(current_user),
+                 session: Session = Depends(get_session)):
+    row = crud.get_strategy_decision_owned(session, user, decision_id)
+    if row is None:
+        raise HTTPException(404, "decision not found")
+    crud.reject_strategy_decision(session, user, row)
+    return RedirectResponse(f"/strategy-decisions/{row.id}", status_code=303)
+
+
+@router.post("/strategy-decisions/{decision_id}/execute")
+def execute_page(decision_id: int, user: User = Depends(current_user),
+                  session: Session = Depends(get_session)):
+    row = crud.get_strategy_decision_owned(session, user, decision_id)
+    if row is None:
+        raise HTTPException(404, "decision not found")
+    crud.execute_strategy_decision(session, user, row)
+    return RedirectResponse(f"/strategy-decisions/{row.id}", status_code=303)
+
+
+@router.get("/strategy-decisions/{decision_id}/recalculate", response_class=HTMLResponse)
+def recalculate_page(decision_id: int, request: Request, user: User = Depends(current_user),
+                      session: Session = Depends(get_session)):
+    row = crud.get_strategy_decision_owned(session, user, decision_id)
+    if row is None:
+        raise HTTPException(404, "decision not found")
+    current_fields = json.loads(row.input_json).get("fields", {})
+    current_quotes = {name: current_fields.get(name) for name in _QUOTE_FIELDS}
+    return templates.TemplateResponse(request, "strategy_decision_recalculate.html",
+        {"user": user, "row": row, "current_quotes": current_quotes, "error": None})
+
+
+@router.post("/strategy-decisions/{decision_id}/recalculate")
+async def recalculate_submit(decision_id: int, request: Request, user: User = Depends(current_user),
+                             session: Session = Depends(get_session)):
+    """workflow.md's "go to market -> reassess with TAR" loop: plug in real
+    quotes, recompute the SAME decision (same corridor, same strategies,
+    same everything else), see whether the recommendation survives contact
+    with the market. Never touches anything but the 4 Tier-3 quote fields —
+    the new decision is a genuine recalculation, not a fresh one."""
+    row = crud.get_strategy_decision_owned(session, user, decision_id)
+    if row is None:
+        raise HTTPException(404, "decision not found")
+    form = await request.form()
+    new_input = json.loads(row.input_json)
+    for name in _QUOTE_FIELDS:
+        v = _num(form, f"field_{name}")
+        if v is not None:
+            new_input["fields"][name] = v
+    try:
+        result = compute_decision(new_input)
+    except (KeyError, ValueError, TypeError) as exc:
+        current_quotes = {name: new_input.get("fields", {}).get(name) for name in _QUOTE_FIELDS}
+        return templates.TemplateResponse(request, "strategy_decision_recalculate.html",
+            {"user": user, "row": row, "current_quotes": current_quotes,
+             "error": f"{type(exc).__name__}: {exc}"}, status_code=422)
+    new_row = crud.create_strategy_decision(
+        session, user, scenario_id=f"{row.scenario_id}-RECALC", corridor=result["corridor"],
+        input_data=new_input, result=result, client_id=row.client_id,
+        exposure_id=row.exposure_id, order_id=row.order_id, previous_decision_id=row.id)
+    return RedirectResponse(f"/strategy-decisions/{new_row.id}", status_code=303)
 
 
 @router.get("/strategy-decisions/{decision_id}/report", response_class=HTMLResponse)

@@ -695,6 +695,88 @@ def test_decision_wizard(client):
     assert f'href="/orders"' in r.text
 
 
+def test_decision_lifecycle(client):
+    """draft -> reject, draft -> approve -> execute, and the recalculate
+    loop (workflow.md's "go to market -> reassess with TAR"). The
+    recalculate case uses a hand-verified quote change: raising
+    war_risk_premium_quote from the sample's 340,000 to 3,500,000 actually
+    flips decision_engine's own recommendation from Continue to Partial
+    reroute (checked directly against src/decision_engine.py before writing
+    this assertion, not guessed) -- proves the loop really recomputes,
+    not just re-saves."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "lifecycle@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+
+    # --- draft -> reject ---
+    r = client.post("/strategy-decisions", data=_decision_form(sample), follow_redirects=False)
+    assert r.status_code == 303, r.text
+    decision1_url = r.headers["location"]
+    decision1_id = int(decision1_url.rsplit("/", 1)[-1])
+
+    r = client.get(decision1_url)
+    assert ">draft<" in r.text and "Approve" in r.text and "Modify" in r.text and "Reject" in r.text
+
+    r = client.post(f"/strategy-decisions/{decision1_id}/reject", follow_redirects=False)
+    assert r.status_code == 303
+    r = client.get(decision1_url)
+    assert ">rejected<" in r.text
+
+    # --- draft -> approve -> execute ---
+    r = client.post("/strategy-decisions", data=_decision_form(sample), follow_redirects=False)
+    decision2_url = r.headers["location"]
+    decision2_id = int(decision2_url.rsplit("/", 1)[-1])
+    client.post(f"/strategy-decisions/{decision2_id}/approve", follow_redirects=False)
+    r = client.get(decision2_url)
+    assert ">approved<" in r.text
+    assert "Mark executed" in r.text and "Reassess with new quotes" in r.text
+
+    r = client.post(f"/strategy-decisions/{decision2_id}/execute", follow_redirects=False)
+    assert r.status_code == 303
+    r = client.get(decision2_url)
+    assert ">executed<" in r.text
+
+    # --- recalculate: a real quote change that really flips the recommendation ---
+    r = client.post("/strategy-decisions", data=_decision_form(sample), follow_redirects=False)
+    decision3_url = r.headers["location"]
+    decision3_id = int(decision3_url.rsplit("/", 1)[-1])
+    r = client.get(decision3_url)
+    assert "Continue" in r.text   # the sample's original, base-rate-fallback recommendation
+
+    r = client.get(f"/strategy-decisions/{decision3_id}/recalculate")
+    assert r.status_code == 200
+    assert 'value="340000.0"' in r.text   # the sample's current war_risk_premium_quote, pre-filled
+
+    r = client.post(f"/strategy-decisions/{decision3_id}/recalculate",
+                     data={"field_war_risk_premium_quote": "3500000"}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    decision4_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    assert decision4_id != decision3_id   # a new row, not an in-place edit
+
+    r = client.get(r.headers["location"])
+    assert "Partial reroute" in r.text
+    assert "Recalculated from" in r.text and "<strong>changed</strong>" in r.text
+
+    # recalculating again with the SAME quote is correctly reported as unchanged
+    r = client.post(f"/strategy-decisions/{decision4_id}/recalculate",
+                     data={"field_war_risk_premium_quote": "3500000"}, follow_redirects=False)
+    r = client.get(r.headers["location"])
+    assert "recommendation is unchanged" in r.text
+
+    # cross-user isolation holds for the new actions too
+    other = TestClient(app)
+    other.post("/signup", data={"email": "other-lifecycle@example.com",
+                                 "password": "a different password"})
+    r = other.post(f"/strategy-decisions/{decision2_id}/reject")
+    assert r.status_code == 404
+
+
 def test_alerts_job_runs_without_error(client):
     """alerts.run() opens its own session against app.db.engine, which in
     this process points at DATABASE_URL (the sqlite file), not the

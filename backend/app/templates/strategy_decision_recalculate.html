@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Reassess with TAR — {{ row.scenario_id }}{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/strategy-decisions/{{ row.id }}" style="color:inherit">{{ row.scenario_id }}</a>
+  &middot; reassess</div>
+  <h1>Reassess with real quotes</h1>
+  <p class="thesis">Procurement went to market. Plug in what came back and TAR recomputes this
+  exact decision &mdash; same corridor, same strategies, same everything else &mdash; to see
+  whether the recommendation survives contact with the market.</p>
+</header>
+
+{% if error %}<p class="note hot"><strong>Could not recalculate.</strong> {{ error }}</p>{% endif %}
+
+<form class="panel" method="post" action="/strategy-decisions/{{ row.id }}/recalculate" style="margin-top:0">
+  <div class="row">
+    <div class="field" style="width:180px">
+      <label for="field_disrupted_freight_quote">Disrupted freight quote</label>
+      <input type="number" id="field_disrupted_freight_quote" name="field_disrupted_freight_quote"
+             step="any" value="{{ current_quotes.disrupted_freight_quote if current_quotes.disrupted_freight_quote is not none else '' }}">
+      <p class="hint">on file now &mdash; leave blank to keep it</p>
+    </div>
+    <div class="field" style="width:180px">
+      <label for="field_reroute_quote">Reroute quote</label>
+      <input type="number" id="field_reroute_quote" name="field_reroute_quote" step="any"
+             value="{{ current_quotes.reroute_quote if current_quotes.reroute_quote is not none else '' }}">
+    </div>
+    <div class="field" style="width:180px">
+      <label for="field_war_risk_premium_quote">War-risk insurance</label>
+      <input type="number" id="field_war_risk_premium_quote" name="field_war_risk_premium_quote"
+             step="any" value="{{ current_quotes.war_risk_premium_quote if current_quotes.war_risk_premium_quote is not none else '' }}">
+    </div>
+    <div class="field" style="width:180px">
+      <label for="field_emergency_replacement_quote">Emergency replacement</label>
+      <input type="number" id="field_emergency_replacement_quote" name="field_emergency_replacement_quote"
+             step="any" value="{{ current_quotes.emergency_replacement_quote if current_quotes.emergency_replacement_quote is not none else '' }}">
+    </div>
+  </div>
+  <button class="btn" type="submit">Reassess with TAR</button>
+</form>
+{% endblock %}

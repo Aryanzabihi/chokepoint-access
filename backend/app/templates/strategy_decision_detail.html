@@ -15,7 +15,7 @@
   <div class="eyebrow"><a href="/strategy-decisions" style="color:inherit">Strategy decisions</a>
   &middot; {{ row.corridor }} &middot; {{ result.incoterm }}</div>
   <h1>{{ row.scenario_id }}
-    <span class="badge {{ 'ok' if row.status == 'approved' else '' }}" style="vertical-align:middle;margin-left:8px">{{ row.status }}</span></h1>
+    <span class="badge {{ 'ok' if row.status in ('approved', 'executed') else ('hot' if row.status == 'rejected' else '') }}" style="vertical-align:middle;margin-left:8px">{{ row.status }}</span></h1>
 </header>
 
 {% if result.client_exposure_note %}<p class="note">{{ result.client_exposure_note }}</p>{% endif %}
@@ -23,6 +23,15 @@
 {% if linked_order %}
 <p class="note">Built from order <a href="/orders/{{ linked_order.id }}">{{ linked_order.sku }}</a>
 (<span class="badge">{{ linked_order.stage.replace('_', ' ') }}</span>).</p>
+{% endif %}
+
+{% if previous_decision %}
+<p class="note {{ 'hot' if recommendation_changed else '' }}">Recalculated from
+<a href="/strategy-decisions/{{ previous_decision.id }}">{{ previous_decision.scenario_id }}</a>
+with updated quotes &mdash;
+{% if recommendation_changed %}the recommendation <strong>changed</strong>, from
+{{ previous_recommended or "—" }} to {{ result.recommended }}.
+{% else %}the recommendation is unchanged.{% endif %}</p>
 {% endif %}
 
 <div class="status">
@@ -350,17 +359,31 @@
     &middot; weakest grade
     <span class="badge {{ 'ok' if result.weakest_grade in ('CLIENT_QUOTED', 'CLIENT_SYSTEM', 'DERIVED') else 'hot' }}">{{ result.weakest_grade }}</span></p>
 
+  {% if row.status == "draft" %}
   <div class="row" style="margin-top:var(--s4)">
+    <form method="post" action="/strategy-decisions/{{ row.id }}/approve" style="margin:0">
+      <button class="btn" type="submit">Approve</button>
+    </form>
+    <a class="btn ghost" href="/strategy-decisions/new{{ '?order_id=' ~ linked_order.id if linked_order else '' }}">Modify</a>
+    <form method="post" action="/strategy-decisions/{{ row.id }}/reject" style="margin:0">
+      <button class="btn ghost" type="submit">Reject</button>
+    </form>
+  </div>
+  {% elif row.status == "approved" %}
+  <div class="row" style="margin-top:var(--s4)">
+    <form method="post" action="/strategy-decisions/{{ row.id }}/execute" style="margin:0">
+      <button class="btn" type="submit">Mark executed</button>
+    </form>
+    <a class="btn ghost" href="/strategy-decisions/{{ row.id }}/recalculate">Reassess with new quotes</a>
+  </div>
+  {% endif %}
+
+  <div class="row" style="margin-top:var(--s3)">
     <a class="btn ghost" href="/strategy-decisions/{{ row.id }}/report" target="_blank">Full report</a>
     <form method="post" action="/strategy-decisions/{{ row.id }}/subscribe" style="margin:0">
       <button class="btn {{ 'ghost' if subscribed else '' }}" type="submit">
         {{ "Turn off monthly re-check" if subscribed else "Re-check this monthly" }}</button>
     </form>
-    {% if row.status == "draft" %}
-    <form method="post" action="/strategy-decisions/{{ row.id }}/approve" style="margin:0">
-      <button class="btn" type="submit">Approve</button>
-    </form>
-    {% endif %}
   </div>
   <p class="hint" style="margin:var(--s3) 0 0">The full report explains the decision and
   break-even in plain sentences, with the complete field-by-field ledger.
