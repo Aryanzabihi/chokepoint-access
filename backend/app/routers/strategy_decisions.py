@@ -35,18 +35,16 @@ from ..db import get_session
 from ..deps import current_principal, current_user
 from ..models import User
 from ..strategy_decision import (
-    CORRIDORS, FIELDS, INCOTERM_GROUPS, compute_decision, decision_brief_html, fields_by_group,
-    template,
+    CORRIDORS, FIELDS, INCOTERM_GROUPS, compute_decision, decision_brief_html,
+    decision_framing_for_stage, default_strategies_for_stage, fields_by_group, template,
 )
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
-_STRATEGY_DEFAULTS = [
-    ("Continue", 0.0, True),
-    ("Partial reroute", 700_000.0, False),
-    ("", 0.0, False),
-]
+_STRATEGY_SLOT_COUNT = 3   # fixed slots (mirrors economic's fixed _STRATEGY_DEFS rather than
+                          # dynamic add/remove-row JS) -- every stage's default set in
+                          # strategy_decision.default_strategies_for_stage() has exactly this many
 
 
 def _num(form: FormData, key: str, default: float | None = None) -> float | None:
@@ -84,7 +82,7 @@ def _form_to_intake(form: FormData) -> dict:
     baseline_idx = int(form.get("baseline_strategy") or 0)  # type: ignore[arg-type]
 
     strategies = []
-    for i in range(len(_STRATEGY_DEFAULTS)):
+    for i in range(_STRATEGY_SLOT_COUNT):
         name = form.get(f"strategy_{i}_name")
         if not name:
             continue
@@ -118,17 +116,40 @@ def _form_to_intake(form: FormData) -> dict:
     return data
 
 
-def _template_context() -> dict:
+_DEMAND_SUPPLY_FIELDS = ("forecast_quantity", "forecast_window_days", "current_inventory",
+                        "inbound_confirmed_quantity", "safety_stock")
+
+
+def _template_context(order=None, demand_supply: dict | None = None) -> dict:
     # template(3): every field gets a None placeholder regardless of tier,
     # so the form always has a key to look up (fields left above the
     # client's chosen tier just stay blank -- see intake.py, supplying one
     # anyway is never forbidden, only not required).
     t = template(3)
-    t["strategies"] = [
-        {"name": n, "direct_cost": c, "is_baseline": b, "notes": "",
-         "effects": {"delay_days_delta": 0, "capacity_restored": 0,
-                     "war_risk_premium_multiplier": None, "days_of_cover_delta": 0}}
-        for n, c, b in _STRATEGY_DEFAULTS]
+    t["strategies"] = default_strategies_for_stage(order.stage if order else None)
+    if order is not None:
+        # Pre-fill from the linked order -- a deliberate improvement over
+        # exposure_id linking below, which pre-fills nothing at all today.
+        t["corridor"] = order.corridor
+        t["incoterm"] = order.incoterm
+        t["fields"]["quantity"] = order.quantity
+        t["fields"]["quantity_unit"] = order.quantity_unit
+        t["fields"]["cargo_value"] = order.cargo_value
+        t["fields"]["contract_freight_rate"] = order.contract_freight_rate
+        t["fields"]["contract_transit_time_days"] = order.contract_transit_time_days
+        t["fields"]["ship_date"] = order.ship_date
+    if demand_supply:
+        # Carried forward from the New Decision wizard's demand & supply
+        # step (decision_wizard.py) as query params, not persisted on the
+        # order itself -- these five fields conceptually belong to a
+        # reusable DemandPlan this project has deliberately deferred (see
+        # memory); carrying them as transient wizard state avoids
+        # duplicating that future table ahead of time. They end up
+        # persisted exactly once, inside this StrategyDecision's own
+        # intake blob, same as if the client had typed them in directly.
+        for name in _DEMAND_SUPPLY_FIELDS:
+            if demand_supply.get(name) is not None:
+                t["fields"][name] = demand_supply[name]
     return t
 
 
@@ -148,20 +169,33 @@ def list_page(request: Request, user: User = Depends(current_user),
 
 @router.get("/strategy-decisions/new", response_class=HTMLResponse)
 def new_page(request: Request, user: User = Depends(current_user),
-             session: Session = Depends(get_session), exposure_id: int | None = None):
+             session: Session = Depends(get_session), exposure_id: int | None = None,
+             order_id: int | None = None, forecast_quantity: float | None = None,
+             forecast_window_days: float | None = None, current_inventory: float | None = None,
+             inbound_confirmed_quantity: float | None = None, safety_stock: float | None = None):
     linked_exposure = crud.get_exposure_owned(session, user, exposure_id) if exposure_id else None
+    linked_order = crud.get_procurement_order_owned(session, user, order_id) if order_id else None
+    demand_supply = {"forecast_quantity": forecast_quantity,
+                     "forecast_window_days": forecast_window_days,
+                     "current_inventory": current_inventory,
+                     "inbound_confirmed_quantity": inbound_confirmed_quantity,
+                     "safety_stock": safety_stock}
     return templates.TemplateResponse(request, "strategy_decision_new.html",
-        {"user": user, "t": _template_context(), "corridors": sorted(CORRIDORS),
+        {"user": user, "t": _template_context(linked_order, demand_supply),
+         "corridors": sorted(CORRIDORS),
          "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(FIELDS),
          "error": None, "exposure_id": linked_exposure.id if linked_exposure else None,
-         "linked_exposure": linked_exposure})
+         "linked_exposure": linked_exposure,
+         "order_id": linked_order.id if linked_order else None, "linked_order": linked_order})
 
 
 @router.post("/strategy-decisions")
 async def create_page(request: Request, exposure_id: int | None = Form(None),
+                       order_id: int | None = Form(None),
                        user: User = Depends(current_user), session: Session = Depends(get_session)):
     form = await request.form()
     data = _form_to_intake(form)
+    order = crud.get_procurement_order_owned(session, user, order_id) if order_id else None
     try:
         result = compute_decision(data)
     except (KeyError, ValueError, TypeError) as exc:
@@ -171,13 +205,19 @@ async def create_page(request: Request, exposure_id: int | None = Form(None),
             {"user": user, "t": t, "corridors": sorted(CORRIDORS),
              "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(FIELDS),
              "error": f"{type(exc).__name__}: {exc}", "exposure_id": exposure_id,
-             "linked_exposure": None}, status_code=422)
+             "linked_exposure": None, "order_id": order.id if order else None,
+             "linked_order": order}, status_code=422)
     exposure = crud.get_exposure_owned(session, user, exposure_id) if exposure_id else None
+    # An order's own client/exposure linkage wins when an order is present
+    # (more specific than a bare exposure_id) -- see strategy_decision.py's
+    # _template_context docstring for the matching pre-fill precedent.
+    client_id = order.client_id if order else (exposure.client_id if exposure else None)
+    linked_exposure_id = order.exposure_id if order else (exposure.id if exposure else None)
     row = crud.create_strategy_decision(
         session, user, scenario_id=data.get("scenario_id", "SCENARIO-UNSPECIFIED"),
         corridor=result["corridor"], input_data=data, result=result,
-        client_id=exposure.client_id if exposure else None,
-        exposure_id=exposure.id if exposure else None)
+        client_id=client_id, exposure_id=linked_exposure_id,
+        order_id=order.id if order else None)
     return RedirectResponse(f"/strategy-decisions/{row.id}", status_code=303)
 
 
@@ -195,10 +235,14 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
     for e in result["ledger"]:
         ledger_by_grade[e["grade"]] = ledger_by_grade.get(e["grade"], 0) + 1
     subscribed = crud.is_subscribed_strategy_decision(session, user, row.id)
+    linked_order = crud.get_procurement_order_owned(session, user, row.order_id) \
+        if row.order_id else None
     return templates.TemplateResponse(request, "strategy_decision_detail.html",
         {"user": user, "row": row, "result": result, "input": input_data,
          "field_groups": fields_by_group(FIELDS),
-         "ledger_by_grade": sorted(ledger_by_grade.items()), "subscribed": subscribed})
+         "ledger_by_grade": sorted(ledger_by_grade.items()), "subscribed": subscribed,
+         "linked_order": linked_order,
+         "decision_framing": decision_framing_for_stage(linked_order.stage if linked_order else None)})
 
 
 @router.post("/strategy-decisions/{decision_id}/subscribe")
@@ -208,6 +252,16 @@ def subscribe_page(decision_id: int, user: User = Depends(current_user),
     if row is None:
         raise HTTPException(404, "decision not found")
     crud.toggle_strategy_decision_subscription(session, user, row.id)
+    return RedirectResponse(f"/strategy-decisions/{row.id}", status_code=303)
+
+
+@router.post("/strategy-decisions/{decision_id}/approve")
+def approve_page(decision_id: int, user: User = Depends(current_user),
+                  session: Session = Depends(get_session)):
+    row = crud.get_strategy_decision_owned(session, user, decision_id)
+    if row is None:
+        raise HTTPException(404, "decision not found")
+    crud.approve_strategy_decision(session, user, row)
     return RedirectResponse(f"/strategy-decisions/{row.id}", status_code=303)
 
 

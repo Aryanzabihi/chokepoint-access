@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Orders — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">Orders</div>
+  <h1>Procurement orders</h1>
+  <p class="thesis">Every requirement you're tracking, at whatever stage it's actually in &mdash;
+  a pre-order intent, a placed PO, or a shipment already moving. Strategy decisions built from
+  an order pick up its stage automatically.</p>
+</header>
+
+<div class="row" style="margin:0 0 var(--s5)">
+  <a class="btn" href="/orders/new">New order</a>
+</div>
+
+<section class="panel" style="margin-top:0">
+  <h2>Orders ({{ orders|length }})</h2>
+  {% if orders %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>SKU</th><th>Corridor</th><th>Stage</th>
+      <th class="m">Quantity</th><th class="m">Created</th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+        <tr>
+          <td><a href="/orders/{{ o.id }}">{{ o.sku }}</a></td>
+          <td>{{ o.corridor }}</td>
+          <td><span class="badge">{{ o.stage.replace('_', ' ') }}</span></td>
+          <td class="m">{{ "{:,.0f}".format(o.quantity) }} {{ o.quantity_unit }}</td>
+          <td class="m">{{ o.created_at.strftime("%Y-%m-%d") }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No orders yet. <a href="/orders/new">Add one</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}

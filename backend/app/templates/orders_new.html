@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}New order — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/orders" style="color:inherit">Orders</a> &middot; new</div>
+  <h1>New procurement order</h1>
+  <p class="thesis">Just the requirement itself &mdash; PO number, price and ship date come later,
+  once you actually have them, via "advance stage" on the order's own page.</p>
+</header>
+
+{% if error %}<p class="note hot"><strong>Could not save this order.</strong> {{ error }}</p>{% endif %}
+
+{% if linked_exposure %}
+<p class="hint">This order will be linked to your <strong>{{ linked_exposure.corridor }}</strong>
+exposure.</p>
+{% endif %}
+
+<form class="panel" method="post" action="/orders" style="margin-top:0">
+  {% if exposure_id %}<input type="hidden" name="exposure_id" value="{{ exposure_id }}">{% endif %}
+  <div class="row">
+    <div class="field" style="min-width:200px;flex:1">
+      <label for="sku">SKU / product</label>
+      <input type="text" id="sku" name="sku" required placeholder="e.g. Industrial component A">
+    </div>
+    <div class="field" style="min-width:220px;flex:1">
+      <label for="corridor">Chokepoint</label>
+      <select id="corridor" name="corridor" required>
+        <option value="" selected disabled>Choose a corridor&hellip;</option>
+        {% for c in corridors %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field" style="width:180px">
+      <label for="stage">Stage</label>
+      <select id="stage" name="stage">
+        {% for s in stages %}
+        <option value="{{ s }}" {{ "selected" if s == "pre_order" else "" }}>{{ stage_labels[s] }}</option>
+        {% endfor %}
+      </select>
+      <p class="hint">most orders start as pre-order</p>
+    </div>
+  </div>
+  <div class="row">
+    <div class="field" style="width:160px">
+      <label for="quantity">Quantity</label>
+      <input type="number" id="quantity" name="quantity" step="any" required>
+    </div>
+    <div class="field" style="width:140px">
+      <label for="quantity_unit">Unit</label>
+      <input type="text" id="quantity_unit" name="quantity_unit" placeholder="e.g. MT" required>
+    </div>
+    <div class="field" style="width:180px">
+      <label for="cargo_value">Cargo value</label>
+      <input type="number" id="cargo_value" name="cargo_value" step="any">
+      <p class="hint">optional &mdash; can be added later</p>
+    </div>
+    <div class="field" style="width:120px">
+      <label for="currency">Currency</label>
+      <input type="text" id="currency" name="currency" value="EUR">
+    </div>
+  </div>
+  <div class="row">
+    <div class="field" style="width:140px">
+      <label for="incoterm">Incoterm</label>
+      <select id="incoterm" name="incoterm">
+        <option value="">&mdash;</option>
+        {% for i in incoterms %}<option value="{{ i }}">{{ i }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field" style="min-width:200px;flex:1">
+      <label for="supplier">Supplier</label>
+      <input type="text" id="supplier" name="supplier">
+    </div>
+  </div>
+  <button class="btn" type="submit">Save order</button>
+</form>
+{% endblock %}

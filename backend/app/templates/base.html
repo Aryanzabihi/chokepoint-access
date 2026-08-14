@@ -13,10 +13,12 @@
 <nav class="nav">
   <a href="/home" class="{{ 'here' if active == 'home' else '' }}">Home</a>
   <a href="/clients" class="{{ 'here' if active == 'clients' else '' }}">Portfolio</a>
-  <a href="/strategy-decisions" class="{{ 'here' if active == 'strategy-decisions' else '' }}">Strategy decisions</a>
+  <a href="/orders" class="{{ 'here' if active == 'orders' else '' }}">Orders</a>
+  <a href="/strategy-decisions" class="{{ 'here' if active == 'strategy-decisions' else '' }}">Decisions</a>
   <a href="/account/api-keys" class="{{ 'here' if active == 'api-keys' else '' }}">API keys</a>
   <a href="https://aryanzabihi.github.io/chokepoint-access/threshold-engine.html">Act or wait</a>
   <span class="spacer"></span>
+  <a class="btn" href="/decisions/new" style="padding:6px 12px">+ New decision</a>
   {% if user %}
     <span class="stamp">{{ user.email }}</span>
     <form method="post" action="/logout" style="display:inline;margin:0">

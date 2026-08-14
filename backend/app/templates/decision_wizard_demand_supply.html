@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Demand & supply — new decision{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/decisions/new" style="color:inherit">New decision</a> &middot; step 1 of 2</div>
+  <h1>Demand &amp; supply</h1>
+  <p class="thesis">What are you planning to supply, and what do you already have? TAR works out
+  the additional quantity to secure &mdash; you don't have to calculate that yourself.</p>
+</header>
+
+<form class="panel" method="post" action="/decisions/new/demand-supply" style="margin-top:0">
+  <input type="hidden" name="stage" value="{{ stage }}">
+  <div class="row">
+    <div class="field" style="min-width:220px;flex:1">
+      <label for="sku">Product / SKU</label>
+      <input type="text" id="sku" name="sku" required placeholder="e.g. Industrial component A">
+    </div>
+    <div class="field" style="width:140px">
+      <label for="quantity_unit">Unit</label>
+      <input type="text" id="quantity_unit" name="quantity_unit" placeholder="e.g. units, MT" required>
+    </div>
+  </div>
+  <div class="row">
+    <div class="field" style="width:180px">
+      <label for="forecast_quantity">Forecast quantity</label>
+      <input type="number" id="forecast_quantity" name="forecast_quantity" step="any" required>
+    </div>
+    <div class="field" style="width:160px">
+      <label for="forecast_window_days">Forecast horizon</label>
+      <input type="number" id="forecast_window_days" name="forecast_window_days" step="any" required>
+      <p class="hint">days</p>
+    </div>
+  </div>
+  <p class="hint" style="margin:0 0 var(--s3)">Current supply &mdash; leave any of these blank if
+  you don't hold that figure; TAR only nets what you actually supply.</p>
+  <div class="row">
+    <div class="field" style="width:180px">
+      <label for="current_inventory">Available inventory</label>
+      <input type="number" id="current_inventory" name="current_inventory" step="any">
+    </div>
+    <div class="field" style="width:180px">
+      <label for="inbound_confirmed_quantity">Confirmed inbound</label>
+      <input type="number" id="inbound_confirmed_quantity" name="inbound_confirmed_quantity" step="any">
+    </div>
+    <div class="field" style="width:160px">
+      <label for="safety_stock">Safety stock</label>
+      <input type="number" id="safety_stock" name="safety_stock" step="any">
+    </div>
+  </div>
+  <button class="btn" type="submit">Continue &rarr;</button>
+</form>
+{% endblock %}

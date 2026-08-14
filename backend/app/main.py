@@ -15,7 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .routers import (
-    api_keys, api_v1, clients, dashboard, economic, exposures, reports, strategy_decisions,
+    api_keys, api_v1, clients, dashboard, decision_wizard, economic, exposures, orders,
+    reports, strategy_decisions,
 )
 
 APP_DIR = Path(__file__).resolve().parent
@@ -36,6 +37,8 @@ app.include_router(exposures.router, prefix="/api/v1/exposures", tags=["exposure
 app.include_router(reports.router, tags=["reports"])
 app.include_router(economic.router, tags=["economic-scenarios"])
 app.include_router(strategy_decisions.router, tags=["strategy-decisions"])
+app.include_router(orders.router, tags=["orders"])
+app.include_router(decision_wizard.router, tags=["decision-wizard"])
 app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"])
 app.include_router(api_v1.router, prefix="/api/v1", tags=["public-api"])
 

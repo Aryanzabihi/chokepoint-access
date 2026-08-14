@@ -152,10 +152,12 @@ class StrategyDecision(SQLModel, table=True):
     owner_user_id: int = Field(foreign_key="user.id", index=True)
     client_id: int | None = Field(default=None, foreign_key="client.id", index=True)
     exposure_id: int | None = Field(default=None, foreign_key="exposure.id", index=True)
+    order_id: int | None = Field(default=None, foreign_key="procurementorder.id", index=True)
     scenario_id: str
     corridor: str
     input_json: str
     result_json: str
+    status: str = Field(default="draft")   # draft | approved
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -167,4 +169,51 @@ class StrategyDecisionSubscription(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     strategy_decision_id: int = Field(foreign_key="strategydecision.id", index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ProcurementOrder(SQLModel, table=True):
+    """A procurement requirement moving through its own lifecycle -- pre-order
+    intent, placed PO, shipment in transit, delivered -- independent of any
+    one StrategyDecision computed against it. Named ProcurementOrder rather
+    than Order for clarity against a hypothetical future work-order/sales-
+    order, not because "order" needs escaping (SQLAlchemy already auto-quotes
+    reserved identifiers -- "user" above is proof).
+
+    Scoped directly to the owning user, same pattern as StrategyDecision/
+    EconomicScenario (an order is useful standalone, before any client/
+    exposure relationship exists yet); client_id/exposure_id are optional
+    links for organising it once one does.
+
+    Unlike every other table in this file, `stage` is genuinely mutated in
+    place over the order's life (see crud.advance_procurement_order_stage)
+    rather than each change becoming a new row -- extending the same
+    lifecycle-state-mutates-via-POST-action pattern ApiKey.revoked_at and
+    ApiKey.last_used_at already use, not a new exception to "everything here
+    is create-only". The append-only AuditEvent log carries the change
+    history (a JSON snapshot in `detail`), so no separate history table.
+    """
+    id: int | None = Field(default=None, primary_key=True)
+    owner_user_id: int = Field(foreign_key="user.id", index=True)
+    client_id: int | None = Field(default=None, foreign_key="client.id", index=True)
+    exposure_id: int | None = Field(default=None, foreign_key="exposure.id", index=True)
+    corridor: str
+    stage: str = Field(default="pre_order")   # pre_order | po_placed | in_transit | delivered
+    sku: str
+    quantity: float
+    quantity_unit: str
+    cargo_value: float | None = None
+    incoterm: str | None = None
+    supplier: str | None = None
+    currency: str = Field(default="EUR")
+    po_number: str | None = None
+    unit_price: float | None = None
+    ship_date: str | None = None              # ISO "YYYY-MM-DD", matches Decision.as_of's precedent
+    contract_transit_time_days: float | None = None
+    contract_freight_rate: float | None = None
+    origin: str | None = None
+    destination: str | None = None
+    supplier_lead_time_days: float | None = None
+    alternative_supplier: str | None = None
+    notes: str | None = None
     created_at: datetime = Field(default_factory=utcnow)

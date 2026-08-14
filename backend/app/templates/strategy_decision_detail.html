@@ -14,10 +14,16 @@
 <header class="masthead">
   <div class="eyebrow"><a href="/strategy-decisions" style="color:inherit">Strategy decisions</a>
   &middot; {{ row.corridor }} &middot; {{ result.incoterm }}</div>
-  <h1>{{ row.scenario_id }}</h1>
+  <h1>{{ row.scenario_id }}
+    <span class="badge {{ 'ok' if row.status == 'approved' else '' }}" style="vertical-align:middle;margin-left:8px">{{ row.status }}</span></h1>
 </header>
 
 {% if result.client_exposure_note %}<p class="note">{{ result.client_exposure_note }}</p>{% endif %}
+
+{% if linked_order %}
+<p class="note">Built from order <a href="/orders/{{ linked_order.id }}">{{ linked_order.sku }}</a>
+(<span class="badge">{{ linked_order.stage.replace('_', ' ') }}</span>).</p>
+{% endif %}
 
 <div class="status">
   <div class="cell"><div class="k">Recommended strategy</div>
@@ -192,6 +198,7 @@
 
 <section class="panel">
   <h2>6 &middot; Decision</h2>
+  {% if decision_framing %}<p class="hint" style="margin-top:0">{{ decision_framing }}</p>{% endif %}
   <div class="verdict {{ 'pos' if result.decision_confidence == 'robust' else 'warn' }}">
     <div class="tag">Recommended</div>
     <div class="call">{{ result.recommended }}</div>
@@ -349,6 +356,11 @@
       <button class="btn {{ 'ghost' if subscribed else '' }}" type="submit">
         {{ "Turn off monthly re-check" if subscribed else "Re-check this monthly" }}</button>
     </form>
+    {% if row.status == "draft" %}
+    <form method="post" action="/strategy-decisions/{{ row.id }}/approve" style="margin:0">
+      <button class="btn" type="submit">Approve</button>
+    </form>
+    {% endif %}
   </div>
   <p class="hint" style="margin:var(--s3) 0 0">The full report explains the decision and
   break-even in plain sentences, with the complete field-by-field ledger.

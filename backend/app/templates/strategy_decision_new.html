@@ -44,8 +44,16 @@
 exposure &mdash; it'll show up on that client's portfolio page.</p>
 {% endif %}
 
+{% if linked_order %}
+<p class="hint">Built from order <strong>{{ linked_order.sku }}</strong>
+(<span class="badge">{{ linked_order.stage.replace('_', ' ') }}</span>) &mdash; quantity, cargo
+value, freight rate and ship date are pre-filled below, and the strategies suggested match this
+order's stage.</p>
+{% endif %}
+
 <form method="post" action="/strategy-decisions">
   {% if exposure_id %}<input type="hidden" name="exposure_id" value="{{ exposure_id }}">{% endif %}
+  {% if order_id %}<input type="hidden" name="order_id" value="{{ order_id }}">{% endif %}
 
   <section class="panel">
     <h2>1 &middot; Exposure basics</h2>

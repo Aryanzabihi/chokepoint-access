@@ -216,6 +216,7 @@ def exposure_page(client_id: int, exposure_id: int, request: Request,
         {"row": d, "recommended": json.loads(d.result_json).get("recommended")}
         for d in crud.list_strategy_decisions_for_exposure(session, exposure.id)
     ]
+    orders = crud.list_procurement_orders_for_exposure(session, exposure.id)
     error = None
     try:
         reading = engine.current_reading(exposure.corridor)
@@ -223,7 +224,8 @@ def exposure_page(client_id: int, exposure_id: int, request: Request,
         reading, error = None, str(exc)
     return templates.TemplateResponse(request, "exposure_detail.html",
         {"user": user, "client": client, "exposure": exposure,
-         "strategy_decisions": strategy_decisions, "reading": reading, "reading_error": error})
+         "strategy_decisions": strategy_decisions, "orders": orders,
+         "reading": reading, "reading_error": error})
 
 
 @router.post("/clients/{client_id}/exposures/{exposure_id}/decide")

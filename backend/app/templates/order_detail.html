@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ order.sku }} — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/orders" style="color:inherit">Orders</a> &middot; {{ order.corridor }}</div>
+  <h1>{{ order.sku }}</h1>
+</header>
+
+<div class="status">
+  <div class="cell"><div class="k">Stage</div>
+    <div class="v big">{{ order.stage.replace('_', ' ')|title }}</div></div>
+  <div class="cell"><div class="k">Quantity</div>
+    <div class="v">{{ "{:,.0f}".format(order.quantity) }} {{ order.quantity_unit }}</div></div>
+  <div class="cell"><div class="k">Cargo value</div>
+    <div class="v">{{ "{:,.0f} {}".format(order.cargo_value, order.currency) if order.cargo_value is not none else "—" }}</div></div>
+  <div class="cell"><div class="k">Incoterm</div>
+    <div class="v">{{ order.incoterm or "—" }}</div></div>
+</div>
+
+<div class="grid split">
+  <section class="panel">
+    <h2>Order details</h2>
+    <div class="stats">
+      <div class="stat"><b>{{ order.supplier or "—" }}</b><span>supplier</span></div>
+      <div class="stat"><b>{{ order.po_number or "—" }}</b><span>PO number</span></div>
+      <div class="stat"><b>{{ "{:,.0f}".format(order.unit_price) if order.unit_price is not none else "—" }}</b><span>unit price</span></div>
+      <div class="stat"><b>{{ order.ship_date or "—" }}</b><span>ship date</span></div>
+      <div class="stat"><b>{{ order.contract_transit_time_days|int if order.contract_transit_time_days is not none else "—" }}</b><span>contract transit days</span></div>
+      <div class="stat"><b>{{ "{:,.0f}".format(order.contract_freight_rate) if order.contract_freight_rate is not none else "—" }}</b><span>contract freight rate</span></div>
+    </div>
+    {% if order.notes %}<p class="hint" style="margin-top:var(--s4)">{{ order.notes }}</p>{% endif %}
+
+    <details style="margin-top:var(--s5)">
+      <summary>Advance stage</summary>
+      <div class="inner">
+        <form method="post" action="/orders/{{ order.id }}/advance-stage">
+          <div class="row">
+            <div class="field" style="width:180px">
+              <label for="new_stage">New stage</label>
+              <select id="new_stage" name="new_stage">
+                {% for s in stages %}
+                <option value="{{ s }}" {{ "selected" if s == order.stage else "" }}>{{ stage_labels[s] }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field" style="width:160px">
+              <label for="po_number">PO number</label>
+              <input type="text" id="po_number" name="po_number" value="{{ order.po_number or '' }}">
+            </div>
+            <div class="field" style="width:140px">
+              <label for="unit_price">Unit price</label>
+              <input type="number" id="unit_price" name="unit_price" step="any"
+                     value="{{ order.unit_price if order.unit_price is not none else '' }}">
+            </div>
+            <div class="field" style="width:160px">
+              <label for="ship_date">Ship date</label>
+              <input type="date" id="ship_date" name="ship_date" value="{{ order.ship_date or '' }}">
+            </div>
+          </div>
+          <div class="row">
+            <div class="field" style="width:200px">
+              <label for="contract_transit_time_days">Contract transit time</label>
+              <input type="number" id="contract_transit_time_days" name="contract_transit_time_days"
+                     step="any"
+                     value="{{ order.contract_transit_time_days if order.contract_transit_time_days is not none else '' }}">
+              <p class="hint">days</p>
+            </div>
+            <div class="field" style="width:200px">
+              <label for="contract_freight_rate">Contract freight rate</label>
+              <input type="number" id="contract_freight_rate" name="contract_freight_rate" step="any"
+                     value="{{ order.contract_freight_rate if order.contract_freight_rate is not none else '' }}">
+            </div>
+          </div>
+          <button class="btn" type="submit">Update</button>
+        </form>
+        <p class="hint" style="margin:var(--s3) 0 0">Only fields you fill in change &mdash; leave
+        the rest blank to keep what's already on file.</p>
+      </div>
+    </details>
+  </section>
+
+  <section class="panel">
+    <h2>Strategy decisions ({{ strategy_decisions|length }})</h2>
+    {% if order.stage != "delivered" %}
+    <a class="btn" href="/strategy-decisions/new?order_id={{ order.id }}">
+      Build a strategy decision from this order</a>
+    <p class="hint" style="margin:var(--s3) 0 var(--s4)">Pre-fills quantity, cargo value, freight
+    rate and ship date from this order, and suggests strategies that fit its stage.</p>
+    {% else %}
+    <p class="hint" style="margin:0 0 var(--s4)">Delivered &mdash; no longer a live logistics
+    decision. The next procurement cycle starts a new order.</p>
+    {% endif %}
+    {% if strategy_decisions %}
+    <div class="scroll">
+      <table>
+        <thead><tr><th class="m">Computed</th><th>Scenario</th><th>Recommended</th></tr></thead>
+        <tbody>
+        {% for d in strategy_decisions %}
+          <tr>
+            <td class="m">{{ d.row.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td><a href="/strategy-decisions/{{ d.row.id }}">{{ d.row.scenario_id }}</a></td>
+            <td>{{ d.recommended or "—" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">No decisions computed yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

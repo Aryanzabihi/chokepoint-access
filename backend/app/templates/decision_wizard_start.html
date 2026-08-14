@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}New decision — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">New decision</div>
+  <h1>What are you deciding?</h1>
+  <p class="thesis">These three situations call for different strategies, so TAR asks which one
+  this is before anything else.</p>
+</header>
+
+<div class="cards">
+  <a class="card" href="/decisions/new/demand-supply?stage=pre_order" style="display:block">
+    <div class="name">I need to purchase</div>
+    <div class="meta">I have a demand requirement but no purchase order yet.</div>
+  </a>
+  <a class="card" href="/orders" style="display:block">
+    <div class="name">Existing order</div>
+    <div class="meta">A PO already exists and I need to decide what to do with it. Pick it
+    from your orders list, then build a decision from its own page.</div>
+  </a>
+  <a class="card" href="/decisions/new/demand-supply?stage=in_transit" style="display:block">
+    <div class="name">Shipment in transit</div>
+    <div class="meta">Cargo is already moving and isn't tracked here yet.</div>
+  </a>
+</div>
+{% endblock %}

@@ -49,4 +49,27 @@ exposure-management notes below, but the cost-ratio test does not apply.</p>
     {% endif %}
   </section>
 </div>
+
+<section class="panel">
+  <h2>Orders ({{ orders|length }})</h2>
+  <a class="btn ghost" href="/orders/new?exposure_id={{ exposure.id }}">New order for this exposure</a>
+  {% if orders %}
+  <div class="scroll" style="margin-top:var(--s4)">
+    <table>
+      <thead><tr><th>SKU</th><th>Stage</th><th class="m">Quantity</th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+        <tr>
+          <td><a href="/orders/{{ o.id }}">{{ o.sku }}</a></td>
+          <td><span class="badge">{{ o.stage.replace('_', ' ') }}</span></td>
+          <td class="m">{{ "{:,.0f}".format(o.quantity) }} {{ o.quantity_unit }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty" style="margin-top:var(--s4)">No orders linked to this exposure yet.</p>
+  {% endif %}
+</section>
 {% endblock %}

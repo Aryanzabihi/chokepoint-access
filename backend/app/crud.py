@@ -17,7 +17,8 @@ from sqlmodel import Session, select
 
 from .models import (
     AlertSubscription, ApiKey, AuditEvent, Client, Decision, EconomicScenario,
-    EconomicScenarioSubscription, Exposure, StrategyDecision, StrategyDecisionSubscription, User,
+    EconomicScenarioSubscription, Exposure, ProcurementOrder, StrategyDecision,
+    StrategyDecisionSubscription, User,
 )
 
 
@@ -196,9 +197,10 @@ def get_strategy_decision_owned(session: Session, user: User,
 def create_strategy_decision(session: Session, user: User, *, scenario_id: str, corridor: str,
                               input_data: dict, result: dict,
                               client_id: int | None = None,
-                              exposure_id: int | None = None) -> StrategyDecision:
+                              exposure_id: int | None = None,
+                              order_id: int | None = None) -> StrategyDecision:
     row = StrategyDecision(owner_user_id=user.id, client_id=client_id, exposure_id=exposure_id,
-                            scenario_id=scenario_id, corridor=corridor,
+                            order_id=order_id, scenario_id=scenario_id, corridor=corridor,
                             input_json=json.dumps(input_data), result_json=json.dumps(result))
     session.add(row)
     session.commit()
@@ -207,6 +209,22 @@ def create_strategy_decision(session: Session, user: User, *, scenario_id: str, 
           f"{corridor} {scenario_id} -> {result.get('recommended')}")
     session.commit()
     return row
+
+
+def approve_strategy_decision(session: Session, user: User,
+                               decision: StrategyDecision) -> StrategyDecision:
+    """The one direct mutation of an otherwise create-only StrategyDecision --
+    same lifecycle-state-mutates-via-POST-action pattern as revoke_api_key()
+    above, not a new exception to it. The AuditEvent row this writes is the
+    approval record (who, when) -- no separate approved_by/approved_at
+    columns, reusing existing infrastructure instead of duplicating it."""
+    decision.status = "approved"
+    session.add(decision)
+    session.commit()
+    audit(session, user.id, "strategy_decision", decision.id, "approved")
+    session.commit()
+    session.refresh(decision)
+    return decision
 
 
 def latest_strategy_decision_for_exposure(session: Session,
@@ -220,6 +238,12 @@ def list_strategy_decisions_for_exposure(session: Session,
                                           exposure_id: int) -> list[StrategyDecision]:
     return list(session.exec(
         select(StrategyDecision).where(StrategyDecision.exposure_id == exposure_id)
+        .order_by(StrategyDecision.created_at.desc())))
+
+
+def list_strategy_decisions_for_order(session: Session, order_id: int) -> list[StrategyDecision]:
+    return list(session.exec(
+        select(StrategyDecision).where(StrategyDecision.order_id == order_id)
         .order_by(StrategyDecision.created_at.desc())))
 
 
@@ -248,6 +272,84 @@ def toggle_strategy_decision_subscription(session: Session, user: User,
                                                strategy_decision_id=strategy_decision_id))
     session.commit()
     return True
+
+
+# ------------------------------------------------------ procurement orders ---
+
+def list_procurement_orders_for_user(session: Session, user: User) -> list[ProcurementOrder]:
+    return list(session.exec(
+        select(ProcurementOrder).where(ProcurementOrder.owner_user_id == user.id)
+        .order_by(ProcurementOrder.created_at.desc())))
+
+
+def list_procurement_orders_for_exposure(session: Session,
+                                          exposure_id: int) -> list[ProcurementOrder]:
+    return list(session.exec(
+        select(ProcurementOrder).where(ProcurementOrder.exposure_id == exposure_id)
+        .order_by(ProcurementOrder.created_at.desc())))
+
+
+def create_procurement_order(session: Session, user: User, *, corridor: str, stage: str,
+                              sku: str, quantity: float, quantity_unit: str,
+                              cargo_value: float | None = None, incoterm: str | None = None,
+                              supplier: str | None = None, currency: str = "EUR",
+                              origin: str | None = None, destination: str | None = None,
+                              supplier_lead_time_days: float | None = None,
+                              alternative_supplier: str | None = None,
+                              client_id: int | None = None,
+                              exposure_id: int | None = None) -> ProcurementOrder:
+    order = ProcurementOrder(owner_user_id=user.id, client_id=client_id, exposure_id=exposure_id,
+                              corridor=corridor, stage=stage, sku=sku, quantity=quantity,
+                              quantity_unit=quantity_unit, cargo_value=cargo_value,
+                              incoterm=incoterm, supplier=supplier, currency=currency,
+                              origin=origin, destination=destination,
+                              supplier_lead_time_days=supplier_lead_time_days,
+                              alternative_supplier=alternative_supplier)
+    session.add(order)
+    session.commit()
+    session.refresh(order)
+    audit(session, user.id, "procurement_order", order.id, "created", f"{corridor} {sku}")
+    session.commit()
+    return order
+
+
+def get_procurement_order_owned(session: Session, user: User,
+                                 order_id: int) -> ProcurementOrder | None:
+    order = session.get(ProcurementOrder, order_id)
+    if order is None or order.owner_user_id != user.id:
+        return None
+    return order
+
+
+_ADVANCEABLE_STAGE_FIELDS = (
+    "po_number", "unit_price", "ship_date", "contract_transit_time_days", "contract_freight_rate",
+)
+
+
+def advance_procurement_order_stage(session: Session, user: User, order: ProcurementOrder,
+                                     new_stage: str, **stage_fields) -> ProcurementOrder:
+    """The one direct mutation of an otherwise create-only ProcurementOrder --
+    stage genuinely progresses on the same physical order over time, rather
+    than each change becoming a new row (see ProcurementOrder's own
+    docstring). Only fields named in _ADVANCEABLE_STAGE_FIELDS are settable
+    here, and only when actually supplied (None is never written over an
+    already-known value) -- the audit trail carries a full snapshot of what
+    changed, not just the new stage name."""
+    old_stage = order.stage
+    changed: dict = {}
+    for name in _ADVANCEABLE_STAGE_FIELDS:
+        value = stage_fields.get(name)
+        if value is not None:
+            setattr(order, name, value)
+            changed[name] = value
+    order.stage = new_stage
+    session.add(order)
+    session.commit()
+    audit(session, user.id, "procurement_order", order.id, "stage_advanced",
+          json.dumps({"from": old_stage, "to": new_stage, "fields": changed}))
+    session.commit()
+    session.refresh(order)
+    return order
 
 
 # -------------------------------------------------------------- api keys ---

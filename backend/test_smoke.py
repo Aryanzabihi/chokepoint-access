@@ -501,6 +501,200 @@ def test_strategy_decision_walkthrough(client):
     assert f"{expected_avoidable:,}" in r.text, (expected_avoidable, r.text)
 
 
+def test_order_walkthrough(client):
+    """ProcurementOrder: the pre-order / PO-placed / in-transit / delivered
+    lifecycle. Unlike exposure_id linking (which pre-fills nothing on the
+    new-decision form -- see test_strategy_decision_walkthrough, which only
+    checks field names appear), order_id linking's entire point is that it
+    DOES pre-fill from the order, so this asserts actual value="..." content,
+    not just field presence. Also covers the one genuinely mutating action
+    in this whole app (advance-stage) and its audit trail, and the
+    draft/approved status flip on StrategyDecision."""
+    client.post("/signup", data={"email": "order-walkthrough@example.com",
+                                  "password": "correct horse battery staple"})
+
+    r = client.get("/orders/new")
+    assert r.status_code == 200
+    assert 'name="corridor"' in r.text and 'name="sku"' in r.text
+
+    r = client.post("/orders", data={
+        "corridor": "Strait of Hormuz", "stage": "pre_order", "sku": "Industrial component A",
+        "quantity": "45000", "quantity_unit": "MT", "cargo_value": "5000000", "incoterm": "FOB",
+        "supplier": "Acme Corp", "currency": "EUR",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    order_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    r = client.get(f"/orders/{order_id}")
+    assert r.status_code == 200
+    assert "Industrial component A" in r.text and "Pre-order" in r.text
+    assert "Build a strategy decision from this order" in r.text
+
+    # an unknown corridor is rejected with a helpful error, not a 500
+    r = client.post("/orders", data={"corridor": "Not A Real Strait", "sku": "x",
+                                      "quantity": "1", "quantity_unit": "MT"})
+    assert r.status_code == 422
+
+    # order-linking pre-fills the new-decision form -- the whole point of
+    # order_id (unlike exposure_id, which pre-fills nothing today) -- and
+    # picks pre_order's stage-appropriate default strategies (Wait/Buy now).
+    r = client.get(f"/strategy-decisions/new?order_id={order_id}")
+    assert r.status_code == 200
+    assert f'value="{order_id}"' in r.text
+    assert 'value="Strait of Hormuz" selected' in r.text
+    assert 'value="45000' in r.text          # quantity pre-filled
+    assert 'value="5000000' in r.text        # cargo_value pre-filled
+    assert 'value="Wait"' in r.text and 'value="Buy now"' in r.text
+
+    r = client.post("/strategy-decisions", data={
+        "scenario_id": "ORDER-TEST-001", "corridor": "Strait of Hormuz", "incoterm": "FOB",
+        "tier": "1", "order_id": str(order_id),
+        "field_ship_date": "2026-11-01", "field_cargo_value": "5000000", "field_quantity": "45000",
+        "field_quantity_unit": "MT", "field_contract_freight_rate": "400000",
+        "field_contract_transit_time_days": "25", "field_days_of_cover": "10",
+        "field_delay_days_estimate": "11",
+        "baseline_strategy": "0", "strategy_0_name": "Wait", "strategy_0_direct_cost": "0",
+        "strategy_1_name": "Buy now", "strategy_1_direct_cost": "500000", "strategy_2_name": "",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    decision_url = r.headers["location"]
+    decision_id = int(decision_url.rsplit("/", 1)[-1])
+
+    r = client.get(decision_url)
+    assert r.status_code == 200
+    assert "Procurement question: should you secure this requirement now?" in r.text
+    assert f"/orders/{order_id}" in r.text            # linked back to the order
+    assert ">draft<" in r.text and "Approve" in r.text
+
+    # the order's own detail page lists the decision built from it
+    r = client.get(f"/orders/{order_id}")
+    assert "ORDER-TEST-001" in r.text
+
+    # advance the stage -- the one mutating action in this app -- with real
+    # PO fields, and confirm both the visible change and the audit trail
+    r = client.post(f"/orders/{order_id}/advance-stage", data={
+        "new_stage": "po_placed", "po_number": "PO-9001", "unit_price": "111.5",
+        "ship_date": "2026-11-01", "contract_transit_time_days": "25",
+        "contract_freight_rate": "400000",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    r = client.get(f"/orders/{order_id}")
+    assert "PO placed" in r.text and "PO-9001" in r.text
+
+    from sqlmodel import select
+
+    from app.models import AuditEvent
+
+    session = next(app.dependency_overrides[get_session]())
+    order_events = session.exec(
+        select(AuditEvent).where(AuditEvent.entity_type == "procurement_order")).all()
+    assert any(e.action == "created" for e in order_events)
+    stage_event = next(e for e in order_events if e.action == "stage_advanced")
+    stage_detail = json.loads(stage_event.detail)
+    assert stage_detail["from"] == "pre_order" and stage_detail["to"] == "po_placed"
+    assert stage_detail["fields"]["po_number"] == "PO-9001"
+
+    # approve the decision -- the other genuinely mutating action
+    r = client.post(f"/strategy-decisions/{decision_id}/approve", follow_redirects=False)
+    assert r.status_code == 303
+    r = client.get(decision_url)
+    assert ">approved<" in r.text
+
+    # a decision built from an in_transit order gets the Reroute default,
+    # not pre_order's Wait/Buy now
+    r = client.post("/orders", data={"corridor": "Bab-el-Mandeb", "stage": "in_transit",
+                                      "sku": "Widget B", "quantity": "1000",
+                                      "quantity_unit": "units"}, follow_redirects=False)
+    order2_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    r = client.get(f"/strategy-decisions/new?order_id={order2_id}")
+    assert 'value="Reroute"' in r.text
+
+    # cross-user isolation holds for orders too
+    other = TestClient(app)
+    other.post("/signup", data={"email": "other-order-walkthrough@example.com",
+                                 "password": "a different password"})
+    r = other.get(f"/api/v1/orders/{order_id}")
+    assert r.status_code == 404
+
+
+def test_decision_wizard(client):
+    """The "+ New Decision" guided entry point (workflow.md steps 1-4):
+    what are you deciding -> demand & supply -> procurement/order -> hands
+    off into the existing /strategy-decisions/new?order_id=... flow (which
+    test_order_walkthrough already covers on its own). This test's job is
+    the two new steps in front of that: the demand/supply calculator
+    (additional requirement = forecast_quantity - net_available_cover, a
+    coarser number than the days-of-cover netting the final decision does)
+    and that the order really gets created with the wizard-collected
+    procurement fields, with both the order AND the raw demand/supply
+    figures pre-filled on the handoff page."""
+    client.post("/signup", data={"email": "wizard@example.com",
+                                  "password": "correct horse battery staple"})
+
+    r = client.get("/home")
+    assert "New decision" in r.text and ">Decisions<" in r.text
+
+    r = client.get("/decisions/new")
+    assert r.status_code == 200
+    assert "I need to purchase" in r.text and "Existing order" in r.text
+    assert "Shipment in transit" in r.text
+
+    r = client.get("/decisions/new/demand-supply?stage=pre_order")
+    assert r.status_code == 200
+    assert 'value="pre_order"' in r.text
+
+    r = client.post("/decisions/new/demand-supply", data={
+        "stage": "pre_order", "sku": "Industrial component A", "quantity_unit": "MT",
+        "forecast_quantity": "45000", "forecast_window_days": "90",
+        "current_inventory": "3000", "inbound_confirmed_quantity": "1500", "safety_stock": "1000",
+    })
+    assert r.status_code == 200
+    # forecast_quantity(45000) - net_available_cover(3000+1500-1000=3500) = 41500
+    assert "41,500" in r.text
+    assert 'name="ds_forecast_quantity" value="45000.0"' in r.text
+
+    r = client.post("/decisions/new/order", data={
+        "stage": "pre_order",
+        "ds_forecast_quantity": "45000.0", "ds_forecast_window_days": "90.0",
+        "ds_current_inventory": "3000.0", "ds_inbound_confirmed_quantity": "1500.0",
+        "ds_safety_stock": "1000.0",
+        "sku": "Industrial component A", "quantity": "41500", "quantity_unit": "MT",
+        "corridor": "Strait of Hormuz", "incoterm": "FOB", "cargo_value": "5000000",
+        "currency": "EUR", "supplier": "Supplier A", "alternative_supplier": "Supplier B",
+        "supplier_lead_time_days": "25", "origin": "India", "destination": "Italy",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    location = r.headers["location"]
+    assert location.startswith("/strategy-decisions/new?")
+    assert "order_id=" in location and "forecast_quantity=45000" in location
+    order_id = int(location.split("order_id=")[1].split("&")[0])
+
+    # the handoff page pre-fills from BOTH the order and the carried
+    # demand/supply figures, and picks pre_order's stage-aware defaults
+    r = client.get(location)
+    assert r.status_code == 200
+    assert 'value="Strait of Hormuz" selected' in r.text
+    assert 'value="41500' in r.text and 'value="45000' in r.text and 'value="3000' in r.text
+    assert 'value="Wait"' in r.text and 'value="Buy now"' in r.text
+
+    # the order itself persisted the wizard-collected procurement fields
+    r = client.get(f"/orders/{order_id}")
+    assert r.status_code == 200
+    assert "Supplier A" in r.text
+
+    # an unknown corridor at step 2 is rejected with a helpful error, not a 500
+    r = client.post("/decisions/new/order", data={
+        "stage": "pre_order", "sku": "x", "quantity": "1", "quantity_unit": "MT",
+        "corridor": "Not A Real Strait",
+    })
+    assert r.status_code == 422
+
+    # existing-order path needs no new code -- /decisions/new's card just
+    # links to /orders, whose own detail page already has the CTA
+    r = client.get("/decisions/new")
+    assert f'href="/orders"' in r.text
+
+
 def test_alerts_job_runs_without_error(client):
     """alerts.run() opens its own session against app.db.engine, which in
     this process points at DATABASE_URL (the sqlite file), not the
