@@ -1,0 +1,1306 @@
+TAR Tool — Recommended Upgrade Specification
+0. First principle: preserve the existing architecture
+
+The current tool already has a strong structure:
+
+TAR signal → regime → timing validity → customer economics → Act / Wait
+
+Do not replace this with a generic risk dashboard.
+
+The current HTML already implements several important ideas:
+
+customer-specific action cost
+3/6/12-month windows
+three policy alternatives
+economic threshold
+corridor selection
+active-disruption override
+track record
+caveats and attribution
+local decision logging
+
+For example, the existing engine explicitly compares “Act every cycle,” “Follow the alert,” and “Never act.”
+
+That logic should remain the foundation.
+
+1. Reposition the product
+Current positioning
+
+Maritime war risk · act-or-wait decision tool
+
+Keep this as the product category, but strengthen the proposition.
+
+Recommended positioning
+
+War-Risk Timing Intelligence
+
+Main headline
+
+Act now, or wait?
+
+Subheadline
+
+TAR converts geopolitical escalation into an economically actionable decision based on your exposure, mitigation cost, and the historical performance of the signal.
+
+Important distinction
+
+Do not market TAR as:
+
+“AI predicts war.”
+
+Do not claim:
+
+“TAR predicts when a war will happen.”
+
+Instead:
+
+TAR evaluates whether a current risk signal contains enough historical decision value to justify early action.
+
+This is much more defensible.
+
+2. Separate the product into three analytical layers
+
+This is probably the most important architectural change.
+
+Layer 1 — Risk signal
+
+Answer:
+
+What is happening?
+
+Example:
+
+Corridor
+Strait of Hormuz
+
+TAR
+1.68
+
+Regime
+Procurement Watch
+
+Percentile
+P70–P85
+
+Your current data already has these fields.
+
+Layer 2 — Timing validity
+
+Answer:
+
+Is this signal actually usable as an anticipatory warning?
+
+Possible states:
+
+VALID
+
+Signal is generated before the disruption.
+
+CONCURRENT
+
+Signal is elevated but the disruption has already started.
+
+INVALID
+
+Current reading cannot support a timing decision.
+
+INSUFFICIENT DATA
+
+Not enough observations to evaluate timing.
+
+This is important because your current engine already correctly prevents a disruption that is already underway from being treated as a future warning.
+
+Keep that feature.
+
+Make it much more visible.
+
+3. Create an explicit "Timing validity" card
+
+Under the current risk level, add:
+
+TIMING VALIDITY
+
+● ANTICIPATORY
+
+Signal detected before disruption
+
+Historical lead time
+4.2 months
+
+Historical hit rate
+34%
+
+Confidence
+Moderate
+
+Or:
+
+TIMING VALIDITY
+
+● CONCURRENT
+
+Disruption already underway
+
+The current reading cannot be interpreted
+as a warning of a new disruption.
+
+No timing decision applies.
+
+This prevents users from misunderstanding TAR.
+
+4. Replace the single confidence concept with multiple confidence dimensions
+
+Don't simply show:
+
+Confidence: 82%
+
+That would imply a precision the model may not possess.
+
+Instead show:
+
+Signal confidence
+
+How strong is the TAR signal?
+
+Timing confidence
+
+How reliable is its historical lead time?
+
+Attribution confidence
+
+How directly can the signal be attributed to this corridor?
+
+Data completeness
+
+How complete is the underlying data?
+
+Example:
+
+MODEL QUALITY
+
+Signal strength       HIGH
+Timing evidence       MODERATE
+Attribution            PROXY
+Data completeness      HIGH
+
+Your current dataset already distinguishes direct and proxy attribution and includes caveats.
+
+Expose that information rather than hiding it.
+
+5. Upgrade the customer cost input
+
+This is one of the biggest commercial improvements.
+
+Currently the customer effectively enters:
+
+early action costs X% of crisis replacement.
+
+That is mathematically elegant, but most customers won't naturally know this percentage.
+
+Instead create:
+
+"Calculate your early-action cost"
+
+Let the customer enter actual costs.
+
+Example
+EARLY ACTION COST
+
+Alternative supplier             €420,000
+Additional freight               €180,000
+Inventory buffer                  €75,000
+Hedging                            €40,000
+Insurance premium                  €25,000
+
+-----------------------------------------
+Total early-action cost          €740,000
+
+Crisis replacement cost        €5,000,000
+
+-----------------------------------------
+
+Your action cost                  14.8%
+
+Then:
+
+α = €740,000 / €5,000,000 = 14.8%
+
+The user never needs to understand α.
+
+The engine does.
+
+6. Make α transparent
+
+Under the calculated percentage:
+
+ACTION COST RATIO
+
+14.8%
+
+€740k early-action cost
+÷
+€5.0m crisis replacement cost
+
+Add:
+
+“This is the percentage of crisis-price replacement cost you spend by acting early.”
+
+This preserves the research model while making it understandable.
+
+7. Preserve the three-policy comparison
+
+This is one of your strongest features.
+
+Keep:
+
+Policy 1
+
+Act every cycle
+
+Policy 2
+
+Follow TAR
+
+Policy 3
+
+Never act
+
+The existing implementation already calculates expected outlay for those three strategies.
+
+But improve the presentation.
+
+8. Turn the policy comparison into actual money
+
+Instead of only showing normalized units, show:
+
+YOUR EXPECTED COST
+
+Act every cycle
+€1.82m
+
+Follow TAR
+€1.21m     ← lowest
+
+Never act
+€2.03m
+
+Then:
+
+Following TAR saves an estimated €610k versus acting every cycle.
+
+And:
+
+Following TAR saves €820k versus waiting for disruption.
+
+This makes the product commercially understandable.
+
+9. Add "decision margin"
+
+This is very important.
+
+Suppose:
+
+Economic action band
+
+10.2% — 15.4%
+
+Customer cost
+
+12.0%
+
+Don't just say:
+
+ACT
+
+Also show:
+
+DECISION MARGIN
+
++1.8 percentage points
+
+Meaning:
+
+The customer's action cost is 1.8 percentage points inside the economically favorable range.
+
+This lets the user understand whether the decision is robust or borderline.
+
+10. Introduce a "borderline" state
+
+Right now you essentially have:
+
+Always act
+
+Act
+
+Wait
+
+Add:
+
+BORDERLINE
+
+If the customer's cost is very close to the threshold.
+
+For example:
+
+BORDERLINE
+
+Your cost:       15.2%
+Action band:     10.2–15.4%
+
+Only 0.2 pp inside the band.
+
+Recommendation:
+Use reversible mitigation only.
+
+This is much safer than pretending every decision is binary.
+
+11. Make the recommendation graduated
+
+Instead of:
+
+ACT
+
+give the user:
+
+No action
+Monitor
+Reversible action
+Partial commitment
+Full action
+
+For example:
+
+RECOMMENDATION
+
+PARTIAL / REVERSIBLE ACTION
+
+• Review alternative suppliers
+• Extend hedge tenor partially
+• Reserve alternative capacity
+• Avoid irreversible commitments
+
+Your current interface already suggests reversible actions such as checking alternatives, extending hedge tenors and partially booking forward.
+
+Make this a formal recommendation layer.
+
+12. Don't let TAR itself dictate the action
+
+This distinction should be hard-coded.
+
+Bad logic:
+
+TAR > 1.42
+→ ACT
+
+Correct logic:
+
+TAR
++
+historical timing performance
++
+customer action cost
++
+crisis replacement cost
++
+decision horizon
++
+current regime
+=
+economic decision
+
+That is your actual product moat.
+
+13. Improve the thresholds
+
+You currently have:
+
+Routine
+0.00
+
+Elevated tension
+0.99
+
+Procurement Watch
+1.42
+
+High-risk escalation
+1.98
+
+Critical transition
+2.87
+
+Crisis regime
+5.12
+
+Those should not simply be treated as universal physical truths.
+
+Add metadata:
+
+Threshold
+1.42
+
+Basis
+Historical recursive cut
+
+Sample
+1985–2026
+
+Validation
+Out-of-sample / in-sample
+
+Confidence
+...
+
+Your current code already calls 1.42 the recursive_cut.
+
+Expose its provenance.
+
+14. Add an explicit "threshold provenance" panel
+
+Clicking a threshold should reveal:
+
+WHY 1.42?
+
+Threshold type:
+Recursive TAR cut
+
+Historical period:
+1985–2026
+
+Estimation:
+...
+
+Validation:
+...
+
+Purpose:
+Procurement Watch
+
+Important:
+This threshold identifies a historical
+regime boundary. It is not itself a
+probability of disruption.
+
+This protects you academically and commercially.
+
+15. Build the track-record page properly
+
+This could become one of the strongest parts of the product.
+
+Your navigation already has:
+
+Track record
+
+Keep it.
+
+Create:
+
+TAR TRACK RECORD
+Overall
+Signals evaluated           126
+Disruptions                 41
+Correct warnings            15
+False alarms                70
+Missed disruptions          41
+
+But don't invent these numbers—connect them directly to your validated registry.
+
+16. Add lead-time statistics
+
+For every successful warning:
+
+Median lead time
+4.1 months
+
+Mean lead time
+X months
+
+P25
+X months
+
+P75
+X months
+
+Maximum
+X months
+
+This is critical.
+
+A warning is much more valuable if the customer knows:
+
+“Historically, this signal tends to arrive 3–6 months before disruption.”
+
+17. Separate precision by horizon
+
+Don't only report overall accuracy.
+
+Show:
+
+Horizon	Precision	Recall	False alarms
+1 month	X%	X%	X
+3 months	X%	X%	X
+6 months	X%	X%	X
+12 months	X%	X%	X
+
+This is especially important because your current engine treats different horizons differently.
+
+Your current six-month window is the one with a fully computed curve; 3- and 12-month windows are currently reported bands rather than fully computed month-level curves.
+
+That needs to be made explicit.
+
+18. Do proper out-of-sample validation
+
+This is the highest-priority research task.
+
+Do not simply optimize TAR on 1985–2026 and then evaluate it on the same history.
+
+Create:
+
+Training period
+
+For example:
+
+1985–2015
+Validation
+2016–2020
+Test
+2021–2026
+
+Or preferably use rolling/expanding windows.
+
+The commercial product should say:
+
+Out-of-sample performance
+
+not just:
+
+historical performance.
+
+19. Implement walk-forward evaluation
+
+The validation engine should operate like:
+
+Train → predict → observe outcome
+       ↓
+expand training set
+       ↓
+predict next period
+       ↓
+observe outcome
+       ↓
+repeat
+
+Never allow future information to leak into past thresholds.
+
+This is especially important for:
+
+expanding mean normalization
+thresholds
+episode detection
+alert calibration
+lead-time estimation
+20. Add a formal forecast registry
+
+Every signal should be frozen at issuance.
+
+For each TAR signal store:
+
+signal_id
+timestamp
+corridor
+TAR
+threshold
+regime
+forecast_window
+forecast_direction
+signal_version
+data_version
+model_version
+publication_timestamp
+
+Then later record:
+
+outcome
+disruption_date
+lead_time
+hit/miss
+
+This gives you a genuinely auditable forecasting system.
+
+21. Never rewrite historical predictions
+
+This is extremely important commercially.
+
+Suppose TAR gives:
+
+June 2026
+
+Hormuz
+TAR = 1.42
+Procurement Watch
+
+Freeze it.
+
+If your methodology changes in August:
+
+June's forecast must remain June's forecast.
+
+Do not retroactively update it.
+
+Create:
+
+TAR v1.2
+TAR v1.3
+TAR v2.0
+
+and maintain model versioning.
+
+22. Add an audit trail
+
+For every decision:
+
+DECISION ID
+TAR-2026-08-00127
+
+Issued
+10 Aug 2026 09:00 UTC
+
+Data vintage
+10 Aug 2026
+
+Model
+TAR v1.3
+
+Corridor
+Bab-el-Mandeb
+
+TAR
+1.37
+
+Regime
+Elevated tension
+
+Customer α
+12.4%
+
+Decision
+ACT
+
+Economic band
+10.2–15.4%
+
+This will be extremely valuable for brokers and insurers.
+
+23. Improve the corridor model
+
+Your current architecture covers:
+
+Hormuz
+Bab-el-Mandeb
+Adriatic
+Turkish Straits / Black Sea
+Suez
+Malacca
+Taiwan Strait
+
+The existing code explicitly labels some coverage as proxy and some as direct.
+
+Do not treat all corridors identically.
+
+Each corridor needs:
+
+Data coverage
+Attribution method
+Historical episodes
+Sample size
+Signal quality
+Lead-time distribution
+False alarm rate
+Validation status
+
+Example:
+
+STRAIT OF HORMUZ
+
+Historical episodes      4
+Direct attribution       Limited
+Proxy attribution        Yes
+Sample adequacy           Moderate
+Forecast validation       Preliminary
+24. Add a "data quality" indicator
+
+Every corridor should have:
+
+Data quality
+
+🟢 Strong
+
+🟡 Moderate
+
+🔴 Limited
+
+For example:
+
+Attribution
+PROXY
+
+Data quality
+MODERATE
+
+Why?
+Current signal relies partly on
+flanking-state coverage.
+
+Your existing system already contains this information.
+
+Use it.
+
+25. Add an "explain this decision" function
+
+Every verdict should have:
+
+Why?
+
+Click it.
+
+Then show:
+
+WHY TAR SAYS ACT
+
+1. Current TAR
+   1.68
+
+2. Historical regime
+   Procurement Watch
+
+3. Timing
+   Historically anticipatory
+
+4. Your action cost
+   12.0%
+
+5. Economic action band
+   10.2–15.4%
+
+6. Historical signal performance
+   X% precision
+
+7. Result
+   Following TAR has lower
+   expected cost than both alternatives.
+
+This is essential for professional users.
+
+26. Add sensitivity analysis
+
+This would make your tool substantially more sophisticated.
+
+Show:
+
+IF YOUR ACTION COST CHANGES
+
+5%       ALWAYS ACT
+10%      ALWAYS ACT
+12%      ACT
+14%      ACT
+16%      WAIT
+20%      WAIT
+25%      WAIT
+
+Then graph:
+
+Expected cost vs action cost
+
+This demonstrates that the decision isn't arbitrary.
+
+27. Add crisis-price sensitivity
+
+The user may not know the true crisis replacement cost.
+
+So allow:
+
+Crisis replacement cost
+
+Low      €4m
+Base     €5m
+High     €7m
+
+Then show whether the recommendation changes.
+
+Example:
+
+€4m crisis cost → WAIT
+€5m crisis cost → ACT
+€7m crisis cost → ACT
+
+This tells the customer whether their decision is robust.
+
+28. Add "what would change my decision?"
+
+This is an excellent professional feature.
+
+Example:
+
+Current decision: ACT
+
+Then:
+
+You would switch to WAIT if:
+
+• mitigation cost rises above 15.4%
+OR
+• TAR falls below 1.42
+OR
+• signal loses anticipatory validity
+
+That's incredibly useful for decision-makers.
+
+29. Add a "reversible vs irreversible" action distinction
+
+The tool already recognizes reversible actions.
+
+Formalize it.
+
+Reversible
+request quotations
+reserve capacity
+partial hedge
+supplier qualification
+scenario planning
+Partially reversible
+inventory increase
+partial rerouting
+partial forward booking
+Irreversible
+full contract replacement
+long-term commitment
+permanent route change
+
+Then the recommendation should become:
+
+Signal supports reversible preparation, not irreversible commitment.
+
+This is much safer.
+
+30. Build a "decision ladder"
+
+I would structure the final verdict like this:
+
+LEVEL 0
+
+WAIT
+
+No economically meaningful signal.
+
+LEVEL 1
+
+MONITOR
+
+Signal exists but timing evidence insufficient.
+
+LEVEL 2
+
+PREPARE
+
+Reversible actions justified.
+
+LEVEL 3
+
+PARTIAL ACTION
+
+Some financial commitment justified.
+
+LEVEL 4
+
+ACT
+
+Full mitigation economically justified.
+
+LEVEL 5
+
+EXPOSURE MANAGEMENT
+
+Disruption already underway; timing model no longer applies.
+
+This is much better than a simple traffic-light system.
+
+31. Add a hard separation between "risk" and "decision"
+
+This should appear visually.
+
+For example:
+
+RISK
+
+TAR 1.68
+Procurement Watch
+P75
+
+──────────────
+
+DECISION
+
+Your cost: 12.0%
+Economic band: 10.2–15.4%
+
+ACT
+
+The first section answers:
+
+What does the model see?
+
+The second:
+
+What should this customer do?
+
+This prevents customers from thinking:
+
+Procurement Watch = automatically act.
+
+32. Add "not financial advice" / model disclaimer carefully
+
+Don't make it a giant legal warning.
+
+Add a small:
+
+Decision-support model. Not a guarantee of disruption or loss.
+
+And underneath:
+
+TAR signals represent historical statistical relationships and should not be interpreted as certainty of future events.
+
+This is especially important because your own dataset warns that the corridor architecture is not yet a validated forecasting instrument.
+
+33. Fix the "one alert in three" wording
+
+I would not leave this as an unqualified marketing claim.
+
+Current copy says:
+
+“One alert in three is followed by a real disruption.”
+
+Replace it with something like:
+
+“Historical evaluation shows that a subset of TAR alerts precede observed disruptions; performance varies by corridor and forecast horizon.”
+
+Once you have proper out-of-sample validation, you can replace this with the actual validated statistic.
+
+34. Don't call the current corridor readings "forecasts"
+
+Until validation is completed, use:
+
+signal
+
+reading
+
+risk state
+
+historical regime
+
+rather than:
+
+forecast
+
+for the weaker corridor implementations.
+
+Your own file explicitly says the corridor-level architecture is demonstrated but not validated.
+
+35. Create model/version transparency
+
+At the bottom:
+
+TAR Engine v1.3
+Data vintage: 10 Aug 2026
+Last recalibration: 01 Aug 2026
+Historical sample: 1985–2026
+
+Click:
+
+Model methodology
+
+and explain the calculation.
+
+This will help tremendously with academic credibility and commercial due diligence.
+
+36. Keep the beautiful design
+
+I would not ask Claude to make it look more like a conventional SaaS application.
+
+The current design decision is good.
+
+Your CSS deliberately treats the whole interface as an “instrument” rather than putting charts inside generic dashboard cards.
+
+Keep that.
+
+The aesthetic should communicate:
+
+specialist analytical instrument
+
+not:
+
+startup dashboard template.
+
+37. But simplify the first screen
+
+The first screen should answer only five questions:
+
+1. Where?
+
+Hormuz
+
+2. What is happening?
+
+TAR 1.68 — Procurement Watch
+
+3. Is it predictive?
+
+Yes — anticipatory signal
+
+4. Does it matter to me?
+
+Your action cost: 12%
+
+5. What should I do?
+ACT
+
+Everything else should be secondary.
+
+38. The ideal final screen
+
+I would make the main decision panel approximately:
+
+──────────────────────────────────────
+
+STRAIT OF HORMUZ
+
+TAR
+1.68
+
+PROCUREMENT WATCH
+P70–P85
+
+● ANTICIPATORY SIGNAL
+Historical lead time: 3–6 months
+
+──────────────────────────────────────
+
+YOUR EXPOSURE
+
+Crisis replacement value
+€5.0m
+
+Early-action cost
+€600k
+
+Action cost ratio
+12.0%
+
+──────────────────────────────────────
+
+ECONOMIC ACTION BAND
+
+10.2% ─────── 12.0% ─────── 15.4%
+
+                  YOU
+
+──────────────────────────────────────
+
+        ACT
+
+Following the TAR signal has lower
+expected cost than acting every cycle
+or waiting for disruption.
+
+Decision margin: +2.0 pp
+
+──────────────────────────────────────
+
+RECOMMENDED ACTION
+
+✓ Review alternative suppliers
+✓ Partially hedge exposure
+✓ Reserve alternative capacity
+✕ Avoid irreversible commitments
+
+──────────────────────────────────────
+
+[ WHY? ] [ SENSITIVITY ] [ TRACK RECORD ]
+
+
+That is the product.
+
+39. The roadmap I would give Claude
+
+Don't ask Claude to implement everything simultaneously.
+
+Give it these phases.
+
+PHASE 1 — Correctness
+
+Priority: 🔴
+
+Freeze historical forecasts.
+Add model/data versioning.
+Separate signal from timing validity.
+Explicitly distinguish concurrent vs anticipatory.
+Remove unsupported forecast claims.
+Add provenance to thresholds.
+Ensure no look-ahead bias.
+Validate all mathematical calculations.
+PHASE 2 — Economic engine
+
+Priority: 🔴
+
+Customer cost calculator.
+Crisis replacement cost.
+α calculation.
+Policy comparison in money.
+Decision margin.
+Sensitivity analysis.
+Robustness analysis.
+Reversible/irreversible action classification.
+PHASE 3 — Forecast validation
+
+Priority: 🔴
+
+Walk-forward validation.
+Out-of-sample testing.
+Corridor-specific validation.
+Lead-time distributions.
+Precision/recall by horizon.
+False-alarm analysis.
+Miss analysis.
+Calibration.
+Confidence estimates.
+PHASE 4 — Decision interface
+
+Priority: 🟠
+
+Timing-validity card.
+Model-quality card.
+Decision ladder.
+“Why?” explanation.
+“What would change my decision?”
+Sensitivity.
+Action recommendations.
+Track record.
+PHASE 5 — Commercial infrastructure
+
+Priority: 🟠
+
+User accounts.
+Client portfolios.
+Multiple exposures.
+Saved decisions.
+Audit trail.
+Exportable decision reports.
+API.
+Alerts.
+Email notifications.
+Broker/underwriter workspace.
+40. And eventually: the real commercial product
+
+The mature version shouldn't require a broker to manually type:
+
+α = 12%.
+
+Instead:
+
+CLIENT
+Mediterranean Bulk Ltd
+
+EXPOSURE
+Hormuz
+
+Commodity
+Steel
+
+Annual exposure
+€38m
+
+Crisis replacement
+€5.2m
+
+Mitigation options
+[Calculate]
+
+↓
+
+TAR ENGINE
+
+Current TAR
+1.68
+
+Timing
+Anticipatory
+
+Historical lead time
+4.1 months
+
+↓
+
+ECONOMIC ENGINE
+
+Action band
+10.2–15.4%
+
+Client cost
+12.0%
+
+↓
+
+DECISION
+
+        ACT
+
+Expected benefit
+€820k
+
+Confidence
+Moderate
+
+Recommended action
+Partial / reversible
+
+That is something a broker, insurer, procurement department, commodity trader or supply-chain risk manager could actually pay for.
+
+41. What I would NOT do
+
+This is just as important.
+
+❌ Don't add AI chat just because it looks impressive.
+❌ Don't add 50 geopolitical indicators.
+❌ Don't turn it into a generic geopolitical dashboard.
+❌ Don't show fake precision like “73.4% probability of war.”
+❌ Don't call every TAR spike a forecast.
+❌ Don't hide false positives.
+❌ Don't optimize the model after seeing the outcome.
+❌ Don't let the UI imply that high TAR automatically means “Act.”
+❌ Don't expand to 50 corridors before validating the first 5–7.
+❌ Don't spend another month polishing CSS before fixing validation.
+42. My priority ranking
+
+If you have limited time, I would do these in exactly this order:
+
+Priority	Work	Importance
+🔴 1	Out-of-sample / walk-forward validation	10/10
+🔴 2	Freeze historical forecasts + audit registry	10/10
+🔴 3	Separate anticipatory vs concurrent signals	10/10
+🔴 4	Customer economic-cost calculator	9.5/10
+🔴 5	Policy comparison in actual €	9/10
+🔴 6	Corridor-specific validation	9/10
+🟠 7	Lead-time statistics	9/10
+🟠 8	Decision margin / borderline state	8.5/10
+🟠 9	Sensitivity analysis	8.5/10
+🟠 10	Explainable decision panel	8/10
+🟠 11	Track-record page	8/10
+🟡 12	Broker/underwriter workspace	7.5/10
+🟡 13	API	7/10
+🟡 14	Alerts	7/10
+🟢 15	More corridors	5/10 right now
+🟢 16	More visual polish	3/10 right now
+The most important message for Claude
+
+If I were giving Claude one instruction, it would be:
+
+Do not turn this into a prettier risk dashboard. Turn the existing TAR prototype into an auditable economic decision engine. Preserve the current Act/Wait architecture, but separate risk detection, timing validity, and customer-specific economic decision; add walk-forward validation, frozen forecasts, customer cost calculation, uncertainty, sensitivity analysis, and an auditable track record.
