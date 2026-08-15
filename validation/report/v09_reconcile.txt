@@ -1,0 +1,56 @@
+RECONCILIATION: v08 DESIGN vs THE MANUSCRIPT'S REPORTED AUC
+==============================================================================
+scoring tar from final_output\panel_final.csv
+target  0.753 pooled / 0.842 chokepoint-restricted
+
+CLOSEST 15 DESIGNS TO THE PUBLISHED NUMBER
+ lead  exclude      start      units    avg  sign  n_pos    n      auc  gap_to_paper
+    3        6 1985-01-01 chokepoint within     1     15 2372 0.745645      0.007355
+    3        6       full chokepoint within     1     15 2372 0.745645      0.007355
+    3        0       full chokepoint within     1     15 2381 0.744026      0.008974
+    3        0 1985-01-01 chokepoint within     1     15 2381 0.744026      0.008974
+    3       12 1985-01-01 chokepoint within     1     15 2361 0.743465      0.009535
+    3       12       full chokepoint within     1     15 2361 0.743465      0.009535
+    3        6       full        all pooled     1     24 3264 0.741088      0.011912
+    3        6 1985-01-01        all pooled     1     24 3264 0.741088      0.011912
+    3        0 1985-01-01        all pooled     1     24 3279 0.740707      0.012293
+    3        0       full        all pooled     1     24 3279 0.740707      0.012293
+    3       12       full        all pooled     1     24 3247 0.740007      0.012993
+    3       12 1985-01-01        all pooled     1     24 3247 0.740007      0.012993
+    3       12 1985-01-01        all within     1     24 3247 0.769850      0.016850
+    3       12       full        all within     1     24 3247 0.769850      0.016850
+    3        0       full        all within     1     24 3279 0.771093      0.018093
+
+BEST AND WORST OVERALL
+ lead  exclude      start units    avg  sign  n_pos    n      auc  gap_to_paper
+    3        6       full   all within     1     24 3264 0.771889      0.018889
+    3        6 1985-01-01   all within     1     24 3264 0.771889      0.018889
+    3        0 1985-01-01   all within     1     24 3279 0.771093      0.018093
+    3        0       full   all within     1     24 3279 0.771093      0.018093
+    3       12       full   all within     1     24 3247 0.769850      0.016850
+...
+ lead  exclude      start units    avg  sign  n_pos    n      auc  gap_to_paper
+    3        6 1985-01-01   all within    -1     24 3264 0.228111      0.524889
+    3        6       full   all within    -1     24 3264 0.228111      0.524889
+    3        0       full   all within    -1     24 3279 0.228907      0.524093
+    3        0 1985-01-01   all within    -1     24 3279 0.228907      0.524093
+    3       12 1985-01-01   all within    -1     24 3247 0.230150      0.522850
+
+closest cell: AUC 0.746 (gap 0.007)
+  lead 3m, exclude 6m, start 1985-01-01, chokepoint units, within, sign 1
+
+SIGN CHECK -- the most important line here
+  sign +1: median AUC 0.688, max 0.772
+  sign -1: median AUC 0.312, max 0.457
+
+  A design in this grid reproduces the published number. Adopt that
+  design in v08 and rerun the corridor comparison under it. The v08
+  null should NOT be reported until that has been done -- it was
+  measured under a design that does not match your paper.
+
+IF THE SIGN IS NEGATIVE
+  A consistently sub-0.5 AUC on the raw series means that in this data
+  acts rise faster than threats ahead of onset, so TAR FALLS into an
+  escalation rather than rising. That would not be a bug -- it would be
+  a substantive result pointing the opposite way to the paper's premise,
+  and it is worth far more attention than the null.
