@@ -42,6 +42,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import statistics
 import sys
 from dataclasses import dataclass
@@ -301,21 +302,38 @@ def _recovered_state(months: list[str], tar: list[float], ep_start: int, ep_end:
 # Interface
 # --------------------------------------------------------------------------
 
-def snapshot(history: dict, corridor: str) -> RecoverySnapshot:
+def snapshot(history: dict, corridor: str, as_of: str | None = None) -> RecoverySnapshot:
     """The one entry point. `history` is the {"months", "tar", "cut",
     "alarm"} shape already sitting in docs/readings.json's "history" key
     (or freshly built by tar_ingest.build_readings()) -- this function
     does no file I/O itself; only the CLI's `snapshot` subcommand below
-    touches a path. "Now" is unambiguously history["months"][-1] -- there
-    is no as_of override, on purpose: a caller passing a date inconsistent
-    with the history it also passed is a footgun this module doesn't need,
-    since back-testing ("what would this have said as of month X") is a
-    different feature this one doesn't attempt."""
+    touches a path.
+
+    `as_of` (optional, "YYYY-MM") is for back-testing: "what would this
+    have said as of month X", using only data available through that
+    month -- same interface convention as episodes.py's own `analogue()`
+    --as-of. Default (None) is "now" = history["months"][-1]. Deliberately
+    NOT a free-form override: `as_of` must already be present in
+    history["months"], checked up front and raising ValueError otherwise,
+    same as the corridor check below -- a caller passing a date the
+    history doesn't actually cover fails loudly rather than silently
+    returning something inconsistent. Everything after the truncation
+    below runs exactly as if `as_of` were the last month on record; no
+    branching elsewhere in this function knows the difference."""
     if corridor not in CORRIDORS:
         raise ValueError(f"unknown corridor {corridor!r}. Known: {sorted(CORRIDORS)}")
     months, tar, alarm = history["months"], history["tar"], history["alarm"]
     if not (len(months) == len(tar) == len(alarm)):
         raise ValueError("history's months/tar/alarm arrays must be the same length")
+
+    if as_of is not None:
+        try:
+            cutoff = months.index(as_of)
+        except ValueError:
+            raise ValueError(
+                f"as_of {as_of!r} is not in this history's months "
+                f"(range {months[0]!r}..{months[-1]!r})") from None
+        months, tar, alarm = months[:cutoff + 1], tar[:cutoff + 1], alarm[:cutoff + 1]
 
     current_idx = len(months) - 1
     alarm_now = bool(alarm[current_idx])
@@ -402,6 +420,8 @@ def main() -> int:
     sn.add_argument("--corridor", required=True)
     sn.add_argument("--readings", type=Path,
                     default=Path(__file__).resolve().parent.parent / "docs" / "readings.json")
+    sn.add_argument("--as-of", help="YYYY-MM, for back-testing -- same convention as "
+                                    "episodes.py's own --as-of")
 
     p.add_argument("--selftest", action="store_true")
     a = p.parse_args()
@@ -411,7 +431,7 @@ def main() -> int:
     if a.cmd == "snapshot":
         import json
         data = json.loads(a.readings.read_text(encoding="utf-8"))
-        _print_snapshot(snapshot(data["history"], a.corridor))
+        _print_snapshot(snapshot(data["history"], a.corridor, as_of=a.as_of))
         return 0
     p.error("pass a subcommand (snapshot) or --selftest")
     return 1
@@ -503,6 +523,32 @@ def selftest() -> int:
     # months_so_far = 17: only the 65-month episode ran at least that long
     # (n=1) -- correctly insufficient, not a fabricated number.
     assert s.conditional_remaining is None
+
+    # --- as_of back-testing: replays the exact real month-by-month sequence
+    # independently hand-verified against the live data before this
+    # parameter existed (2026-04 STALLED, 05 RE_ESCALATING, 06 STALLED, 07
+    # RECOVERING) -- proves truncation reproduces what the unrestricted
+    # snapshot() above already does at the final month, and that the
+    # classifier genuinely responds to new evidence each month rather than
+    # flip-flopping on noise. REAL_TAIL's last 4 entries (2.229/2.356/
+    # 2.323/1.68) are the real 2026-04..2026-07 readings, in fixture months
+    # hist["months"][-4:].
+    as_of_04, as_of_05, as_of_06, as_of_07 = hist["months"][-4:]
+    assert snapshot(hist, "Strait of Hormuz", as_of=as_of_04).recovery_state.state == "STALLED"
+    assert snapshot(hist, "Strait of Hormuz", as_of=as_of_05).recovery_state.state == "RE_ESCALATING"
+    assert snapshot(hist, "Strait of Hormuz", as_of=as_of_06).recovery_state.state == "STALLED"
+    s_07 = snapshot(hist, "Strait of Hormuz", as_of=as_of_07)
+    assert s_07.recovery_state.state == "RECOVERING"
+    assert s_07.as_of == as_of_07 == hist["months"][-1]   # as_of=last month == the default (None)
+    assert dataclasses.asdict(s_07) == dataclasses.asdict(s)   # truncating to everything changes nothing
+
+    # as_of outside the history's range raises, rather than silently using
+    # the nearest month or some other guessed behaviour
+    try:
+        snapshot(hist, "Strait of Hormuz", as_of="1899-01")
+        assert False, "an as_of outside the history should have raised"
+    except ValueError:
+        pass
 
     # --- same real duration list answers a lower bar (the ANSWERABLE
     # branch of the same n>=2 gate, not just the insufficient branch) ---
