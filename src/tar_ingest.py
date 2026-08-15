@@ -20,6 +20,9 @@ Input columns
 Needs threat and act coverage. Recognised names are listed in _ALIASES;
 pass --threat-col / --act-col if the release uses something else.
 Country columns (GPRC_*) are optional and only used for corridor salience.
+Salience additionally backfills each GPRC_<code> with the release's
+GPRHC_<code> (the historical country index) for months before GPRC_ exists,
+so it is not limited to BENCHMARK_START the way the TAR series itself is.
 """
 
 from __future__ import annotations
@@ -194,12 +197,19 @@ def salience_parts(df: pd.DataFrame, codes: list[str]):
     indicator is one number for the whole world — printing it once per corridor
     tells the reader nothing they did not already know.
 
+    Matched on exact "GPRC_<code>" equality. A prior version matched any
+    column *ending* in the code, which also caught GPRHC_<code> (the
+    historical country index — see _extend_country_columns) whenever both
+    were present in the same frame: the numerator counted both, the
+    denominator below only ever summed GPRC_, silently inflating every
+    corridor's shipped share by roughly 2x. Fixed 2026-08-15.
+
     Returns None when the release carries none of the requested countries, which
     is the honest outcome for corridors whose escalating states are unpublished
     and whose proxies are also absent.
     """
-    cols = [c for c in df.columns
-            if any(c.upper().endswith(k) or c.upper() == f"GPRC_{k}" for k in codes)]
+    wanted = {f"GPRC_{k}" for k in codes}
+    cols = [c for c in df.columns if c.upper() in wanted]
     if not cols:
         return None
     total = df[[c for c in df.columns if c.upper().startswith("GPRC_")]].sum(axis=1)
@@ -209,6 +219,35 @@ def salience_parts(df: pd.DataFrame, codes: list[str]):
     mean = frac.expanding(min_periods=BURN_IN).mean()
     sd = frac.expanding(min_periods=BURN_IN).std()
     return frac, (frac - mean) / sd
+
+
+def _extend_country_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Backfill each GPRC_<code> (current release, 1985+) with GPRHC_<code>
+    (historical release, 1900+) for months GPRC_ has no value — GPRC_ always
+    wins where both exist, so this only ever fills gaps, never overrides.
+
+    Called in load() before BENCHMARK_START truncation. Salience is not the
+    paper's calibrated TAR series and was never bound to that constant — it
+    is already its own, separately-caveated computation ("a demonstrated
+    architecture, not a validated instrument"), so widening its own baseline
+    doesn't touch the benchmark threat/act series or anything derived from it.
+
+    In the 1985-2026 overlap where both column families exist, GPRC_ and
+    GPRHC_ correlate 0.89-0.98 per country (checked against the live release,
+    2026-08-15) — closely related, but not confirmed here to share a
+    methodology, which is exactly why GPRC_ always wins where it has a value:
+    the backfill only ever extends the averaging window, never substitutes
+    for a current-era observation.
+    """
+    gprc = [c for c in df.columns if c.upper().startswith("GPRC_")]
+    if not gprc:
+        return pd.DataFrame(index=df.index)
+    out = {}
+    for col in gprc:
+        code = col.split("_", 1)[1]
+        hcol = f"GPRHC_{code}"
+        out[col] = df[col].combine_first(df[hcol]) if hcol in df.columns else df[col]
+    return pd.DataFrame(out, index=df.index)
 
 
 # --------------------------------------------------------------------------
@@ -264,6 +303,9 @@ MAX_VINTAGE_LAG_DAYS = 75   # release lands in the first days of each month
 # and act coverage only exists from 1985. Leaving the earlier rows in lets the
 # burn-in and the recursive percentile consume months the measure was never
 # defined on, which changes every threshold without changing anything visible.
+# Corridor salience is a separate computation and is not bound to this
+# constant — see _extend_country_columns, which backfills it with GPRHC_
+# back to 1900 where the release has it.
 BENCHMARK_START = "1985-01"
 
 
@@ -328,6 +370,9 @@ def load(source: Path, threat_col: str | None, act_col: str | None,
     df.attrs["threat_col"] = pick("threat", threat_col)
     df.attrs["act_col"] = pick("act", act_col)
 
+    country_hist = _extend_country_columns(df)
+    df.attrs["country_history"] = country_hist
+
     tcol, acol = df.attrs["threat_col"], df.attrs["act_col"]
     full_first, full_last = df.index[0].date(), df.index[-1].date()
 
@@ -350,6 +395,11 @@ def load(source: Path, threat_col: str | None, act_col: str | None,
           f"{blank} with no {tcol}/{acol})")
     print(f"  threat={tcol} act={acol}  "
           f"{len([c for c in df.columns if c.upper().startswith('GPRC_')])} country columns")
+    if not country_hist.empty:
+        extra = int((country_hist.index < pd.Timestamp(start)).sum())
+        print(f"  salience backfilled with GPRHC_ back to {country_hist.index[0].date()} "
+              f"({extra} extra months before {start} — today's own reading is unaffected, "
+              f"only the long-run average/z-score baseline widens)")
 
     # A frozen vintage reads identically to a current one and produces a
     # perfectly plausible band. Refuse it rather than warn.
@@ -381,9 +431,16 @@ def build_readings(df: pd.DataFrame) -> dict:
     if len(fired):
         trig = int((last.to_period("M") - ind.index[fired[-1]].to_period("M")).n)
 
+    # Salience reads from the GPRHC_-backfilled frame when load() attached
+    # one; falls back to df itself so callers that build a frame directly
+    # (the selftest, --verify) keep working unchanged.
+    country_df = df.attrs.get("country_history")
+    if country_df is None:
+        country_df = df
+
     readings = []
     for name, meta in CORRIDORS.items():
-        parts = salience_parts(df, meta["codes"])
+        parts = salience_parts(country_df, meta["codes"])
         sal = None if parts is None else parts[1]
         sal_now = None if sal is None or pd.isna(sal.iloc[-1]) else round(float(sal.iloc[-1]), 3)
 
@@ -642,6 +699,62 @@ def selftest() -> int:
         if r["share"] is not None:
             assert 0 <= r["share"] <= 100
             assert r["share_history"] and len(r["share_history"]) <= 60
+
+    # 12. _extend_country_columns: GPRC_ wins wherever it has a value; GPRHC_
+    #     fills only the months GPRC_ has none for.
+    idx5 = pd.date_range("1980-01-01", periods=24, freq="MS")
+    df5 = pd.DataFrame(index=idx5)
+    df5["GPRC_SAU"] = [np.nan] * 12 + list(range(12))
+    df5["GPRHC_SAU"] = list(range(100, 124))
+    merged = _extend_country_columns(df5)
+    assert list(merged["GPRC_SAU"].iloc[:12]) == list(range(100, 112)), \
+        "GPRHC_ did not backfill the months GPRC_ has no value for"
+    assert list(merged["GPRC_SAU"].iloc[12:]) == list(range(12)), \
+        "GPRC_ must win wherever it already has its own value"
+
+    # 13. Regression: a historical GPRHC_ column must never be counted
+    #     alongside its GPRC_ counterpart — the shipped bug this fixed
+    #     (endswith() matched GPRHC_SAU as well as GPRC_SAU, inflating every
+    #     corridor's live share by roughly 2x). Fixed 2026-08-15.
+    rng3 = np.random.default_rng(7)
+    dfx = pd.DataFrame({
+        "GPRC_SAU": np.abs(rng3.lognormal(3.0, 0.4, n)),
+        "GPRC_EGY": np.abs(rng3.lognormal(2.0, 0.4, n)),
+    }, index=idx)
+    dfx["GPRHC_SAU"] = np.abs(rng3.lognormal(3.0, 0.4, n))  # must be ignored
+    parts = salience_parts(dfx, CORRIDORS["Strait of Hormuz"]["codes"])
+    expect_now = (dfx["GPRC_SAU"] / (dfx["GPRC_SAU"] + dfx["GPRC_EGY"])).iloc[-1]
+    assert np.isclose(parts[0].iloc[-1], expect_now, rtol=1e-9), \
+        "salience is counting a GPRHC_ column alongside its GPRC_ counterpart"
+
+    # 14. Extension: widening the history with pre-1985 GPRHC_-sourced data
+    #     moves the long-run average/z baseline but never today's own share,
+    #     which always comes from the GPRC_-covered (modern) era.
+    pre = pd.date_range("1975-01-01", periods=120, freq="MS")
+    ext = pd.DataFrame({
+        "GPRC_SAU": pd.concat([pd.Series(np.abs(rng3.lognormal(3.0, 0.4, 120)), index=pre),
+                              dfx["GPRC_SAU"]]),
+        "GPRC_EGY": pd.concat([pd.Series(np.abs(rng3.lognormal(2.0, 0.4, 120)), index=pre),
+                              dfx["GPRC_EGY"]]),
+    })
+    short_parts = salience_parts(dfx[["GPRC_SAU", "GPRC_EGY"]],
+                                 CORRIDORS["Strait of Hormuz"]["codes"])
+    long_parts = salience_parts(ext, CORRIDORS["Strait of Hormuz"]["codes"])
+    assert np.isclose(short_parts[0].iloc[-1], long_parts[0].iloc[-1], rtol=1e-9), \
+        "extending the history changed today's own share, not just its baseline"
+    assert not np.isclose(short_parts[1].iloc[-1], long_parts[1].iloc[-1], atol=1e-9), \
+        "widening the baseline had no effect on the z-score — extension not wired up"
+
+    # 15. load()->build_readings() integration: df.attrs["country_history"],
+    #     when present, is what salience actually reads — not df itself.
+    df4 = pd.DataFrame({"GPRT": threat, "GPRA": act,
+                        "GPRC_SAU": dfx["GPRC_SAU"], "GPRC_EGY": dfx["GPRC_EGY"]})
+    df4.attrs["threat_col"], df4.attrs["act_col"] = "GPRT", "GPRA"
+    df4.attrs["country_history"] = ext
+    out4 = build_readings(df4)
+    hormuz4 = next(r for r in out4["readings"] if r["corridor"] == "Strait of Hormuz")
+    assert np.isclose(hormuz4["share"], round(float(long_parts[0].iloc[-1]) * 100, 2), atol=0.01), \
+        "build_readings did not use df.attrs['country_history'] for salience"
 
     print("all checks passed")
     print(f"  synthetic TAR now       {out['readings'][0]['tar']}")

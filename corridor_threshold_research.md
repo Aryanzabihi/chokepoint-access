@@ -37,20 +37,49 @@ data per parameter. More knobs on the same eight events is not a fix.
 
 ## Path A — extend the historical window before 1985
 
-**Status: unknown, cheap to check, do this first.**
+**Status: done, 2026-08-15 — checked and implemented.**
 
-The Caldara-Iacoviello GPR headline index reportedly goes back to 1900,
-but it is not yet confirmed whether the specific threat/act country-level
-columns this project actually ingests (`GPRT`/`GPRA` per country, used for
-corridor salience) have usable coverage that far back, or at what quality.
+Confirmed against the live release (`data/gpr_monthly.dta`): the
+country-level series aren't named `GPRT`/`GPRA` per country as this
+document originally guessed — they're a separate family, `GPRC_<code>`
+(current release) and `GPRHC_<code>` (historical release), 44 countries
+each. `GPRC_*` starts exactly 1985-01 for every one of the 44 (a hard wall,
+not a coincidence — it's the actual reason `BENCHMARK_START` is 1985-01).
+`GPRHC_*` has full 1900-01–2026-07 coverage for all 44, including 11 of the
+16 corridor-relevant codes (`SAU`/`EGY`/`ITA`/`TUR`/`HUN`/`RUS`/`UKR`/`MYS`/
+`IDN`/`CHN`/`TWN`). The 5 small Gulf states used as Hormuz's GCC proxy
+(`ARE`/`KWT`/`QAT`/`OMN`/`BHR`) are absent from both families, current and
+historical — that ceiling doesn't move regardless. In the 1985–2026
+overlap, `GPRC_` and `GPRHC_` correlate 0.89–0.98 per country — closely
+related, but not confirmed here to share a newspaper corpus/methodology
+with the modern index, so the implementation always prefers `GPRC_` where
+it has a value and only uses `GPRHC_` to fill months `GPRC_` has none for.
 
-- **Action**: check the raw GPR release documentation / earlier vintages
-  for country-level coverage before 1985 (`BENCHMARK_START` in
-  `tar_ingest.py`).
-- **Even in the best case**: this adds more *months* of series, not more
-  *onset events* — major corridor disruptions are still rare. This alone
-  is unlikely to fix the n=1–4-per-corridor problem, but it's free
-  information and may still meaningfully narrow the global base-rate CI.
+**Implemented**: `tar_ingest._extend_country_columns()`, wired into
+`load()`/`build_readings()`. As anticipated, this is free information, not
+a fix for the n=1–4-per-corridor problem — TAR itself and `ONSETS` are
+untouched, still anchored to 1985 (the paper's own calibration), and
+nothing here adds a single onset event. What it does do: widen the
+long-run average/z-score baseline each corridor's live salience reading is
+judged against, from ~41 years to up to 126. Today's own `share` value is
+unchanged for every corridor (proven in `tar_ingest.py`'s selftest, not
+just eyeballed); `share_avg`/`salience_z` move to reflect the longer
+baseline.
+
+**Found as a byproduct, not part of the original scope**: `salience_parts()`
+had a live bug — `endswith()` column matching counted `GPRHC_<code>`
+alongside `GPRC_<code>` in the numerator while the denominator only ever
+summed `GPRC_*`, inflating every corridor's shipped `share`/`salience_z`
+by roughly 2x in the currently-committed `docs/readings.json` (e.g. Hormuz
+13.04% shown vs. 6.29% correct — every corridor, same ~2x, since every
+country code has both columns). Fixed in the same pass (tightened to exact
+`GPRC_<code>` match). Checked whether this needed a `--amend` against
+`docs/record.jsonl`'s hash chain — it doesn't: the ledger only ever hashed
+headline fields (`tar`/`band`/`alarm_now`/etc.), never per-corridor
+salience. The fix is in `src/tar_ingest.py`, selftest-verified; the
+committed `docs/readings.json` snapshot itself was deliberately left as-is
+this session on request — it will pick up the fix next time
+`run_month.py`'s normal monthly cycle regenerates it.
 
 ## Path B — a richer, graded disruption indicator (the real work)
 
@@ -107,8 +136,8 @@ global threshold. That is a real possible outcome, the same way 0.466 was.
 
 ## Concrete sequence, if this gets picked up
 
-1. Check GPR country-level coverage before 1985 (Path A) — quick, do
-   regardless of whether Path B happens.
+1. ~~Check GPR country-level coverage before 1985 (Path A)~~ — **done,
+   2026-08-15**, see above.
 2. Define what counts as a graded disruption event per corridor per month
    (Path B) — a real scoping decision, needs domain judgment before any
    data collection starts.
