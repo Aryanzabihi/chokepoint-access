@@ -21,6 +21,7 @@ plumbing.
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 from xml.sax.saxutils import escape as _esc
@@ -33,6 +34,7 @@ if str(SRC) not in sys.path:
 import chokepoint_profiles  # noqa: E402
 import decision_engine  # noqa: E402
 import intake  # noqa: E402
+import recovery  # noqa: E402
 from decision_engine import build_decision, decision_brief_html  # noqa: E402
 from intake import FIELDS, INCOTERM_GROUPS, fields_by_group, fields_for, template  # noqa: E402
 
@@ -357,3 +359,31 @@ def act_wait_dial_svg(result: dict, act: dict) -> dict | None:
           f'style="width:100%;height:auto">' + "".join(parts) + '</svg>')
     return {"svg": svg, "p_star": p_star, "probability_used": probability_used,
             "other_name": other_name}
+
+
+# --------------------------------------------------------------------------
+# Time recovery — a derived read alongside act_or_wait()/act_wait_dial_svg()
+# above: same file, same pattern, never touches build_decision()'s own math,
+# additive only (src/recovery.py, the TAR Time Recovery module).
+# --------------------------------------------------------------------------
+
+def recovery_snapshot(result: dict) -> dict | None:
+    """recovery.snapshot(), fed from engine.history_snapshot(). None when
+    there's no corridor on this result, when docs/readings.json isn't
+    present in this deployment (mirrors compute_decision()'s own
+    FileNotFoundError handling), or when the corridor is unrecognised by
+    recovery.py (defensive -- CORRIDORS above and tar_ingest.CORRIDORS are
+    identical sets today, confirmed, but this guards against future drift
+    the same way compute_decision() already guards engine.current_reading())."""
+    corridor = result.get("corridor")
+    if not corridor:
+        return None
+    try:
+        history = engine.history_snapshot()
+    except FileNotFoundError:
+        return None
+    try:
+        snap = recovery.snapshot(history, corridor)
+    except ValueError:
+        return None
+    return dataclasses.asdict(snap)

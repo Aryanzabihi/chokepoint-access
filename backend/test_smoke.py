@@ -503,6 +503,21 @@ def test_strategy_decision_walkthrough(client):
     assert r.text.count("hormuz-analyst@example.com") >= 2
     assert "Estimated cost" in r.text and "Approved cost" not in r.text  # still draft
 
+    # Time Recovery module (src/recovery.py) -- wired into the detail page
+    # via strategy_decision.recovery_snapshot(). This reads the REAL, live
+    # docs/readings.json (refreshed monthly by tar-monitor[bot]), so the
+    # specific recovery_state can legitimately change month to month --
+    # assert on the structural/fixed parts only, not today's live value.
+    # Strait of Hormuz has had onset history since 1987, so >=2 completed
+    # alarm episodes is a permanent historical fact, not something this
+    # month's data could regress below.
+    assert "Recovery state:" in r.text
+    assert any(f">{s}</span>" in r.text for s in
+              ("ESCALATING", "PEAKED", "RECOVERING", "STALLED", "RE_ESCALATING", "RECOVERED"))
+    assert "completed alarm episodes since 1985" in r.text
+    assert "global monthly TAR alarm series" in r.text        # scope_note, fixed text
+    assert "never a projection of what happens next" in r.text  # trend_disclaimer, fixed text
+
     r = client.get(detail_url + "/report")
     assert r.status_code == 200
     assert "Decision engine v2" in r.text

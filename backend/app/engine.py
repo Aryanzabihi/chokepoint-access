@@ -64,6 +64,20 @@ def load_readings() -> dict:
     return json.loads(READINGS_PATH.read_text(encoding="utf-8"))
 
 
+def history_snapshot() -> dict:
+    """The global monthly history (months/tar/cut/alarm) already sitting in
+    docs/readings.json under 'history' -- reuses load_readings(), does not
+    re-read the file. Deliberately takes no corridor argument: TAR is one
+    global series (tar_ingest.py's own selftest asserts every corridor's
+    band/horizon match in a given month), and current_reading(corridor)'s
+    per-corridor dict shape is a contract other callers already rely on
+    (its own docstring: "shaped like services.point_in_time()") -- bolting
+    a global object onto that per-corridor shape would blur exactly the
+    global/per-corridor line this codebase is careful to keep sharp
+    elsewhere."""
+    return load_readings()["history"]
+
+
 def current_reading(corridor: str) -> dict:
     """The current state of one corridor, shaped like services.point_in_time().
 

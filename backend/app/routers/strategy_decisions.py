@@ -37,7 +37,7 @@ from ..models import User
 from ..strategy_decision import (
     CORRIDORS, FIELDS, INCOTERM_GROUPS, act_or_wait, act_wait_dial_svg, compute_decision,
     decision_brief_html, decision_framing_for_stage, default_strategies_for_stage, display_label,
-    fields_by_group, intake, template,
+    fields_by_group, intake, recovery_snapshot, template,
 )
 
 router = APIRouter()
@@ -468,7 +468,8 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
          "decision_framing": decision_framing_for_stage(linked_order.stage if linked_order else None),
          "previous_decision": previous_decision, "previous_recommended": previous_recommended,
          "recommendation_changed": recommendation_changed, "edit_strategies": edit_strategies,
-         "act": act, "dial": act_wait_dial_svg(result, act)})
+         "act": act, "dial": act_wait_dial_svg(result, act),
+         "recovery": recovery_snapshot(result)})
 
 
 @router.post("/strategy-decisions/{decision_id}/subscribe")

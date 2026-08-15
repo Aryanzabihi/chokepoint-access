@@ -109,6 +109,10 @@ def main() -> int:
     # publication.
     step(6, "Decision engine v2 selftest", ["decision_engine.py", "--selftest"], optional=True)
 
+    # Same reasoning as step 6: a code-health check on the standalone
+    # recovery module, not part of the reading pipeline.
+    step(7, "Recovery selftest", ["recovery.py", "--selftest"], optional=True)
+
     print("\nDone. Now commit the record so there are two independent timestamps:")
     print("    git add record.jsonl readings.json track-record.html")
     print('    git commit -m "reading: <month>"')
