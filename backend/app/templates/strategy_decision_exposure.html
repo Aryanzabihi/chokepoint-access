@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}TAR Exposure — {{ input.scenario_id }}{% endblock %}
+{% block content %}
+
+{% macro field_recap(field, value) %}
+  <div class="stat">
+    <b>{% if value is none %}—{% elif field.unit == 'currency' %}{{ "{:,.0f}".format(value) }}{% elif field.unit in ('fraction', 'fraction_pa') %}{{ "{:.1%}".format(value) }}{% elif field.unit in ('days', 'count') %}{{ "{:,.0f}".format(value) }}{% else %}{{ value }}{% endif %}</b>
+    <span>{{ display_label(field.name) }}</span>
+  </div>
+{% endmacro %}
+
+{% set ds = result.demand_supply %}
+{% set ds_used_negative = ds.days_of_cover_used is not none and ds.days_of_cover_used < 0 %}
+{% set ds_derived_negative = ds.days_of_cover_derived is not none and ds.days_of_cover_derived < 0 %}
+
+<header class="masthead">
+  <div class="eyebrow"><a href="/strategy-decisions" style="color:inherit">Strategy decisions</a>
+  &middot; new &middot; TAR Exposure</div>
+  <h1>{{ input.scenario_id }}</h1>
+  <p class="thesis">{{ input.corridor }}{% if input.incoterm %} &middot; {{ input.incoterm }}{% endif %}
+  &mdash; this is what TAR reads from what you've supplied so far. Nothing is saved yet; the next
+  step generates strategies TAR thinks fit this situation and picks a recommendation.</p>
+</header>
+
+{% if result.client_exposure_note %}<p class="note">{{ result.client_exposure_note }}</p>{% endif %}
+
+{% if linked_order %}
+<p class="note">Built from order <a href="/orders/{{ linked_order.id }}">{{ linked_order.sku }}</a>
+(<span class="badge">{{ linked_order.stage.replace('_', ' ') }}</span>).</p>
+{% endif %}
+
+<section class="panel" style="margin-top:var(--s5)">
+  <h2>Reading</h2>
+  {% if result.reading %}
+  <p style="margin-top:0">Current reading: <span class="m">TAR {{ result.reading.tar }}</span>
+  {%- if result.reading.band %}, {{ result.reading.band }}{% endif %}.</p>
+  {% else %}
+  <p class="empty">No current reading available for this corridor.</p>
+  {% endif %}
+  <p class="m" style="margin-top:var(--s3)">{{ result.base_rate.episodes_with_disruption }} of
+  {{ result.base_rate.alarm_episodes }} alarm episodes since 1985 preceded a real disruption
+  ({{ "{:.0%}".format(result.base_rate.hit_rate) }}, 95% CI
+  {{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[0]) }}&ndash;{{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[1]) }}).
+  {%- if result.base_rate.corridor_note %} {{ result.base_rate.corridor_note }}{% endif %}</p>
+</section>
+
+<section class="panel">
+  <h2>Order &amp; exposure basics</h2>
+  <div class="stats">
+    {% for key, label, fields in field_groups if key == "exposure_basics" %}
+      {% for field in fields %}{{ field_recap(field, input.fields.get(field.name)) }}{% endfor %}
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Resolved supply position</h2>
+  <div class="stats">
+    {% for key, label, fields in field_groups if key == "demand_supply" %}
+      {% for field in fields %}{{ field_recap(field, input.fields.get(field.name)) }}{% endfor %}
+    {% endfor %}
+  </div>
+  {% if ds and (ds.days_of_cover_used is not none or ds.days_of_cover_derived is not none) %}
+  <div class="stats" style="margin-top:var(--s3)">
+    {% if ds.days_of_cover_used is not none %}
+    <div class="stat"><b>{{ "%g"|format(ds.days_of_cover_used) }}</b>
+      <span>days of cover used{% if ds.days_of_cover_is_derived_fallback %} &mdash; derived,
+      no direct figure supplied{% else %} &mdash; your direct figure{% endif %}</span></div>
+    {% endif %}
+    {% if ds.days_of_cover_derived is not none and not ds.days_of_cover_is_derived_fallback %}
+    <div class="stat"><b>{{ "%g"|format(ds.days_of_cover_derived) }}</b>
+      <span>days of cover, derived from the netting above &mdash; shown as a cross-check only,
+      your direct figure was used instead</span></div>
+    {% endif %}
+    {% if ds.stockout_date %}
+    <div class="stat"><b>{{ ds.stockout_date }}</b><span>stockout date, if nothing more arrives</span></div>
+    {% endif %}
+    {% if ds.quantity_at_risk is not none %}
+    <div class="stat"><b>{{ "{:,.0f}".format(ds.quantity_at_risk) }}</b>
+      <span>quantity at risk during the delay window</span></div>
+    {% endif %}
+    {% if ds.demand_at_risk_value is not none %}
+    <div class="stat"><b>{{ "{:,.0f}".format(ds.demand_at_risk_value) }}</b>
+      <span>demand at risk, valued at this shipment's own unit price</span></div>
+    {% endif %}
+  </div>
+  {% if ds_used_negative or ds_derived_negative %}
+  <p class="note warn"><strong>Already short.</strong>
+  {%- if ds_used_negative %} Days of cover used is {{ "%g"|format(ds.days_of_cover_used) }}
+  {%- else %} The derived days of cover is {{ "%g"|format(ds.days_of_cover_derived) }}
+  {%- endif %} &mdash; on-hand plus confirmed inbound is already below safety stock, before any
+  disruption delay is even applied.</p>
+  {% endif %}
+  {% else %}
+  <p class="empty">No days-of-cover figure, direct or derived &mdash; supply either your WMS
+  figure or the forecast/inventory/inbound/safety-stock set above to see this.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Disruption assumptions</h2>
+  <div class="stats">
+    {% for key, label, fields in field_groups if key == "disruption_assumptions" %}
+      {% for field in fields %}{{ field_recap(field, input.fields.get(field.name)) }}{% endfor %}
+    {% endfor %}
+    <div class="stat"><b>{{ "{:.0%}".format(result.probability_used) }}</b>
+      <span>probability used {% if result.probability_is_published_fallback %}&mdash; published
+      base rate, not yours{% else %}&mdash; your estimate{% endif %}</span></div>
+    {% if input.probability_range %}
+    <div class="stat"><b>{{ "{:.0%}".format(input.probability_range[0]) }}&ndash;{{ "{:.0%}".format(input.probability_range[1]) }}</b>
+      <span>your supplied probability range, for the regret check later</span></div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Exposure</h2>
+  <div class="stats">
+    <div class="stat"><b>{{ "{:,.0f}".format(result.exposure.baseline) }}</b><span>baseline, no disruption</span></div>
+    <div class="stat"><b>{{ "{:,.0f}".format(result.exposure.disrupted) }}</b><span>disrupted, unmitigated</span></div>
+    <div class="stat"><b>{{ "{:,.0f}".format(result.exposure.avoidable) }}</b><span>avoidable</span></div>
+  </div>
+  <p class="hint" style="margin-top:var(--s3)">Avoidable exposure is what a strategy has room to
+  save, at the probability used above &mdash; TAR Analysis compares strategies against this next.</p>
+</section>
+
+<section class="panel">
+  <h2>What's still missing</h2>
+  <p class="hint" style="margin-top:0">Tier {{ input.tier }} &mdash; fields above your tier are
+  never counted as missing here, only the ones you could have answered at your own tier and
+  Incoterm but left blank.</p>
+  {% if missing_fields %}
+  <div class="cards" style="margin-top:var(--s3)">
+    {% for f in missing_fields %}
+    <div class="card">
+      <div class="name">{{ display_label(f.name) }}</div>
+      <div class="meta">Owner: {{ f.department }} &middot; Tier {{ f.tier }}</div>
+      <div class="meta">System of record: {{ f.system_of_record }}</div>
+      <div class="meta">Impact: would let the {{ f.unit }}-denominated figure be derived instead
+      of left absent.</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">Nothing missing at your tier &mdash; every field you could have answered, you did.</p>
+  {% endif %}
+</section>
+
+<form method="post" action="/strategy-decisions/analyze" style="margin-top:var(--s5)">
+  {% for k, v in carry.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <div class="row">
+    <button class="btn" type="submit">Continue to TAR Analysis &rarr;</button>
+    <a class="btn ghost" href="/strategy-decisions/new{% if carry.decision_id %}?decision_id={{ carry.decision_id }}{% elif carry.order_id %}?order_id={{ carry.order_id }}{% elif carry.exposure_id %}?exposure_id={{ carry.exposure_id }}{% endif %}">&larr; Back to Input</a>
+  </div>
+  <p class="hint" style="margin-top:var(--s3)">Next: TAR generates strategies that fit this
+  situation and stage &mdash; nothing to construct by hand &mdash; and recommends one.</p>
+</form>
+{% endblock %}

@@ -43,14 +43,14 @@ def signup_form(request: Request):
 
 @router.post("/signup")
 def signup(request: Request, email: str = Form(...), password: str = Form(...),
-           session: Session = Depends(get_session)):
+           company_name: str | None = Form(None), session: Session = Depends(get_session)):
     if len(password) < 8:
         return templates.TemplateResponse(request, "signup.html",
             {"error": "Password must be at least 8 characters."}, status_code=422)
     if crud.get_user_by_email(session, email):
         return templates.TemplateResponse(request, "signup.html",
             {"error": "An account with that email already exists."}, status_code=422)
-    user = crud.create_user(session, email, hash_password(password))
+    user = crud.create_user(session, email, hash_password(password), company_name=company_name)
     resp = RedirectResponse("/home", status_code=303)
     resp.set_cookie(SESSION_COOKIE, make_session_cookie(user.id),
                      httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)

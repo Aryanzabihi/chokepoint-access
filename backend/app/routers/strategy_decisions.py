@@ -35,12 +35,14 @@ from ..db import get_session
 from ..deps import current_principal, current_user
 from ..models import User
 from ..strategy_decision import (
-    CORRIDORS, FIELDS, INCOTERM_GROUPS, compute_decision, decision_brief_html,
-    decision_framing_for_stage, default_strategies_for_stage, fields_by_group, template,
+    CORRIDORS, FIELDS, INCOTERM_GROUPS, act_or_wait, act_wait_dial_svg, compute_decision,
+    decision_brief_html, decision_framing_for_stage, default_strategies_for_stage, display_label,
+    fields_by_group, intake, template,
 )
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
+templates.env.globals["display_label"] = display_label
 
 _STRATEGY_SLOT_COUNT = 3   # fixed slots (mirrors economic's fixed _STRATEGY_DEFS rather than
                           # dynamic add/remove-row JS) -- every stage's default set in
@@ -84,10 +86,13 @@ def _field_value(form: FormData, spec) -> object:
     return _num(form, key)
 
 
-def _form_to_intake(form: FormData) -> dict:
-    fields = {spec.name: _field_value(form, spec) for spec in FIELDS}
+def _strategies_from_form(form: FormData) -> list[dict]:
+    """Parses the strategy_{i}_* fields a strategy-editing form posts
+    (whether that's the fixed 3-slot table this used to be inline on the
+    Input page, or the draft-mode cards on the detail page now) into
+    intake.py's strategy shape. A blank name means an unused slot, same
+    convention either way."""
     baseline_idx = int(form.get("baseline_strategy") or 0)  # type: ignore[arg-type]
-
     strategies = []
     for i in range(_STRATEGY_SLOT_COUNT):
         name = form.get(f"strategy_{i}_name")
@@ -105,14 +110,29 @@ def _form_to_intake(form: FormData) -> dict:
             "is_baseline": i == baseline_idx,
             "notes": form.get(f"strategy_{i}_notes") or "",
         })
+    return strategies
 
+
+# A single, effect-free baseline -- just enough to satisfy build_decision()'s
+# ">= 1 strategy" requirement for the Input -> TAR Exposure step, where no
+# real strategy has been chosen yet. Confirmed by reading decision_engine.py:
+# result["exposure"]/["demand_supply"]/["reading"]/["base_rate"]/["procurement_window"]
+# and the ABSENT ledger/missing-fields entries are all computed from
+# intake_data["fields"] alone, before the per-strategy loop ever runs --
+# this placeholder never reaches the user, only exposure-stage figures do.
+_PLACEHOLDER_STRATEGY = [{"name": "Continue", "direct_cost": 0.0, "is_baseline": True,
+                         "effects": {}, "notes": ""}]
+
+
+def _form_to_intake(form: FormData, *, strategies: list[dict] | None = None) -> dict:
+    fields = {spec.name: _field_value(form, spec) for spec in FIELDS}
     data = {
         "scenario_id": form.get("scenario_id") or "SCENARIO-UNSPECIFIED",
         "corridor": form.get("corridor") or "",
         "incoterm": form.get("incoterm") or None,
         "tier": int(form.get("tier") or 1),  # type: ignore[arg-type]
         "fields": fields,
-        "strategies": strategies,
+        "strategies": strategies if strategies is not None else _strategies_from_form(form),
         "client_probability_estimate": _pct(form, "client_probability_estimate"),
         "probability_range": None,
         "tier4_ledger_path": None,
@@ -123,8 +143,55 @@ def _form_to_intake(form: FormData) -> dict:
     return data
 
 
+def _carry_forward_fields(data: dict) -> dict[str, object]:
+    """Flattens an intake dict back into the exact POST field names
+    _form_to_intake() reads, for hidden-field round-tripping from Input to
+    TAR Exposure to the final Analyze step (mirrors decision_wizard.py's
+    own proven hidden-field pattern, just for the ~21 intake fields instead
+    of 5). Fraction-unit fields convert back to the percentage form the
+    visible inputs use -- the one place this conversion happens, so a
+    later step can never drift out of sync with what field_input() shows."""
+    carry: dict[str, object] = {
+        "scenario_id": data.get("scenario_id") or "",
+        "corridor": data.get("corridor") or "",
+        "incoterm": data.get("incoterm") or "",
+        "tier": data.get("tier") or 1,
+    }
+    for spec in FIELDS:
+        v = data.get("fields", {}).get(spec.name)
+        if v is None:
+            continue
+        carry[f"field_{spec.name}"] = v * 100 if spec.unit in _PCT_UNITS else v
+    if data.get("client_probability_estimate") is not None:
+        carry["client_probability_estimate"] = data["client_probability_estimate"] * 100
+    if data.get("probability_range"):
+        lo, hi = data["probability_range"]
+        carry["probability_range_low"] = lo * 100
+        carry["probability_range_high"] = hi * 100
+    return carry
+
+
 _DEMAND_SUPPLY_FIELDS = ("forecast_quantity", "forecast_window_days", "current_inventory",
                         "inbound_confirmed_quantity", "safety_stock")
+
+# Every field in intake.py's "exposure_basics" group has a same-named
+# attribute directly on ProcurementOrder -- the whole reason that group can
+# collapse into a read-only order recap instead of a data-entry section
+# when a decision is linked to an order (never ask the user twice for
+# something the order already has on file).
+_ORDER_SOURCED_FIELDS = ("ship_date", "cargo_value", "quantity", "quantity_unit",
+                        "contract_freight_rate", "contract_transit_time_days")
+
+
+def _order_field_values(order) -> dict[str, object]:
+    """Only the ones actually present on the order -- a field the order
+    itself lacks falls through to the template's own "Not provided" /
+    fallback-input path, same missing-is-reported-not-guessed principle as
+    everywhere else in this form."""
+    if order is None:
+        return {}
+    return {name: v for name in _ORDER_SOURCED_FIELDS
+            if (v := getattr(order, name)) is not None}
 
 
 def _template_context(order=None, demand_supply: dict | None = None) -> dict:
@@ -132,11 +199,20 @@ def _template_context(order=None, demand_supply: dict | None = None) -> dict:
     # so the form always has a key to look up (fields left above the
     # client's chosen tier just stay blank -- see intake.py, supplying one
     # anyway is never forbidden, only not required).
+    # No "strategies" key here anymore -- Input no longer shows a strategy
+    # table at all (see the plan this was rebuilt from: strategies are
+    # chosen by the engine at the Analyze step, not constructed by hand on
+    # this page).
     t = template(3)
-    t["strategies"] = default_strategies_for_stage(order.stage if order else None)
     if order is not None:
         # Pre-fill from the linked order -- a deliberate improvement over
         # exposure_id linking below, which pre-fills nothing at all today.
+        # scenario_id too: an order already has its own identity (SKU +
+        # order number) -- asking for a second, separate name on top of it
+        # is redundant, and worse, easy to leave at the literal fallback
+        # string "SCENARIO-UNSPECIFIED". No order linked still means no
+        # identity to borrow, so that path keeps asking.
+        t["scenario_id"] = f"{order.sku} #{order.id}"
         t["corridor"] = order.corridor
         t["incoterm"] = order.incoterm
         t["fields"]["quantity"] = order.quantity
@@ -177,31 +253,57 @@ def list_page(request: Request, user: User = Depends(current_user),
 @router.get("/strategy-decisions/new", response_class=HTMLResponse)
 def new_page(request: Request, user: User = Depends(current_user),
              session: Session = Depends(get_session), exposure_id: int | None = None,
-             order_id: int | None = None, forecast_quantity: float | None = None,
+             order_id: int | None = None, decision_id: int | None = None,
+             forecast_quantity: float | None = None,
              forecast_window_days: float | None = None, current_inventory: float | None = None,
              inbound_confirmed_quantity: float | None = None, safety_stock: float | None = None):
     linked_exposure = crud.get_exposure_owned(session, user, exposure_id) if exposure_id else None
     linked_order = crud.get_procurement_order_owned(session, user, order_id) if order_id else None
-    demand_supply = {"forecast_quantity": forecast_quantity,
-                     "forecast_window_days": forecast_window_days,
-                     "current_inventory": current_inventory,
-                     "inbound_confirmed_quantity": inbound_confirmed_quantity,
-                     "safety_stock": safety_stock}
+    if decision_id is not None:
+        # "Modify": re-open Input pre-filled from the decision's OWN saved
+        # input, not re-derived from the linked order -- fixes a real gap
+        # the old Modify link had (it silently dropped whatever the analyst
+        # had actually typed, since it only ever knew the order).
+        row = crud.get_strategy_decision_owned(session, user, decision_id)
+        if row is None:
+            raise HTTPException(404, "decision not found")
+        t = json.loads(row.input_json)
+        t.setdefault("currency", "EUR")
+        # The Modify link itself only ever carries decision_id (not
+        # order_id) -- without this, a decision that WAS built from an
+        # order would silently lose its order recap on Modify, even though
+        # row.order_id still points right at it.
+        if linked_order is None and row.order_id is not None:
+            linked_order = crud.get_procurement_order_owned(session, user, row.order_id)
+    else:
+        demand_supply = {"forecast_quantity": forecast_quantity,
+                         "forecast_window_days": forecast_window_days,
+                         "current_inventory": current_inventory,
+                         "inbound_confirmed_quantity": inbound_confirmed_quantity,
+                         "safety_stock": safety_stock}
+        t = _template_context(linked_order, demand_supply)
     return templates.TemplateResponse(request, "strategy_decision_new.html",
-        {"user": user, "t": _template_context(linked_order, demand_supply),
-         "corridors": sorted(CORRIDORS),
+        {"user": user, "t": t, "corridors": sorted(CORRIDORS),
          "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(FIELDS),
          "error": None, "exposure_id": linked_exposure.id if linked_exposure else None,
          "linked_exposure": linked_exposure,
-         "order_id": linked_order.id if linked_order else None, "linked_order": linked_order})
+         "order_id": linked_order.id if linked_order else None, "linked_order": linked_order,
+         "order_field_values": _order_field_values(linked_order), "decision_id": decision_id})
 
 
-@router.post("/strategy-decisions")
-async def create_page(request: Request, exposure_id: int | None = Form(None),
-                       order_id: int | None = Form(None),
-                       user: User = Depends(current_user), session: Session = Depends(get_session)):
+@router.post("/strategy-decisions", response_class=HTMLResponse)
+async def compute_exposure_page(request: Request, exposure_id: int | None = Form(None),
+                                 order_id: int | None = Form(None),
+                                 decision_id: int | None = Form(None),
+                                 user: User = Depends(current_user),
+                                 session: Session = Depends(get_session)):
+    """Input -> TAR Exposure. Computes with a single placeholder strategy
+    (see _PLACEHOLDER_STRATEGY) and renders the Exposure template directly
+    -- no redirect, nothing persisted yet -- exactly the "POST renders the
+    next template" pattern decision_wizard.py already established. Nothing
+    is inserted into the database until /strategy-decisions/analyze."""
     form = await request.form()
-    data = _form_to_intake(form)
+    data = _form_to_intake(form, strategies=_PLACEHOLDER_STRATEGY)
     order = crud.get_procurement_order_owned(session, user, order_id) if order_id else None
     try:
         result = compute_decision(data)
@@ -213,18 +315,80 @@ async def create_page(request: Request, exposure_id: int | None = Form(None),
              "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(FIELDS),
              "error": f"{type(exc).__name__}: {exc}", "exposure_id": exposure_id,
              "linked_exposure": None, "order_id": order.id if order else None,
-             "linked_order": order}, status_code=422)
+             "linked_order": order, "order_field_values": _order_field_values(order),
+             "decision_id": decision_id}, status_code=422)
+    missing = intake.missing_fields(data)
+    carry = _carry_forward_fields(data)
+    if exposure_id is not None:
+        carry["exposure_id"] = exposure_id
+    if order_id is not None:
+        carry["order_id"] = order_id
+    if decision_id is not None:
+        carry["decision_id"] = decision_id
+    return templates.TemplateResponse(request, "strategy_decision_exposure.html",
+        {"user": user, "result": result, "input": data, "missing_fields": missing,
+         "carry": carry, "linked_order": order, "field_groups": fields_by_group(FIELDS)})
+
+
+@router.post("/strategy-decisions/analyze")
+async def analyze_page(request: Request, exposure_id: int | None = Form(None),
+                        order_id: int | None = Form(None), decision_id: int | None = Form(None),
+                        user: User = Depends(current_user), session: Session = Depends(get_session)):
+    """TAR Exposure -> TAR Analysis. Recomputes with the engine's real,
+    stage-appropriate strategy set and persists for the first and only
+    time in this whole flow -- everything from here on (the detail page
+    while status == "draft", Approve/Reject/Execute/Recalculate) already
+    exists and needs no changes. A carried decision_id means this run
+    started as a "Modify" of that decision -- link the new row back to it
+    the same way the recalculate loop already links its own new rows, so
+    the decision record has real provenance either way."""
+    form = await request.form()
+    order = crud.get_procurement_order_owned(session, user, order_id) if order_id else None
+    data = _form_to_intake(form, strategies=default_strategies_for_stage(
+        order.stage if order else None))
+    try:
+        result = compute_decision(data)
+    except (KeyError, ValueError, TypeError) as exc:
+        # Exposure-stage fields were already validated once with the same
+        # values; this branch is realistically unreachable (only the
+        # strategy set changed, and default_strategies_for_stage() always
+        # returns a well-formed list), but fail loudly rather than silently
+        # if it ever is.
+        raise HTTPException(422, f"{type(exc).__name__}: {exc}") from exc
     exposure = crud.get_exposure_owned(session, user, exposure_id) if exposure_id else None
-    # An order's own client/exposure linkage wins when an order is present
-    # (more specific than a bare exposure_id) -- see strategy_decision.py's
-    # _template_context docstring for the matching pre-fill precedent.
+    previous_decision = crud.get_strategy_decision_owned(session, user, decision_id) \
+        if decision_id else None
     client_id = order.client_id if order else (exposure.client_id if exposure else None)
     linked_exposure_id = order.exposure_id if order else (exposure.id if exposure else None)
     row = crud.create_strategy_decision(
         session, user, scenario_id=data.get("scenario_id", "SCENARIO-UNSPECIFIED"),
         corridor=result["corridor"], input_data=data, result=result,
         client_id=client_id, exposure_id=linked_exposure_id,
-        order_id=order.id if order else None)
+        order_id=order.id if order else None,
+        previous_decision_id=previous_decision.id if previous_decision else None)
+    return RedirectResponse(f"/strategy-decisions/{row.id}", status_code=303)
+
+
+@router.post("/strategy-decisions/{decision_id}/recompute")
+async def recompute_page(decision_id: int, request: Request, user: User = Depends(current_user),
+                          session: Session = Depends(get_session)):
+    """Editing strategy cards on the detail page while status == "draft"
+    ("TAR Analysis"). Only the strategies change -- every other field stays
+    exactly what was already validated at Input -- and the row is updated
+    in place, not re-inserted (see crud.update_strategy_decision_draft)."""
+    row = crud.get_strategy_decision_owned(session, user, decision_id)
+    if row is None:
+        raise HTTPException(404, "decision not found")
+    if row.status != "draft":
+        raise HTTPException(409, "only a draft decision can be recomputed")
+    form = await request.form()
+    input_data = json.loads(row.input_json)
+    input_data["strategies"] = _strategies_from_form(form)
+    try:
+        result = compute_decision(input_data)
+    except (KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(422, f"{type(exc).__name__}: {exc}") from exc
+    crud.update_strategy_decision_draft(session, user, row, input_data=input_data, result=result)
     return RedirectResponse(f"/strategy-decisions/{row.id}", status_code=303)
 
 
@@ -252,6 +416,20 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
         if previous_decision is not None:
             previous_recommended = json.loads(previous_decision.result_json).get("recommended")
             recommendation_changed = previous_recommended != result.get("recommended")
+    # "TAR Analysis": while a decision is still a draft, section 5 renders
+    # the strategies as editable cards (posting to /recompute) instead of
+    # a read-only comparison -- padded to the fixed 3 slots so the cards
+    # match what Input's old strategy table used to offer, blank slots
+    # included. Once status leaves "draft" this is simply unused.
+    edit_strategies = None
+    if row.status == "draft":
+        edit_strategies = list(input_data.get("strategies", []))
+        blank_effects = {"delay_days_delta": 0.0, "capacity_restored": 0.0,
+                         "war_risk_premium_multiplier": None, "days_of_cover_delta": 0.0}
+        while len(edit_strategies) < _STRATEGY_SLOT_COUNT:
+            edit_strategies.append({"name": "", "direct_cost": 0.0, "is_baseline": False,
+                                    "notes": "", "effects": dict(blank_effects)})
+    act = act_or_wait(result)
     return templates.TemplateResponse(request, "strategy_decision_detail.html",
         {"user": user, "row": row, "result": result, "input": input_data,
          "field_groups": fields_by_group(FIELDS),
@@ -259,7 +437,8 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
          "linked_order": linked_order,
          "decision_framing": decision_framing_for_stage(linked_order.stage if linked_order else None),
          "previous_decision": previous_decision, "previous_recommended": previous_recommended,
-         "recommendation_changed": recommendation_changed})
+         "recommendation_changed": recommendation_changed, "edit_strategies": edit_strategies,
+         "act": act, "dial": act_wait_dial_svg(result, act)})
 
 
 @router.post("/strategy-decisions/{decision_id}/subscribe")

@@ -34,8 +34,10 @@ def get_user_by_email(session: Session, email: str) -> User | None:
     return session.exec(select(User).where(User.email == email.lower().strip())).first()
 
 
-def create_user(session: Session, email: str, password_hash: str) -> User:
-    user = User(email=email.lower().strip(), password_hash=password_hash)
+def create_user(session: Session, email: str, password_hash: str, *,
+                 company_name: str | None = None) -> User:
+    user = User(email=email.lower().strip(), password_hash=password_hash,
+                company_name=company_name or None)
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -229,6 +231,27 @@ def _set_strategy_decision_status(session: Session, user: User, decision: Strate
     session.add(decision)
     session.commit()
     audit(session, user.id, "strategy_decision", decision.id, action)
+    session.commit()
+    session.refresh(decision)
+    return decision
+
+
+def update_strategy_decision_draft(session: Session, user: User, decision: StrategyDecision, *,
+                                    input_data: dict, result: dict) -> StrategyDecision:
+    """Recompute a still-draft decision IN PLACE -- editing strategy cards
+    on the "TAR Analysis" screen (strategy_decision_detail.html while
+    status == "draft") shouldn't insert a new row per edit the way the
+    recalculate loop deliberately does (that one keeps a previous_decision_id
+    trail on purpose, because a market-quote reassessment is worth a
+    history). The router only calls this while status is still "draft" --
+    once a decision is approved/rejected/executed it goes back to being
+    create-only like everything else, unchanged."""
+    decision.input_json = json.dumps(input_data)
+    decision.result_json = json.dumps(result)
+    decision.corridor = result["corridor"]
+    session.add(decision)
+    session.commit()
+    audit(session, user.id, "strategy_decision", decision.id, "recomputed")
     session.commit()
     session.refresh(decision)
     return decision

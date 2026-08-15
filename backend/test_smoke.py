@@ -56,6 +56,30 @@ def test_signup_requires_password_length(client):
     assert r.status_code == 422
 
 
+def test_signup_company_name_is_optional(client):
+    """company_name is a plain optional field on User -- blank stays None,
+    supplied gets stored and normalized like everything else here (blank
+    string collapses to None, same convention as _text() elsewhere)."""
+    from app import crud
+    from app.db import get_session as _get_session
+
+    r = client.post("/signup", data={"email": "no-company@example.com",
+                                      "password": "correct horse battery staple"},
+                     follow_redirects=False)
+    assert r.status_code == 303
+    session = next(app.dependency_overrides[_get_session]())
+    user = crud.get_user_by_email(session, "no-company@example.com")
+    assert user.company_name is None
+
+    r = client.post("/signup", data={"email": "with-company@example.com",
+                                      "password": "correct horse battery staple",
+                                      "company_name": "Adriatic Bulk Ltd"},
+                     follow_redirects=False)
+    assert r.status_code == 303
+    user2 = crud.get_user_by_email(session, "with-company@example.com")
+    assert user2.company_name == "Adriatic Bulk Ltd"
+
+
 def test_full_walkthrough(client):
     # signup logs in immediately (session cookie set)
     r = client.post("/signup", data={"email": "broker@example.com",
@@ -370,30 +394,40 @@ def _decision_form(sample: dict, *, exposure_id: int | None = None) -> dict:
     """Converts an intake.py-shaped document (what decision_engine.py's own
     _sample_intake() and the JSON API's template both return) into the flat
     field names the "new decision" dashboard form posts -- the inverse of
-    app/routers/strategy_decisions.py's _form_to_intake()."""
+    app/routers/strategy_decisions.py's _form_to_intake(). No strategy_*
+    fields any more: Input no longer collects strategies (see
+    default_strategies_for_stage in app/strategy_decision.py) -- whatever
+    sample["strategies"] holds is only read by tests that call
+    compute_decision()/the JSON API directly."""
     fields = {"scenario_id": sample["scenario_id"], "corridor": sample["corridor"],
               "incoterm": sample["incoterm"], "tier": 3}
     for name, v in sample.get("fields", {}).items():
         if v is None:
             continue
         fields[f"field_{name}"] = v * 100 if name in _PCT_INTAKE_FIELDS else v
-    strategies = sample.get("strategies", [])
-    baseline_idx = next((i for i, s in enumerate(strategies) if s.get("is_baseline")), 0)
-    fields["baseline_strategy"] = baseline_idx
-    for i, s in enumerate(strategies):
-        fields[f"strategy_{i}_name"] = s["name"]
-        fields[f"strategy_{i}_direct_cost"] = s["direct_cost"]
-        effects = s.get("effects", {}) or {}
-        fields[f"strategy_{i}_delay_days_delta"] = effects.get("delay_days_delta", 0)
-        fields[f"strategy_{i}_capacity_restored"] = (effects.get("capacity_restored") or 0) * 100
-        wrpm = effects.get("war_risk_premium_multiplier")
-        if wrpm is not None:
-            fields[f"strategy_{i}_war_risk_premium_multiplier"] = wrpm * 100
-        fields[f"strategy_{i}_days_of_cover_delta"] = effects.get("days_of_cover_delta", 0)
-        fields[f"strategy_{i}_notes"] = s.get("notes", "")
     if exposure_id is not None:
         fields["exposure_id"] = exposure_id
     return {k: str(v) for k, v in fields.items() if v is not None}
+
+
+def _create_decision(client, sample: dict, *, exposure_id: int | None = None,
+                      order_id: int | None = None, decision_id: int | None = None):
+    """Input -> TAR Exposure -> TAR Analysis, replacing the old single-POST
+    helper now that a StrategyDecision is no longer created by one form
+    submit: POST /strategy-decisions computes and renders the Exposure
+    template directly (200, nothing persisted), then POST
+    /strategy-decisions/analyze is the one call that actually inserts a row
+    and redirects (303) -- mirrors exactly what the real form's hidden-field
+    carry-forward does between the two pages."""
+    form = _decision_form(sample, exposure_id=exposure_id)
+    if order_id is not None:
+        form["order_id"] = str(order_id)
+    if decision_id is not None:
+        form["decision_id"] = str(decision_id)
+    r = client.post("/strategy-decisions", data=form)
+    assert r.status_code == 200, r.text
+    assert "TAR Exposure" in r.text
+    return client.post("/strategy-decisions/analyze", data=form, follow_redirects=False)
 
 
 def test_strategy_decision_walkthrough(client):
@@ -435,26 +469,34 @@ def test_strategy_decision_walkthrough(client):
     r = client.post("/api/v1/strategy-decisions", json=bad)
     assert r.status_code == 422
 
-    # the dashboard form flow: labeled/tiered fields, compute, land on detail
+    # the dashboard form flow: labeled/tiered fields (no strategy table --
+    # strategies are generated by the engine at the Analyze step, not
+    # constructed by hand on Input), compute, land on detail
     r = client.get("/strategy-decisions/new")
     assert r.status_code == 200
-    assert 'name="field_cargo_value"' in r.text and 'name="strategy_0_name"' in r.text
+    assert 'name="field_cargo_value"' in r.text
+    assert "strategy_0_name" not in r.text
 
-    form = _decision_form(sample)
-    r = client.post("/strategy-decisions", data=form, follow_redirects=False)
+    r = _create_decision(client, sample)
     assert r.status_code == 303, r.text
     detail_url = r.headers["location"]
 
     r = client.get(detail_url)
     assert r.status_code == 200
-    assert result["recommended"] in r.text
+    # the form path uses default_strategies_for_stage(None) (Continue /
+    # Partial reroute), not sample["strategies"]'s own hand-tuned effects --
+    # verified separately that this still recommends "Continue" here, same
+    # as the JSON-path result above, though the two are no longer
+    # guaranteed to agree in general since the strategy sets differ
+    assert "Continue" in r.text
 
     r = client.get(detail_url + "/report")
     assert r.status_code == 200
     assert "Decision engine v2" in r.text
 
-    # an unknown corridor via the form is rejected with a helpful error, not a 500
-    bad_fields = dict(form)
+    # an unknown corridor via the form is rejected with a helpful error, not a
+    # 500 -- caught at the Input -> Exposure step, before /analyze ever runs
+    bad_fields = _decision_form(sample)
     bad_fields["corridor"] = "Not A Real Strait"
     r = client.post("/strategy-decisions", data=bad_fields)
     assert r.status_code == 422
@@ -487,8 +529,7 @@ def test_strategy_decision_walkthrough(client):
 
     bab_sample = dict(sample, corridor="Bab-el-Mandeb")
     for exp_id in exposure_ids:
-        r = client.post("/strategy-decisions", data=_decision_form(bab_sample, exposure_id=exp_id),
-                         follow_redirects=False)
+        r = _create_decision(client, bab_sample, exposure_id=exp_id)
         assert r.status_code == 303, r.text
 
     r = client.get(f"/clients/{client_id}/portfolio")
@@ -536,26 +577,34 @@ def test_order_walkthrough(client):
     assert r.status_code == 422
 
     # order-linking pre-fills the new-decision form -- the whole point of
-    # order_id (unlike exposure_id, which pre-fills nothing today) -- and
-    # picks pre_order's stage-appropriate default strategies (Wait/Buy now).
+    # order_id (unlike exposure_id, which pre-fills nothing today).
+    # Stage-appropriate default strategies (Wait/Buy now for pre_order) are
+    # no longer shown here -- Input has no strategy table any more, the
+    # engine picks them at the Analyze step -- checked below on the detail
+    # page instead, once a decision actually exists.
     r = client.get(f"/strategy-decisions/new?order_id={order_id}")
     assert r.status_code == 200
     assert f'value="{order_id}"' in r.text
-    assert 'value="Strait of Hormuz" selected' in r.text
+    # corridor comes from the order -- shown read-only (hidden input + plain
+    # text), never a re-editable dropdown, so the order stays authoritative
+    assert 'type="hidden" name="corridor" value="Strait of Hormuz"' in r.text
+    assert "from the order" in r.text
     assert 'value="45000' in r.text          # quantity pre-filled
     assert 'value="5000000' in r.text        # cargo_value pre-filled
-    assert 'value="Wait"' in r.text and 'value="Buy now"' in r.text
+    assert "strategy_0_name" not in r.text
 
-    r = client.post("/strategy-decisions", data={
+    order_form = {
         "scenario_id": "ORDER-TEST-001", "corridor": "Strait of Hormuz", "incoterm": "FOB",
         "tier": "1", "order_id": str(order_id),
         "field_ship_date": "2026-11-01", "field_cargo_value": "5000000", "field_quantity": "45000",
         "field_quantity_unit": "MT", "field_contract_freight_rate": "400000",
         "field_contract_transit_time_days": "25", "field_days_of_cover": "10",
         "field_delay_days_estimate": "11",
-        "baseline_strategy": "0", "strategy_0_name": "Wait", "strategy_0_direct_cost": "0",
-        "strategy_1_name": "Buy now", "strategy_1_direct_cost": "500000", "strategy_2_name": "",
-    }, follow_redirects=False)
+    }
+    r = client.post("/strategy-decisions", data=order_form)
+    assert r.status_code == 200, r.text
+    assert "TAR Exposure" in r.text
+    r = client.post("/strategy-decisions/analyze", data=order_form, follow_redirects=False)
     assert r.status_code == 303, r.text
     decision_url = r.headers["location"]
     decision_id = int(decision_url.rsplit("/", 1)[-1])
@@ -565,6 +614,10 @@ def test_order_walkthrough(client):
     assert "Procurement question: should you secure this requirement now?" in r.text
     assert f"/orders/{order_id}" in r.text            # linked back to the order
     assert ">draft<" in r.text and "Approve" in r.text
+    # pre_order's stage-appropriate default strategies (Wait/Buy now), now
+    # generated by the engine at Analyze rather than typed on Input, show up
+    # as editable cards on the draft-mode detail page
+    assert 'value="Wait"' in r.text and 'value="Buy now"' in r.text
 
     # the order's own detail page lists the decision built from it
     r = client.get(f"/orders/{order_id}")
@@ -601,12 +654,28 @@ def test_order_walkthrough(client):
     assert ">approved<" in r.text
 
     # a decision built from an in_transit order gets the Reroute default,
-    # not pre_order's Wait/Buy now
+    # not pre_order's Wait/Buy now -- verified on the draft-mode detail
+    # page, since Input itself no longer shows any strategy at all
     r = client.post("/orders", data={"corridor": "Bab-el-Mandeb", "stage": "in_transit",
                                       "sku": "Widget B", "quantity": "1000",
                                       "quantity_unit": "units"}, follow_redirects=False)
     order2_id = int(r.headers["location"].rsplit("/", 1)[-1])
     r = client.get(f"/strategy-decisions/new?order_id={order2_id}")
+    assert "strategy_0_name" not in r.text
+
+    order2_form = {
+        "scenario_id": "ORDER-TEST-002", "corridor": "Bab-el-Mandeb", "incoterm": "FOB",
+        "tier": "1", "order_id": str(order2_id),
+        "field_ship_date": "2026-11-01", "field_cargo_value": "1000000", "field_quantity": "1000",
+        "field_quantity_unit": "units", "field_contract_freight_rate": "50000",
+        "field_contract_transit_time_days": "20", "field_days_of_cover": "10",
+        "field_delay_days_estimate": "7",
+    }
+    r = client.post("/strategy-decisions", data=order2_form)
+    assert r.status_code == 200, r.text
+    r = client.post("/strategy-decisions/analyze", data=order2_form, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    r = client.get(r.headers["location"])
     assert 'value="Reroute"' in r.text
 
     # cross-user isolation holds for orders too
@@ -670,12 +739,14 @@ def test_decision_wizard(client):
     order_id = int(location.split("order_id=")[1].split("&")[0])
 
     # the handoff page pre-fills from BOTH the order and the carried
-    # demand/supply figures, and picks pre_order's stage-aware defaults
+    # demand/supply figures. Stage-aware default strategies (Wait/Buy now
+    # for pre_order) are picked by the engine at the Analyze step now, not
+    # shown on Input -- covered end-to-end in test_order_walkthrough.
     r = client.get(location)
     assert r.status_code == 200
-    assert 'value="Strait of Hormuz" selected' in r.text
+    assert 'type="hidden" name="corridor" value="Strait of Hormuz"' in r.text
     assert 'value="41500' in r.text and 'value="45000' in r.text and 'value="3000' in r.text
-    assert 'value="Wait"' in r.text and 'value="Buy now"' in r.text
+    assert "strategy_0_name" not in r.text
 
     # the order itself persisted the wizard-collected procurement fields
     r = client.get(f"/orders/{order_id}")
@@ -715,13 +786,14 @@ def test_decision_lifecycle(client):
     sample = _sample_intake()
 
     # --- draft -> reject ---
-    r = client.post("/strategy-decisions", data=_decision_form(sample), follow_redirects=False)
+    r = _create_decision(client, sample)
     assert r.status_code == 303, r.text
     decision1_url = r.headers["location"]
     decision1_id = int(decision1_url.rsplit("/", 1)[-1])
 
     r = client.get(decision1_url)
     assert ">draft<" in r.text and "Approve" in r.text and "Modify" in r.text and "Reject" in r.text
+    assert f'href="/strategy-decisions/new?decision_id={decision1_id}"' in r.text  # Modify, fixed
 
     r = client.post(f"/strategy-decisions/{decision1_id}/reject", follow_redirects=False)
     assert r.status_code == 303
@@ -729,7 +801,7 @@ def test_decision_lifecycle(client):
     assert ">rejected<" in r.text
 
     # --- draft -> approve -> execute ---
-    r = client.post("/strategy-decisions", data=_decision_form(sample), follow_redirects=False)
+    r = _create_decision(client, sample)
     decision2_url = r.headers["location"]
     decision2_id = int(decision2_url.rsplit("/", 1)[-1])
     client.post(f"/strategy-decisions/{decision2_id}/approve", follow_redirects=False)
@@ -743,7 +815,7 @@ def test_decision_lifecycle(client):
     assert ">executed<" in r.text
 
     # --- recalculate: a real quote change that really flips the recommendation ---
-    r = client.post("/strategy-decisions", data=_decision_form(sample), follow_redirects=False)
+    r = _create_decision(client, sample)
     decision3_url = r.headers["location"]
     decision3_id = int(decision3_url.rsplit("/", 1)[-1])
     r = client.get(decision3_url)
@@ -774,6 +846,114 @@ def test_decision_lifecycle(client):
     other.post("/signup", data={"email": "other-lifecycle@example.com",
                                  "password": "a different password"})
     r = other.post(f"/strategy-decisions/{decision2_id}/reject")
+    assert r.status_code == 404
+
+
+def test_act_or_wait(client):
+    """Act/Wait is a derived read on the same recommendation the engine
+    already computes -- WAIT when the baseline strategy wins, ACT with the
+    strategy name otherwise -- plus the edge case a Plan-agent review
+    surfaced: is_baseline isn't guaranteed to be set on any row (reachable
+    by checking the radio on a blank/unused slot in the real edit UI, then
+    Recompute), which must recover cleanly rather than mislabel or crash."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "act-or-wait@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+
+    # --- WAIT: the sample's own baseline (Continue) already wins ---
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_url = r.headers["location"]
+    r = client.get(decision_url)
+    assert r.status_code == 200
+    assert "WAIT" in r.text
+    assert "ACT &mdash;" not in r.text
+    assert "Net benefit" in r.text
+
+    # --- ACT: the same verified quote change test_decision_lifecycle uses,
+    # which flips Continue -> Partial reroute ---
+    r = client.post(f"/strategy-decisions/{decision_url.rsplit('/', 1)[-1]}/recalculate",
+                     data={"field_war_risk_premium_quote": "3500000"}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    r = client.get(r.headers["location"])
+    assert r.status_code == 200
+    assert "ACT &mdash; Partial reroute" in r.text
+
+    # --- edge case: no strategy card's radio checked on a named row (blank
+    # slot checked instead), then Recompute -- must not crash and must not
+    # silently mislabel a real recommendation ---
+    r = _create_decision(client, sample)
+    decision2_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    r = client.post(f"/strategy-decisions/{decision2_id}/recompute", data={
+        "baseline_strategy": "2",   # slot 2 is blank -- no row ends up is_baseline=True
+        "strategy_0_name": "Continue", "strategy_0_direct_cost": "0",
+        "strategy_1_name": "Partial reroute", "strategy_1_direct_cost": "700000",
+        "strategy_1_capacity_restored": "40", "strategy_1_war_risk_premium_multiplier": "25",
+        "strategy_2_name": "",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    r = client.get(r.headers["location"])
+    assert r.status_code == 200, "must not 500 when no strategy row is flagged is_baseline"
+    assert "WAIT" in r.text or "ACT" in r.text, "must resolve a real Decision, not go blank"
+
+
+def test_strategy_decision_recompute(client):
+    """TAR Analysis: editing strategy cards on the draft-mode detail page
+    and recomputing UPDATES the existing row in place -- no duplicate
+    insert -- and once the decision leaves draft, /recompute is refused."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "recompute@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_url = r.headers["location"]
+    decision_id = int(decision_url.rsplit("/", 1)[-1])
+    n_before = len(client.get("/api/v1/strategy-decisions").json())
+
+    r = client.post(f"/strategy-decisions/{decision_id}/recompute", data={
+        "baseline_strategy": "0",
+        "strategy_0_name": "Continue", "strategy_0_direct_cost": "0",
+        "strategy_1_name": "Partial reroute", "strategy_1_direct_cost": "999000",
+        "strategy_1_capacity_restored": "40", "strategy_1_war_risk_premium_multiplier": "25",
+        "strategy_1_notes": "recomputed in test", "strategy_2_name": "",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    assert r.headers["location"] == decision_url   # same row, not a new one
+
+    n_after = len(client.get("/api/v1/strategy-decisions").json())
+    assert n_after == n_before, "recompute must UPDATE in place, not INSERT"
+
+    r = client.get(decision_url)
+    assert r.status_code == 200
+    assert "999,000" in r.text
+    assert "recomputed in test" in r.text
+    assert ">draft<" in r.text
+
+    # once approved, /recompute is refused (only a draft can be recomputed)
+    client.post(f"/strategy-decisions/{decision_id}/approve", follow_redirects=False)
+    r = client.post(f"/strategy-decisions/{decision_id}/recompute",
+                     data={"strategy_0_name": "Continue", "strategy_0_direct_cost": "0"})
+    assert r.status_code == 409
+
+    # cross-user isolation holds for recompute too
+    other = TestClient(app)
+    other.post("/signup", data={"email": "other-recompute@example.com",
+                                 "password": "a different password"})
+    r = other.post(f"/strategy-decisions/{decision_id}/recompute",
+                    data={"strategy_0_name": "Continue", "strategy_0_direct_cost": "0"})
     assert r.status_code == 404
 
 
@@ -939,12 +1119,11 @@ def test_home_dashboard(client):
 
     # build a strategy decision for the Hormuz exposure via the dashboard form
     sample = _sample_intake()
-    form = _decision_form(sample, exposure_id=hormuz_exp["id"])
-    r = client.post("/strategy-decisions", data=form, follow_redirects=False)
+    r = _create_decision(client, sample, exposure_id=hormuz_exp["id"])
     assert r.status_code == 303, r.text
 
     r = client.get("/home")
     assert r.status_code == 200
     assert r.text.count("no decision yet") == 1   # Suez still has none
-    assert "Continue" in r.text or "Partial reroute" in r.text  # the recommended strategy shows somewhere
+    assert "Continue" in r.text  # the form path's recommendation (verified), shows somewhere
     assert suez_exp["corridor"] == "Suez Canal"   # sanity: the untouched exposure is the right one

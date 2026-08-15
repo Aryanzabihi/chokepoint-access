@@ -5,7 +5,7 @@
 {% macro field_recap(field, value) %}
   <div class="stat">
     <b>{% if value is none %}—{% elif field.unit == 'currency' %}{{ "{:,.0f}".format(value) }}{% elif field.unit in ('fraction', 'fraction_pa') %}{{ "{:.1%}".format(value) }}{% elif field.unit in ('days', 'count') %}{{ "{:,.0f}".format(value) }}{% else %}{{ value }}{% endif %}</b>
-    <span>{{ field.name.replace('_', ' ')|title }}</span>
+    <span>{{ display_label(field.name) }}</span>
   </div>
 {% endmacro %}
 
@@ -172,21 +172,23 @@ with updated quotes &mdash;
   <div class="scroll">
   <table>
     <thead><tr><th>Strategy</th><th class="m">Direct cost</th><th class="m">Conditional loss</th>
-    <th class="m">Coverage after, days</th><th class="m">Expected cost</th><th>Grade</th></tr></thead>
+    <th class="m">Coverage after, days</th><th class="m">Expected cost</th><th class="m">Net benefit</th><th>Grade</th></tr></thead>
     <tbody>
-    {% for r in result.strategies %}
+    {% for r in act.strategies_with_net_benefit %}
       <tr{{ ' style="font-weight:600"' | safe if r.name == result.recommended else "" }}>
-        <td>{{ r.name }}{% if r.is_baseline %} <span class="hint">(baseline)</span>{% endif %}</td>
+        <td>{{ r.name }}{% if r.name == act.baseline_strategy %} <span class="hint">(baseline)</span>{% endif %}</td>
         <td class="m">{{ "{:,.0f}".format(r.direct_cost) }}</td>
         <td class="m">{{ "{:,.0f}".format(r.conditional_loss) }}</td>
         <td class="m">{{ "%g"|format(r.get('coverage_after_strategy')) if r.get('coverage_after_strategy') is not none else "—" }}</td>
         <td class="m">{{ "{:,.0f}".format(r.expected_cost) }}</td>
+        <td class="m">{{ "{:+,.0f}".format(r.net_benefit) if r.net_benefit is not none else "—" }}</td>
         <td>{{ r.grade }}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
+
   <div class="row" style="margin-top:var(--s4);flex-direction:column;align-items:stretch">
   {% for r in result.strategies %}
     <details>
@@ -203,19 +205,82 @@ with updated quotes &mdash;
     </details>
   {% endfor %}
   </div>
+
+  {% if row.status == "draft" %}
+  <details open style="margin-top:var(--s4)">
+    <summary>Edit strategies</summary>
+    <div class="inner">
+      <p class="hint" style="margin-top:0">What each option costs directly, and how it changes
+      your exposure. Pick one as the baseline (usually "do nothing differently") &mdash; the
+      others are compared against it. Leave a row's name blank to skip it. Recompute to update
+      the comparison above &mdash; nothing is finalized until you Approve.</p>
+      <form method="post" action="/strategy-decisions/{{ row.id }}/recompute">
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Baseline</th><th>Name</th><th class="m">Direct cost</th>
+            <th class="m">Delay days, change</th><th class="m">Capacity restored</th>
+            <th class="m">War-risk premium &times;</th><th class="m">Days of cover, change</th>
+            <th>Notes</th></tr></thead>
+            <tbody>
+            {% for s in edit_strategies %}
+              <tr>
+                <td><input type="radio" name="baseline_strategy" value="{{ loop.index0 }}"
+                    {{ "checked" if s.is_baseline else "" }}></td>
+                <td><input type="text" name="strategy_{{ loop.index0 }}_name" style="width:150px"
+                    value="{{ s.name }}"></td>
+                <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_direct_cost"
+                    step="1000" style="width:120px" value="{{ s.direct_cost }}"></td>
+                <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_delay_days_delta"
+                    step="0.5" style="width:90px" value="{{ s.effects.delay_days_delta }}"></td>
+                <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_capacity_restored"
+                    min="0" max="100" step="1" style="width:80px"
+                    value="{{ (s.effects.capacity_restored * 100)|round(0) if s.effects.capacity_restored else 0 }}"> %</td>
+                <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_war_risk_premium_multiplier"
+                    min="0" max="100" step="1" style="width:80px"
+                    value="{{ (s.effects.war_risk_premium_multiplier * 100)|round(0) if s.effects.war_risk_premium_multiplier is not none else '' }}"> %</td>
+                <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_days_of_cover_delta"
+                    step="0.5" style="width:90px" value="{{ s.effects.days_of_cover_delta }}"></td>
+                <td><input type="text" name="strategy_{{ loop.index0 }}_notes" style="width:140px"
+                    value="{{ s.notes }}"></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="hint">Capacity restored and war-risk premium &times; are fractions of the
+        baseline (e.g. 40% capacity restored, 25% of the baseline war-risk premium). Leave
+        war-risk premium &times; blank to leave the quote as-is. Days of cover, change applies on
+        top of whichever days-of-cover figure section 2 resolves to &mdash; direct if you
+        supplied it, derived otherwise.</p>
+        <div class="row" style="margin-top:var(--s4)">
+          <button class="btn" type="submit">Recompute</button>
+        </div>
+      </form>
+    </div>
+  </details>
+  {% endif %}
 </section>
 
 <section class="panel">
   <h2>6 &middot; Decision</h2>
   {% if decision_framing %}<p class="hint" style="margin-top:0">{{ decision_framing }}</p>{% endif %}
   <div class="verdict {{ 'pos' if result.decision_confidence == 'robust' else 'warn' }}">
-    <div class="tag">Recommended</div>
-    <div class="call">{{ result.recommended }}</div>
+    <div class="tag">Decision</div>
+    <div class="call">
+      {%- if act.timing == "WAIT" %}WAIT
+      {%- elif act.timing == "ACT" %}ACT &mdash; {{ act.recommended_strategy }}
+      {%- else %}{{ result.recommended }}{% endif -%}
+    </div>
+    {% if act.reason %}<p>{{ act.reason }}</p>{% endif %}
+    {% if act.timing is none %}
+    <p class="hint">Baseline strategy couldn't be determined for this decision &mdash; shown as
+    the plain recommendation, not an Act/Wait call.</p>
+    {% endif %}
     {% if result.decision_confidence_note %}
     <p>{{ result.decision_confidence_note }}</p>
-    {% elif result.recommended_break_even and result.recommended_break_even.reason %}
+    {% elif not act.reason and result.recommended_break_even and result.recommended_break_even.reason %}
     <p>{{ result.recommended_break_even.reason }}</p>
-    {% else %}
+    {% elif not act.reason %}
     <p>Lowest expected cost at the {{ "{:.0%}".format(result.probability_used) }} probability used
     above.</p>
     {% endif %}
@@ -224,18 +289,38 @@ with updated quotes &mdash;
   {% set be = result.recommended_break_even %}
   {% if be and be.p_star is not none %}
   <div class="stats" style="margin-top:var(--s4)">
+    <div class="stat"><b>{{ "{:.0%}".format(result.probability_used) }}</b>
+      <span>probability used &mdash; current position</span></div>
     <div class="stat"><b>{{ "{:.0%}".format(be.p_star) }}</b>
       <span>break-even probability, {{ be.strategy }} vs {{ be.baseline }}</span></div>
     <div class="stat"><b>{{ "{:.0%}".format(result.base_rate.hit_rate) }}</b>
       <span>published base rate, for context (95% CI
       {{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[0]) }}&ndash;{{ "{:.0%}".format(result.base_rate.hit_rate_ci_95[1]) }},
       n={{ result.base_rate.alarm_episodes }})</span></div>
+    {% if act.timing == "WAIT" and act.cheapest_mitigation %}
+    <div class="stat"><b>{{ act.cheapest_mitigation.name }}</b>
+      <span>cheapest mitigation &mdash; {{ "{:,.0f}".format(act.cheapest_mitigation.expected_cost) }}
+      expected cost</span></div>
+    {% endif %}
   </div>
+
+  {% if dial %}
+  <figure style="margin-top:var(--s4)">
+    <div class="canvas">
+      {{ dial.svg | safe }}
+    </div>
+    <figcaption>Your position, WAIT vs ACT &mdash; {{ "{:.0%}".format(dial.probability_used) }}
+    probability used against a {{ "{:.0%}".format(dial.p_star) }} break-even
+    ({{ dial.other_name }} vs {{ act.baseline_strategy }}).</figcaption>
+  </figure>
+  {% endif %}
+
   {% endif %}
 
   <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
     color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
     border-bottom:1px solid var(--rule-soft)">What would change this decision</h3>
+  {% if act.timing %}<p class="hint" style="margin-top:0">Reassess if any of these move:</p>{% endif %}
   {% if result.flip_points %}
   <div class="scroll">
   <table>
@@ -364,7 +449,7 @@ with updated quotes &mdash;
     <form method="post" action="/strategy-decisions/{{ row.id }}/approve" style="margin:0">
       <button class="btn" type="submit">Approve</button>
     </form>
-    <a class="btn ghost" href="/strategy-decisions/new{{ '?order_id=' ~ linked_order.id if linked_order else '' }}">Modify</a>
+    <a class="btn ghost" href="/strategy-decisions/new?decision_id={{ row.id }}">Modify</a>
     <form method="post" action="/strategy-decisions/{{ row.id }}/reject" style="margin:0">
       <button class="btn ghost" type="submit">Reject</button>
     </form>

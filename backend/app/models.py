@@ -24,6 +24,7 @@ class User(SQLModel, table=True):
     password_hash: str
     created_at: datetime = Field(default_factory=utcnow)
     email_verified_at: datetime | None = None
+    company_name: str | None = None
 
 
 class Client(SQLModel, table=True):

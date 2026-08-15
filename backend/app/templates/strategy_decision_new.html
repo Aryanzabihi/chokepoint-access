@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}New strategy decision — Chokepoint Access{% endblock %}
+{% block title %}Build a decision — Chokepoint Access{% endblock %}
 {% block content %}
 {% macro field_input(field, value) %}
   <div class="field" style="width:210px">
     <label for="field_{{ field.name }}" style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-      <span>{{ field.name.replace('_', ' ')|title }}</span>
+      <span>{{ display_label(field.name) }}</span>
       <span class="badge" title="Tier {{ field.tier }} — {{ field.department }}">T{{ field.tier }}</span>
     </label>
     {% if field.unit in ('fraction_pa', 'fraction') %}
@@ -27,139 +27,239 @@
   </div>
 {% endmacro %}
 
+{% macro order_field(field) %}
+  {% set ov = order_field_values.get(field.name) %}
+  {% if ov is not none %}
+    <input type="hidden" name="field_{{ field.name }}" value="{{ ov }}">
+    <div class="field" style="min-width:150px">
+      <label>{{ display_label(field.name) }}</label>
+      <p style="margin:6px 0 0;font:500 14px/1.4 var(--sans)">{% if field.unit == 'currency' %}{{ "{:,.0f}".format(ov) }}{% else %}{{ ov }}{% endif %}</p>
+      <p class="hint">from the order</p>
+    </div>
+  {% else %}
+    <div class="field" style="min-width:200px;flex:1">
+      <label for="field_{{ field.name }}">{{ display_label(field.name) }}</label>
+      {% if field.unit == 'date_iso' %}
+        <input type="date" id="field_{{ field.name }}" name="field_{{ field.name }}">
+      {% elif field.unit == 'text' %}
+        <input type="text" id="field_{{ field.name }}" name="field_{{ field.name }}">
+      {% else %}
+        <input type="number" id="field_{{ field.name }}" name="field_{{ field.name }}" step="any">
+      {% endif %}
+      <p class="hint">Not provided on the order &mdash; enter it here for this decision.</p>
+    </div>
+  {% endif %}
+{% endmacro %}
+
 <header class="masthead">
   <div class="eyebrow"><a href="/strategy-decisions" style="color:inherit">Strategy decisions</a>
   &middot; new</div>
   <h1>Build a decision</h1>
-  <p class="thesis">Answer what your own teams already hold &mdash; a field left blank is reported
-  as missing, with who owns it, never silently defaulted. Fields above your tier are optional:
-  fill in as much as you have. Probability is never estimated for you unless you leave it blank,
-  in which case the published historical base rate is used as a stated fallback, not a guess.</p>
+  {% if linked_order %}
+  <div class="stats" style="margin-top:var(--s3)">
+    <div class="stat"><b>{{ linked_order.sku }}</b><span>{{ linked_order.stage.replace('_', ' ')|title }}</span></div>
+    <div class="stat"><b>{{ "{:,.0f}".format(linked_order.quantity) }} {{ linked_order.quantity_unit }}</b><span>quantity</span></div>
+    {% if linked_order.cargo_value %}<div class="stat"><b>{{ linked_order.currency }} {{ "{:,.0f}".format(linked_order.cargo_value) }}</b><span>cargo value</span></div>{% endif %}
+    {% if linked_order.incoterm %}<div class="stat"><b>{{ linked_order.incoterm }}</b><span>incoterm</span></div>{% endif %}
+    <div class="stat"><b>{{ linked_order.corridor }}</b><span>chokepoint</span></div>
+    {% if linked_order.supplier %}<div class="stat"><b>{{ linked_order.supplier }}</b><span>supplier</span></div>{% endif %}
+  </div>
+  <p class="hint" style="margin-top:var(--s3)"><a href="/orders/{{ linked_order.id }}">Order #{{ linked_order.id }} &rarr;</a></p>
+  {% endif %}
+  <p class="thesis" style="margin-top:var(--s4)"><strong>Purpose:</strong> assess how the current
+  chokepoint signal could affect this order, and whether changing the procurement strategy is
+  economically justified. Anything already on file{{ ' for this order' if linked_order else '' }}
+  is filled in below and never asked twice; a value left blank is reported as missing, with who
+  owns it, never silently defaulted.</p>
 </header>
 
 {% if error %}<p class="note hot"><strong>Could not compute this decision.</strong> {{ error }}</p>{% endif %}
 
-{% if linked_exposure %}
-<p class="hint">This decision will be linked to your <strong>{{ linked_exposure.corridor }}</strong>
-exposure &mdash; it'll show up on that client's portfolio page.</p>
-{% endif %}
-
-{% if linked_order %}
-<p class="hint">Built from order <strong>{{ linked_order.sku }}</strong>
-(<span class="badge">{{ linked_order.stage.replace('_', ' ') }}</span>) &mdash; quantity, cargo
-value, freight rate and ship date are pre-filled below, and the strategies suggested match this
-order's stage.</p>
-{% endif %}
-
 <form method="post" action="/strategy-decisions">
   {% if exposure_id %}<input type="hidden" name="exposure_id" value="{{ exposure_id }}">{% endif %}
   {% if order_id %}<input type="hidden" name="order_id" value="{{ order_id }}">{% endif %}
+  {% if decision_id %}<input type="hidden" name="decision_id" value="{{ decision_id }}">{% endif %}
 
   <section class="panel">
-    <h2>1 &middot; Exposure basics</h2>
-    <p class="hint" style="margin-top:0">The shipment itself &mdash; what's moving, under what
-    terms, on what schedule. Incoterm decides which fields further down the form you're even
-    asked for; a CIF or DDP buyer never sees a freight or war-risk field, because the seller
-    carries that exposure.</p>
     <div class="row">
-      <div class="field" style="min-width:200px;flex:1">
-        <label for="scenario_id">Scenario name</label>
-        <input type="text" id="scenario_id" name="scenario_id" value="{{ t.scenario_id }}" required>
-      </div>
-      <div class="field" style="min-width:220px;flex:1">
-        <label for="corridor">Chokepoint</label>
-        <select id="corridor" name="corridor" required>
-          <option value="" {{ "selected" if not t.corridor else "" }} disabled>Choose a corridor&hellip;</option>
-          {% for c in corridors %}
-          <option value="{{ c }}" {{ "selected" if c == t.corridor else "" }}>{{ c }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="field" style="width:140px">
-        <label for="incoterm">Incoterm</label>
-        <select id="incoterm" name="incoterm">
-          <option value="">&mdash;</option>
-          {% for i in incoterms %}
-          <option value="{{ i }}" {{ "selected" if i == t.incoterm else "" }}>{{ i }}</option>
-          {% endfor %}
-        </select>
-        <p class="hint">decides which fields you're asked for</p>
-      </div>
-      <div class="field" style="width:110px">
-        <label for="tier">Tier</label>
+      {% if linked_order %}
+        <input type="hidden" name="scenario_id" value="{{ t.scenario_id }}">
+      {% else %}
+        <div class="field" style="min-width:200px;flex:1">
+          <label for="scenario_id">Scenario name</label>
+          <input type="text" id="scenario_id" name="scenario_id" value="{{ t.scenario_id }}" required>
+        </div>
+      {% endif %}
+
+      {% if linked_order %}
+        <input type="hidden" name="corridor" value="{{ linked_order.corridor }}">
+        <div class="field" style="min-width:180px">
+          <label>Chokepoint</label>
+          <p style="margin:6px 0 0;font:500 14px/1.4 var(--sans)">{{ linked_order.corridor }}</p>
+          <p class="hint">from the order</p>
+        </div>
+      {% else %}
+        <div class="field" style="min-width:220px;flex:1">
+          <label for="corridor">Chokepoint</label>
+          <select id="corridor" name="corridor" required>
+            <option value="" {{ "selected" if not t.corridor else "" }} disabled>Choose a corridor&hellip;</option>
+            {% for c in corridors %}
+            <option value="{{ c }}" {{ "selected" if c == t.corridor else "" }}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+
+      {% if linked_order and linked_order.incoterm %}
+        <input type="hidden" name="incoterm" value="{{ linked_order.incoterm }}">
+        <div class="field" style="width:120px">
+          <label>Incoterm</label>
+          <p style="margin:6px 0 0;font:500 14px/1.4 var(--sans)">{{ linked_order.incoterm }}</p>
+          <p class="hint">from the order</p>
+        </div>
+      {% else %}
+        <div class="field" style="width:140px">
+          <label for="incoterm">Incoterm</label>
+          <select id="incoterm" name="incoterm">
+            <option value="">&mdash;</option>
+            {% for i in incoterms %}
+            <option value="{{ i }}" {{ "selected" if i == t.incoterm else "" }}>{{ i }}</option>
+            {% endfor %}
+          </select>
+          <p class="hint">decides which fields you're asked for</p>
+        </div>
+      {% endif %}
+
+      <div class="field" style="width:170px">
+        <label for="tier">How much can you supply?</label>
         <select id="tier" name="tier">
-          <option value="1" selected>1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
+          <option value="1" selected>Core facts only</option>
+          <option value="2">+ finance/treasury rates</option>
+          <option value="3">+ live market quotes</option>
         </select>
-        <p class="hint">how much you can supply</p>
+        <p class="hint">fields beyond this are never counted as missing</p>
       </div>
     </div>
+
     <div class="row" style="margin-top:var(--s3)">
       {% for key, label, fields in field_groups if key == "exposure_basics" %}
-        {% for field in fields %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+        {% for field in fields %}{{ order_field(field) }}{% endfor %}
       {% endfor %}
     </div>
   </section>
 
   <section class="panel">
-    <h2>2 &middot; Demand &amp; supply</h2>
-    <p class="hint" style="margin-top:0">If you already know your days of cover from your WMS,
-    just supply that. If not, supply the forecast, on-hand, inbound and safety-stock figures
-    below instead and the engine derives it &mdash; a demand forecast over a stated window
-    (e.g. "45,000 MT over the next 90 days"), not a per-day rate, since that's what a demand
-    forecast usually looks like. Inbound should include this shipment itself. When both are
-    supplied, the direct days-of-cover figure wins; the derived one is still shown alongside it
-    as a cross-check.</p>
+    <h2>1 &middot; Supply position</h2>
+    <p class="hint" style="margin-top:0">How much operational buffer does this order have?</p>
     <div class="row">
-      {% for key, label, fields in field_groups if key == "demand_supply" %}
-        {% for field in fields %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
-      {% endfor %}
+      {% set doc = t.fields.get('days_of_cover') %}
+      <div class="field" style="width:180px">
+        <label for="field_days_of_cover">Days of cover</label>
+        <input type="number" id="field_days_of_cover" name="field_days_of_cover" step="any"
+               value="{{ doc if doc is not none else '' }}">
+        <p class="hint">ERP / WMS &mdash; if you already know this figure, provide it directly</p>
+      </div>
+      {% set ss = t.fields.get('safety_stock') %}
+      <div class="field" style="width:180px">
+        <label for="field_safety_stock">Safety stock</label>
+        <input type="number" id="field_safety_stock" name="field_safety_stock" step="any"
+               value="{{ ss if ss is not none else '' }}">
+        <p class="hint">inventory policy / ERP &mdash; the buffer this order's cover is measured against</p>
+      </div>
     </div>
+    <p class="hint">Used to determine when the available supply position falls below the required
+    buffer. Strongly recommended but not required &mdash; left blank, the decision still computes,
+    a safety-stock breach just can't be determined.</p>
+
+    <details style="margin-top:var(--s4)">
+      <summary>Don't have days of cover? Calculate it from supply data</summary>
+      <div class="inner">
+        <div class="row">
+          {% for key, label, fields in field_groups if key == "demand_supply" %}
+            {% for field in fields if field.name != "days_of_cover" and field.name != "safety_stock" %}
+              {{ field_input(field, t.fields.get(field.name)) }}
+            {% endfor %}
+          {% endfor %}
+        </div>
+        <p class="hint">Forecast quantity is over the stated window (e.g. "45,000 MT over the next
+        90 days"), not a per-day rate. Confirmed inbound includes this shipment itself. When both a
+        direct days-of-cover figure and this set are supplied, the direct figure wins; the derived
+        one is still shown alongside it as a cross-check.</p>
+      </div>
+    </details>
   </section>
 
   <section class="panel">
-    <h2>3 &middot; Disruption assumptions</h2>
-    <p class="hint" style="margin-top:0">How long a disruption would delay this shipment, and how
-    likely you think it is. Leave probability blank to use the published historical base rate
-    instead of a guess.</p>
+    <h2>2 &middot; Disruption scenario</h2>
+    <p class="hint" style="margin-top:0">Describe the disruption scenario you want TAR to evaluate.</p>
     <div class="row">
       {% for key, label, fields in field_groups if key == "disruption_assumptions" %}
         {% for field in fields %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
       {% endfor %}
+    </div>
+
+    <div class="row" style="margin-top:var(--s3)">
       <div class="field" style="width:200px">
-        <label for="client_probability_estimate">Your probability estimate</label>
+        <label for="client_probability_estimate">Disruption probability</label>
         <input type="number" id="client_probability_estimate" name="client_probability_estimate"
                min="0" max="100" step="0.1" value="">
-        <p class="hint">% &mdash; leave blank to use the published base rate</p>
-      </div>
-      <div class="field" style="width:160px">
-        <label for="probability_range_low">Range, low end</label>
-        <input type="number" id="probability_range_low" name="probability_range_low"
-               min="0" max="100" step="0.1" value="">
-        <p class="hint">% &mdash; optional, for a regret check</p>
-      </div>
-      <div class="field" style="width:160px">
-        <label for="probability_range_high">Range, high end</label>
-        <input type="number" id="probability_range_high" name="probability_range_high"
-               min="0" max="100" step="0.1" value="">
+        <p class="hint">% &mdash; optional</p>
       </div>
     </div>
+    <p class="hint">Leave blank to use the published historical reference rate. That reference rate
+    is a base rate, not a forecast of this specific disruption &mdash; it is never presented as an
+    AI-estimated probability.</p>
+
+    <details style="margin-top:var(--s4)">
+      <summary>Probability sensitivity</summary>
+      <div class="inner">
+        <p class="hint" style="margin-top:0">How robust the economic decision is under alternative
+        probability assumptions.</p>
+        <div class="row">
+          <div class="field" style="width:160px">
+            <label for="probability_range_low">Lower</label>
+            <input type="number" id="probability_range_low" name="probability_range_low"
+                   min="0" max="100" step="0.1" value="">
+            <p class="hint">%</p>
+          </div>
+          <div class="field" style="width:160px">
+            <label for="probability_range_high">Higher</label>
+            <input type="number" id="probability_range_high" name="probability_range_high"
+                   min="0" max="100" step="0.1" value="">
+            <p class="hint">%</p>
+          </div>
+        </div>
+      </div>
+    </details>
   </section>
 
   <section class="panel">
-    <h2>4 &middot; Economic exposure</h2>
-    <p class="hint" style="margin-top:0">Rates and contract terms turn the disruption into a
-    number; a live quote sharpens it further and is the tier most often unavailable. Optional
-    beyond Tier 1 &mdash; leave any of these blank and it's reported as missing, with who owns
-    it, never guessed.</p>
-    <div class="row">
+    <h2>3 &middot; Economic inputs</h2>
+    <p class="hint" style="margin-top:0">These inputs translate disruption into financial exposure.
+    Provide what your organization has available; missing values are explicitly reported rather
+    than guessed.</p>
+
+    <p class="hint" style="margin:var(--s4) 0 0"><strong>Core</strong></p>
+    <div class="row" style="margin-top:var(--s3)">
       {% for key, label, fields in field_groups if key == "economic_exposure" %}
-        {% for field in fields|selectattr("tier", "equalto", 2) %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
+        {% for field in fields if field.name in ("wacc_pct", "carrying_cost_pct_pa") %}
+          {{ field_input(field, t.fields.get(field.name)) }}
+        {% endfor %}
       {% endfor %}
     </div>
-    <p class="hint" style="margin:var(--s4) 0 0">Tier 3 &mdash; a carrier, broker or underwriter
-    quote in hand right now:</p>
+
+    <p class="hint" style="margin:var(--s4) 0 0"><strong>Optional</strong> &mdash; improve precision,
+    never block analysis</p>
+    <div class="row" style="margin-top:var(--s3)">
+      {% for key, label, fields in field_groups if key == "economic_exposure" %}
+        {% for field in fields if field.name in ("penalty_per_day", "gross_margin_pct") %}
+          {{ field_input(field, t.fields.get(field.name)) }}
+        {% endfor %}
+      {% endfor %}
+    </div>
+
+    <p class="hint" style="margin:var(--s4) 0 0"><strong>Live market quotes</strong> &mdash; current
+    commercial quotes, make the strategy comparison more realistic</p>
     <div class="row" style="margin-top:var(--s3)">
       {% for key, label, fields in field_groups if key == "economic_exposure" %}
         {% for field in fields|selectattr("tier", "equalto", 3) %}{{ field_input(field, t.fields.get(field.name)) }}{% endfor %}
@@ -167,52 +267,11 @@ order's stage.</p>
     </div>
   </section>
 
-  <section class="panel">
-    <h2>5 &middot; Strategies</h2>
-    <p class="hint" style="margin-top:0">What each option costs directly, and how it changes your
-    exposure. Pick one as the baseline (usually "do nothing differently") &mdash; the others are
-    compared against it. Leave a row's name blank to skip it.</p>
-    <div class="scroll">
-      <table>
-        <thead><tr><th>Baseline</th><th>Name</th><th class="m">Direct cost</th>
-        <th class="m">Delay days, change</th><th class="m">Capacity restored</th>
-        <th class="m">War-risk premium &times;</th><th class="m">Days of cover, change</th>
-        <th>Notes</th></tr></thead>
-        <tbody>
-        {% for row in t.strategies %}
-          <tr>
-            <td><input type="radio" name="baseline_strategy" value="{{ loop.index0 }}"
-                {{ "checked" if row.is_baseline else "" }}></td>
-            <td><input type="text" name="strategy_{{ loop.index0 }}_name" style="width:150px"
-                value="{{ row.name }}"></td>
-            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_direct_cost"
-                step="1000" style="width:120px" value="{{ row.direct_cost }}"></td>
-            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_delay_days_delta"
-                step="0.5" style="width:90px" value="{{ row.effects.delay_days_delta }}"></td>
-            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_capacity_restored"
-                min="0" max="100" step="1" style="width:80px"
-                value="{{ (row.effects.capacity_restored * 100)|round(0) if row.effects.capacity_restored else 0 }}"> %</td>
-            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_war_risk_premium_multiplier"
-                min="0" max="100" step="1" style="width:80px"
-                value="{{ (row.effects.war_risk_premium_multiplier * 100)|round(0) if row.effects.war_risk_premium_multiplier is not none else '' }}"> %</td>
-            <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_days_of_cover_delta"
-                step="0.5" style="width:90px" value="{{ row.effects.days_of_cover_delta }}"></td>
-            <td><input type="text" name="strategy_{{ loop.index0 }}_notes" style="width:140px"
-                value="{{ row.notes }}"></td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <p class="hint">Capacity restored and war-risk premium &times; are fractions of the baseline
-    (e.g. 40% capacity restored, 25% of the baseline war-risk premium). Leave war-risk premium
-    &times; blank to leave the quote as-is. Days of cover, change applies on top of whichever
-    days-of-cover figure section 2 resolves to &mdash; direct if you supplied it, derived
-    otherwise.</p>
-  </section>
-
   <div class="row" style="margin-top:var(--s5)">
-    <button class="btn" type="submit">Compute</button>
+    <button class="btn" type="submit">Analyze TAR exposure &rarr;</button>
   </div>
+  <p class="hint" style="margin-top:var(--s3)">TAR will evaluate the order against the current
+  chokepoint signal and calculate the relevant exposure. You will then see the strategies that are
+  economically eligible for this situation.</p>
 </form>
 {% endblock %}
