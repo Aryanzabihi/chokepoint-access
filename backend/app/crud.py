@@ -44,6 +44,25 @@ def create_user(session: Session, email: str, password_hash: str, *,
     return user
 
 
+def update_user_settings(session: Session, user: User, *, company_name: str | None,
+                          default_wacc_pct: float | None,
+                          default_carrying_cost_pct_pa: float | None,
+                          default_gross_margin_pct: float | None,
+                          default_penalty_per_day: float | None) -> User:
+    """User is the one row in this table that's genuinely meant to be
+    updated in place (a settings/profile row) -- same class of exception as
+    ApiKey.revoked_at / ProcurementOrder.stage, not a new one."""
+    user.company_name = company_name
+    user.default_wacc_pct = default_wacc_pct
+    user.default_carrying_cost_pct_pa = default_carrying_cost_pct_pa
+    user.default_gross_margin_pct = default_gross_margin_pct
+    user.default_penalty_per_day = default_penalty_per_day
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
 # -------------------------------------------------------------- clients ---
 
 def list_clients(session: Session, user: User) -> list[Client]:
@@ -341,6 +360,7 @@ def create_procurement_order(session: Session, user: User, *, corridor: str, sta
                               origin: str | None = None, destination: str | None = None,
                               supplier_lead_time_days: float | None = None,
                               alternative_supplier: str | None = None,
+                              unit_price: float | None = None,
                               client_id: int | None = None,
                               exposure_id: int | None = None) -> ProcurementOrder:
     order = ProcurementOrder(owner_user_id=user.id, client_id=client_id, exposure_id=exposure_id,
@@ -349,7 +369,7 @@ def create_procurement_order(session: Session, user: User, *, corridor: str, sta
                               incoterm=incoterm, supplier=supplier, currency=currency,
                               origin=origin, destination=destination,
                               supplier_lead_time_days=supplier_lead_time_days,
-                              alternative_supplier=alternative_supplier)
+                              alternative_supplier=alternative_supplier, unit_price=unit_price)
     session.add(order)
     session.commit()
     session.refresh(order)

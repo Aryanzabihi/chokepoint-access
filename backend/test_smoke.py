@@ -490,6 +490,19 @@ def test_strategy_decision_walkthrough(client):
     # guaranteed to agree in general since the strategy sets differ
     assert "Continue" in r.text
 
+    # "Why TAR recommends this" (Batch B) -- four-bucket synthesis, built
+    # entirely from numbers already shown elsewhere on the page
+    assert "Why TAR recommends this" in r.text
+    assert "① Demand" in r.text and "② Supply" in r.text
+    assert "③ Geopolitical exposure" in r.text and "④ Economic impact" in r.text
+
+    # "Decision record" (Batch B) -- consolidated summary card. Decision
+    # maker is the real owning user (this app has no separate approver
+    # concept), not a fabricated title -- appears here AND in the nav stamp
+    assert "Decision record" in r.text
+    assert r.text.count("hormuz-analyst@example.com") >= 2
+    assert "Estimated cost" in r.text and "Approved cost" not in r.text  # still draft
+
     r = client.get(detail_url + "/report")
     assert r.status_code == 200
     assert "Decision engine v2" in r.text
@@ -729,6 +742,7 @@ def test_decision_wizard(client):
         "ds_safety_stock": "1000.0",
         "sku": "Industrial component A", "quantity": "41500", "quantity_unit": "MT",
         "corridor": "Strait of Hormuz", "incoterm": "FOB", "cargo_value": "5000000",
+        "unit_price": "1234.5",
         "currency": "EUR", "supplier": "Supplier A", "alternative_supplier": "Supplier B",
         "supplier_lead_time_days": "25", "origin": "India", "destination": "Italy",
     }, follow_redirects=False)
@@ -752,6 +766,7 @@ def test_decision_wizard(client):
     r = client.get(f"/orders/{order_id}")
     assert r.status_code == 200
     assert "Supplier A" in r.text
+    assert "1,234" in r.text   # unit_price, wired through order_submit() -> crud.create_procurement_order()
 
     # an unknown corridor at step 2 is rejected with a helpful error, not a 500
     r = client.post("/decisions/new/order", data={
@@ -792,7 +807,11 @@ def test_decision_lifecycle(client):
     decision1_id = int(decision1_url.rsplit("/", 1)[-1])
 
     r = client.get(decision1_url)
-    assert ">draft<" in r.text and "Approve" in r.text and "Modify" in r.text and "Reject" in r.text
+    assert ">draft<" in r.text and "Approve" in r.text and "Modify" in r.text
+    # decision1 recommends the baseline ("Continue" -- see the recalculate section
+    # below), i.e. a WAIT verdict -- Reject is deliberately hidden for WAIT
+    # (workflow.md section 9: WAIT offers Approve/Modify only, ACT offers all 3).
+    assert "Reject" not in r.text
     assert f'href="/strategy-decisions/new?decision_id={decision1_id}"' in r.text  # Modify, fixed
 
     r = client.post(f"/strategy-decisions/{decision1_id}/reject", follow_redirects=False)
@@ -813,6 +832,7 @@ def test_decision_lifecycle(client):
     assert r.status_code == 303
     r = client.get(decision2_url)
     assert ">executed<" in r.text
+    assert "Approved cost" in r.text and "Estimated cost" not in r.text   # Decision record
 
     # --- recalculate: a real quote change that really flips the recommendation ---
     r = _create_decision(client, sample)
@@ -834,12 +854,38 @@ def test_decision_lifecycle(client):
     r = client.get(r.headers["location"])
     assert "Partial reroute" in r.text
     assert "Recalculated from" in r.text and "<strong>changed</strong>" in r.text
+    assert "Reject" in r.text   # decision4 recommends ACT (Partial reroute, not the
+                               # baseline) -- Reject is shown again for ACT verdicts
 
     # recalculating again with the SAME quote is correctly reported as unchanged
     r = client.post(f"/strategy-decisions/{decision4_id}/recalculate",
                      data={"field_war_risk_premium_quote": "3500000"}, follow_redirects=False)
     r = client.get(r.headers["location"])
     assert "recommendation is unchanged" in r.text
+
+    # the decisions list surfaces each row's status as a badge
+    r = client.get("/strategy-decisions")
+    assert r.status_code == 200
+    assert f'href="/strategy-decisions/{decision1_id}"' in r.text and ">rejected<" in r.text
+    assert f'href="/strategy-decisions/{decision2_id}"' in r.text and ">executed<" in r.text
+
+    # Active/Monitoring/History tabs filter by status (decision1=rejected,
+    # decision2=executed, decision3/decision4 are still draft)
+    r = client.get("/strategy-decisions?view=history")
+    assert f'href="/strategy-decisions/{decision1_id}"' in r.text
+    assert f'href="/strategy-decisions/{decision2_id}"' not in r.text
+
+    r = client.get("/strategy-decisions?view=monitoring")
+    assert f'href="/strategy-decisions/{decision2_id}"' in r.text
+    assert f'href="/strategy-decisions/{decision1_id}"' not in r.text
+
+    r = client.get("/strategy-decisions?view=active")
+    assert f'href="/strategy-decisions/{decision3_id}"' in r.text
+    assert f'href="/strategy-decisions/{decision1_id}"' not in r.text
+    assert f'href="/strategy-decisions/{decision2_id}"' not in r.text
+
+    r = client.get("/strategy-decisions?view=nonsense")
+    assert r.status_code == 422
 
     # cross-user isolation holds for the new actions too
     other = TestClient(app)
@@ -1127,3 +1173,47 @@ def test_home_dashboard(client):
     assert r.text.count("no decision yet") == 1   # Suez still has none
     assert "Continue" in r.text  # the form path's recommendation (verified), shows somewhere
     assert suez_exp["corridor"] == "Suez Canal"   # sanity: the untouched exposure is the right one
+
+    # ACT/WAIT badges on the redesigned Home (Batch D): the Hormuz decision's
+    # baseline IS the recommendation ("Continue"), so act_or_wait() resolves
+    # it to WAIT; Suez still has no decision at all
+    assert '<span class="badge warn">WAIT</span>' in r.text
+    assert '<span class="badge">NO DECISION YET</span>' in r.text
+
+
+def test_settings(client):
+    """Company profile + financial-assumption defaults (Batch D). Defaults
+    are scoped to the 4 Tier-2 economic_exposure fields only -- Tier-3
+    market quotes must never be pre-filled from a stale saved default (see
+    models.py's User docstring)."""
+    client.post("/signup", data={"email": "settings-user@example.com",
+                                  "password": "correct horse battery staple"})
+
+    r = client.get("/settings")
+    assert r.status_code == 200
+    assert 'id="company_name"' in r.text
+    assert "Not available yet" in r.text   # Users section, honestly stubbed, not silently omitted
+    assert 'href="/account/api-keys"' in r.text
+
+    r = client.post("/settings", data={
+        "company_name": "Acme Shipping", "wacc_pct": "8", "carrying_cost_pct_pa": "11",
+        "gross_margin_pct": "33", "penalty_per_day": "4321",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+
+    r = client.get(r.headers["location"])
+    assert r.status_code == 200
+    assert "Saved." in r.text
+    assert 'value="Acme Shipping"' in r.text
+    assert 'value="8.0"' in r.text and 'value="11.0"' in r.text and 'value="33.0"' in r.text
+    assert 'value="4321.0"' in r.text
+
+    # the saved defaults now pre-fill a FRESH decision form
+    r = client.get("/strategy-decisions/new")
+    assert r.status_code == 200
+    assert 'id="field_wacc_pct"' in r.text
+    assert 'value="8.0"' in r.text and 'value="11.0"' in r.text and 'value="33.0"' in r.text
+
+    # but never a Tier-3 market quote -- that stays a live, per-decision input
+    assert ('id="field_disrupted_freight_quote" name="field_disrupted_freight_quote" step="any"\n'
+           '             value="">') in r.text

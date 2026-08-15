@@ -194,7 +194,13 @@ def _order_field_values(order) -> dict[str, object]:
             if (v := getattr(order, name)) is not None}
 
 
-def _template_context(order=None, demand_supply: dict | None = None) -> dict:
+_FINANCIAL_DEFAULT_FIELDS = (("wacc_pct", "default_wacc_pct"),
+                            ("carrying_cost_pct_pa", "default_carrying_cost_pct_pa"),
+                            ("gross_margin_pct", "default_gross_margin_pct"),
+                            ("penalty_per_day", "default_penalty_per_day"))
+
+
+def _template_context(order=None, demand_supply: dict | None = None, user=None) -> dict:
     # template(3): every field gets a None placeholder regardless of tier,
     # so the form always has a key to look up (fields left above the
     # client's chosen tier just stay blank -- see intake.py, supplying one
@@ -233,21 +239,45 @@ def _template_context(order=None, demand_supply: dict | None = None) -> dict:
         for name in _DEMAND_SUPPLY_FIELDS:
             if demand_supply.get(name) is not None:
                 t["fields"][name] = demand_supply[name]
+    if user is not None:
+        # Settings' financial-assumption defaults (Batch D) -- a last-resort
+        # fill only, since neither order nor demand_supply above ever touch
+        # these 4 fields: still None here unless the user actually blanked
+        # a default back out, or the field was never asked for at all.
+        for field_name, attr_name in _FINANCIAL_DEFAULT_FIELDS:
+            default_value = getattr(user, attr_name)
+            if default_value is not None and t["fields"].get(field_name) is None:
+                t["fields"][field_name] = default_value
     return t
 
 
 # --------------------------------------------------------------- dashboard ---
 
+# Sitemap's "Decisions -> Active/Monitoring/History" (workflow.md), mapped onto
+# the status values that already exist rather than a new field: Active is
+# still-open decision-making (draft/approved), Monitoring is a decision
+# that's live and whose assumptions are worth watching (executed), History
+# is closed out (rejected). "all" is the default -- additive, not a
+# replacement for the unfiltered view, so nothing already linking here
+# silently starts hiding rows.
+_VIEW_STATUSES = {"active": ("draft", "approved"), "monitoring": ("executed",),
+                  "history": ("rejected",)}
+
+
 @router.get("/strategy-decisions", response_class=HTMLResponse)
 def list_page(request: Request, user: User = Depends(current_user),
-              session: Session = Depends(get_session)):
+              session: Session = Depends(get_session), view: str = "all"):
+    if view != "all" and view not in _VIEW_STATUSES:
+        raise HTTPException(422, "view must be one of: all, active, monitoring, history")
     decisions = crud.list_strategy_decisions(session, user)
+    if view != "all":
+        decisions = [d for d in decisions if d.status in _VIEW_STATUSES[view]]
     rows = [{"id": d.id, "scenario_id": d.scenario_id, "corridor": d.corridor,
-             "created_at": d.created_at,
+             "created_at": d.created_at, "status": d.status,
              "recommended": json.loads(d.result_json).get("recommended")}
             for d in decisions]
     return templates.TemplateResponse(request, "strategy_decision_list.html",
-        {"user": user, "decisions": rows})
+        {"user": user, "decisions": rows, "view": view})
 
 
 @router.get("/strategy-decisions/new", response_class=HTMLResponse)
@@ -281,7 +311,7 @@ def new_page(request: Request, user: User = Depends(current_user),
                          "current_inventory": current_inventory,
                          "inbound_confirmed_quantity": inbound_confirmed_quantity,
                          "safety_stock": safety_stock}
-        t = _template_context(linked_order, demand_supply)
+        t = _template_context(linked_order, demand_supply, user)
     return templates.TemplateResponse(request, "strategy_decision_new.html",
         {"user": user, "t": t, "corridors": sorted(CORRIDORS),
          "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(FIELDS),

@@ -14,19 +14,27 @@
   <a class="btn" href="/strategy-decisions/new">New decision</a>
 </div>
 
+<div class="row" style="margin-bottom:var(--s4)">
+  <a class="btn {{ '' if view == 'all' else 'ghost' }}" href="/strategy-decisions?view=all">All</a>
+  <a class="btn {{ '' if view == 'active' else 'ghost' }}" href="/strategy-decisions?view=active">Active</a>
+  <a class="btn {{ '' if view == 'monitoring' else 'ghost' }}" href="/strategy-decisions?view=monitoring">Monitoring</a>
+  <a class="btn {{ '' if view == 'history' else 'ghost' }}" href="/strategy-decisions?view=history">History</a>
+</div>
+
 <section class="panel" style="margin-top:0">
   <h2>Decisions ({{ decisions|length }})</h2>
   {% if decisions %}
   <div class="scroll">
     <table>
       <thead><tr><th>Scenario</th><th>Corridor</th><th>Recommended strategy</th>
-      <th class="m">Computed</th></tr></thead>
+      <th>Status</th><th class="m">Computed</th></tr></thead>
       <tbody>
       {% for d in decisions %}
         <tr>
           <td><a href="/strategy-decisions/{{ d.id }}">{{ d.scenario_id }}</a></td>
           <td>{{ d.corridor }}</td>
           <td>{{ d.recommended or "—" }}</td>
+          <td><span class="badge {{ 'ok' if d.status in ('approved', 'executed') else ('hot' if d.status == 'rejected' else '') }}">{{ d.status }}</span></td>
           <td class="m">{{ d.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
         </tr>
       {% endfor %}
@@ -34,7 +42,8 @@
     </table>
   </div>
   {% else %}
-  <p class="empty">No decisions yet. <a href="/strategy-decisions/new">Build one</a>.</p>
+  <p class="empty">{% if view == 'all' %}No decisions yet. <a href="/strategy-decisions/new">Build one</a>.
+  {% else %}No decisions in this view. <a href="/strategy-decisions?view=all">See all decisions</a>.{% endif %}</p>
   {% endif %}
 </section>
 {% endblock %}

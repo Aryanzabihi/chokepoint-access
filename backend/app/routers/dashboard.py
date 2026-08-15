@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 
 from .. import crud, engine
+from ..strategy_decision import act_or_wait
 from ..auth import (
     SESSION_COOKIE, generate_api_key, hash_password, make_session_cookie,
     verify_password,
@@ -87,12 +88,16 @@ def logout():
 @router.get("/home", response_class=HTMLResponse)
 def home_page(request: Request, user: User = Depends(current_user),
               session: Session = Depends(get_session)):
-    """Every exposure across every client this user owns, one row each,
-    worst corridor first. Answers "what needs my attention right now"
-    instead of requiring a click into each client to find out. No new
-    scoring formula -- urgency is read directly off the same band/regime
-    the corridor's live reading already carries, "in episode" ranked above
-    every band since an ongoing disruption outranks any alarm level."""
+    """Every exposure across every client this user owns, one card each --
+    workflow.md's "what needs my attention" Home. ACT decisions first, then
+    WAIT, then exposures with no strategy decision built yet, each bucket
+    internally sorted by the same band/regime urgency this page has always
+    used ("in episode" ranked above every band). ACT/WAIT reuses
+    act_or_wait() (strategy_decision.py) -- the same derivation the decision
+    detail page itself shows, not a second verdict computed here. No
+    decision yet is its own, honestly distinct bucket rather than a
+    "confirmed no material exposure" claim -- that's a judgment nothing here
+    has actually computed."""
     pairs = crud.list_exposures_for_user(session, user)
     band_severity = {label: i for i, (_, label, _, _) in enumerate(engine.BANDS)}
 
@@ -104,8 +109,9 @@ def home_page(request: Request, user: User = Depends(current_user),
             reading = None
         latest_sd = crud.latest_strategy_decision_for_exposure(session, exposure.id)
         sd_result = json.loads(latest_sd.result_json) if latest_sd else None
+        act = act_or_wait(sd_result) if sd_result else None
         rows.append({"exposure": exposure, "client": client, "reading": reading,
-                     "strategy_decision": latest_sd, "sd_result": sd_result})
+                     "strategy_decision": latest_sd, "sd_result": sd_result, "act": act})
 
     def _urgency(row):
         reading = row["reading"]
@@ -115,7 +121,14 @@ def home_page(request: Request, user: User = Depends(current_user),
             return (len(engine.BANDS), reading.get("as_of", ""))
         return (band_severity.get(reading.get("band"), 0), reading.get("as_of", ""))
 
-    rows.sort(key=_urgency, reverse=True)
+    _BUCKET_RANK = {"ACT": 2, "WAIT": 1}   # no decision, or an unresolved
+                                           # act.timing, ranks 0 and sorts last
+
+    def _sort_key(row):
+        bucket = _BUCKET_RANK.get(row["act"]["timing"] if row["act"] else None, 0)
+        return (bucket,) + _urgency(row)
+
+    rows.sort(key=_sort_key, reverse=True)
     return templates.TemplateResponse(request, "home.html", {"user": user, "rows": rows})
 
 
@@ -279,3 +292,32 @@ def revoke_api_key(key_id: int, user: User = Depends(current_user),
                     session: Session = Depends(get_session)):
     crud.revoke_api_key(session, user, key_id)
     return RedirectResponse("/account/api-keys", status_code=303)
+
+
+# --------------------------------------------------------------- settings ---
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, user: User = Depends(current_user), saved: str | None = None):
+    return templates.TemplateResponse(request, "settings.html",
+        {"user": user, "saved": saved is not None})
+
+
+@router.post("/settings")
+def update_settings(company_name: str = Form(""), wacc_pct: str = Form(""),
+                     carrying_cost_pct_pa: str = Form(""), gross_margin_pct: str = Form(""),
+                     penalty_per_day: str = Form(""), user: User = Depends(current_user),
+                     session: Session = Depends(get_session)):
+    """Financial-assumption defaults only cover the 4 Tier-2 economic_exposure
+    fields (see models.py's User docstring) -- Tier-3 market quotes are
+    deliberately never settable here, they stay live per-decision inputs."""
+    def _pct(raw: str) -> float | None:
+        return None if raw == "" else float(raw) / 100
+
+    def _num(raw: str) -> float | None:
+        return None if raw == "" else float(raw)
+
+    crud.update_user_settings(
+        session, user, company_name=company_name or None,
+        default_wacc_pct=_pct(wacc_pct), default_carrying_cost_pct_pa=_pct(carrying_cost_pct_pa),
+        default_gross_margin_pct=_pct(gross_margin_pct), default_penalty_per_day=_num(penalty_per_day))
+    return RedirectResponse("/settings?saved=1", status_code=303)

@@ -125,7 +125,8 @@ async def order_submit(request: Request, user: User = Depends(current_user),
         supplier=_text(form, "supplier"), currency=form.get("currency") or "EUR",
         origin=_text(form, "origin"), destination=_text(form, "destination"),
         supplier_lead_time_days=_num(form, "supplier_lead_time_days"),
-        alternative_supplier=_text(form, "alternative_supplier"))
+        alternative_supplier=_text(form, "alternative_supplier"),
+        unit_price=_num(form, "unit_price"))
 
     query_params = {"order_id": order.id}
     query_params.update({k: v for k, v in ds_fields.items() if v is not None})

@@ -19,12 +19,24 @@ def utcnow() -> datetime:
 
 
 class User(SQLModel, table=True):
+    """Financial-assumption defaults (fraction-unit, same units the engine
+    itself consumes -- see strategy_decision.py's _template_context()) are
+    scoped to the 4 Tier-2 economic_exposure fields only (intake.py):
+    wacc_pct/carrying_cost_pct_pa/gross_margin_pct/penalty_per_day. The
+    Tier-3 quote fields in that same group (disrupted_freight_quote etc.)
+    are deliberately never defaulted here -- those are live, per-decision
+    market quotes; silently pre-filling one with a stale number would look
+    like a current quote when it isn't."""
     id: int | None = Field(default=None, primary_key=True)
     email: str = Field(index=True, unique=True)
     password_hash: str
     created_at: datetime = Field(default_factory=utcnow)
     email_verified_at: datetime | None = None
     company_name: str | None = None
+    default_wacc_pct: float | None = None
+    default_carrying_cost_pct_pa: float | None = None
+    default_gross_margin_pct: float | None = None
+    default_penalty_per_day: float | None = None
 
 
 class Client(SQLModel, table=True):

@@ -319,6 +319,65 @@ with updated quotes &mdash;
 
   <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
     color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
+    border-bottom:1px solid var(--rule-soft)">Why TAR recommends this</h3>
+  {% set ds = result.get('demand_supply') %}
+  <div class="cards">
+    <div class="card">
+      <div class="name">① Demand</div>
+      {% if input.fields.get('forecast_quantity') is not none %}
+      <div class="meta">Forecast requires {{ "{:,.0f}".format(input.fields.forecast_quantity) }}
+      {{ input.fields.get('quantity_unit') or 'units' }}{% if input.fields.get('forecast_window_days') is not none %}
+      over {{ "{:,.0f}".format(input.fields.forecast_window_days) }} days{% endif %}.</div>
+      {% elif input.fields.get('quantity') is not none %}
+      <div class="meta">{{ "{:,.0f}".format(input.fields.quantity) }}
+      {{ input.fields.get('quantity_unit') or 'units' }} on this shipment &mdash; no separate
+      demand forecast supplied.</div>
+      {% else %}
+      <div class="meta">No demand quantity supplied.</div>
+      {% endif %}
+    </div>
+    <div class="card">
+      <div class="name">② Supply</div>
+      {% if ds and ds.days_of_cover_used is not none %}
+      <div class="meta">On-hand and confirmed supply cover {{ "%g"|format(ds.days_of_cover_used) }}
+      days{% if ds.quantity_at_risk is not none %}, leaving
+      {{ "{:,.0f}".format(ds.quantity_at_risk) }} {{ input.fields.get('quantity_unit') or 'units' }}
+      exposed during the delay window{% endif %}.</div>
+      {% elif ds and ds.days_of_cover_derived is not none %}
+      <div class="meta">Estimated at {{ "%g"|format(ds.days_of_cover_derived) }} days of cover from
+      inventory, inbound and safety stock{% if ds.quantity_at_risk is not none %}, leaving
+      {{ "{:,.0f}".format(ds.quantity_at_risk) }} {{ input.fields.get('quantity_unit') or 'units' }}
+      exposed{% endif %}.</div>
+      {% else %}
+      <div class="meta">No inventory, inbound or safety-stock figures supplied &mdash; supply
+      coverage isn't computable.</div>
+      {% endif %}
+    </div>
+    <div class="card">
+      <div class="name">③ Geopolitical exposure</div>
+      <div class="meta">{{ row.corridor }}{% if result.reading %} &mdash; current reading TAR
+      {{ result.reading.tar }}{% if result.reading.band %}, {{ result.reading.band }}{% endif %}
+      {%- else %} &mdash; no current reading available{% endif %}.
+      {%- if input.fields.get('delay_days_estimate') is not none %} Assumed disruption length:
+      {{ "{:,.0f}".format(input.fields.delay_days_estimate) }} days.{% endif %}
+      Probability used: {{ "{:.0%}".format(result.probability_used) }}
+      ({% if result.probability_is_published_fallback %}published base rate{% else %}your
+      estimate{% endif %}).</div>
+    </div>
+    <div class="card">
+      <div class="name">④ Economic impact</div>
+      <div class="meta">{% if act.reason %}{{ act.reason }}{% elif result.decision_confidence_note %}
+      {{ result.decision_confidence_note }}{% else %}{{ result.recommended }} has the lowest
+      expected cost at the {{ "{:.0%}".format(result.probability_used) }} probability
+      used.{% endif %}</div>
+      <div class="meta">Baseline {{ "{:,.0f}".format(result.exposure.baseline) }} &middot; disrupted
+      {{ "{:,.0f}".format(result.exposure.disrupted) }} &middot; avoidable
+      {{ "{:,.0f}".format(result.exposure.avoidable) }}.</div>
+    </div>
+  </div>
+
+  <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
     border-bottom:1px solid var(--rule-soft)">What would change this decision</h3>
   {% if act.timing %}<p class="hint" style="margin-top:0">Reassess if any of these move:</p>{% endif %}
   {% if result.flip_points %}
@@ -403,6 +462,31 @@ with updated quotes &mdash;
 <section class="panel">
   <h2>7 &middot; Monitor</h2>
 
+  <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-faint);margin:0 0 var(--s3);padding-bottom:8px;
+    border-bottom:1px solid var(--rule-soft)">Decision record</h3>
+  {% set rec_strategy = result.strategies | selectattr("name", "equalto", result.recommended) | first %}
+  <div class="status" style="margin-bottom:var(--s5)">
+    <div class="cell"><div class="k">PO / requirement</div>
+      <div class="v">{% if linked_order %}<a href="/orders/{{ linked_order.id }}">{{ linked_order.sku }} #{{ linked_order.id }}</a>{% else %}{{ row.scenario_id }}{% endif %}</div></div>
+    <div class="cell"><div class="k">Chokepoint</div><div class="v">{{ row.corridor }}</div></div>
+    <div class="cell"><div class="k">Decision</div>
+      <div class="v">{% if act.timing == "WAIT" %}WAIT{% elif act.timing == "ACT" %}ACT &mdash; {{ act.recommended_strategy }}{% else %}{{ result.recommended }}{% endif %}</div></div>
+    <div class="cell"><div class="k">{% if linked_order %}Order quantity{% else %}Quantity{% endif %}</div>
+      <div class="v">{% if linked_order and linked_order.quantity is not none %}{{ "{:,.0f}".format(linked_order.quantity) }} {{ linked_order.quantity_unit }}{% else %}&mdash;{% endif %}</div></div>
+    <div class="cell"><div class="k">{{ "Approved cost" if row.status in ("approved", "executed") else "Estimated cost" }}</div>
+      <div class="v">{% if rec_strategy %}{{ "{:,.0f}".format(rec_strategy.direct_cost) }}{% else %}&mdash;{% endif %}</div></div>
+    <div class="cell"><div class="k">Decision maker</div><div class="v">{{ user.email }}</div></div>
+    <div class="cell"><div class="k">Decision date</div><div class="v">{{ row.created_at.strftime("%Y-%m-%d") }}</div></div>
+    <div class="cell"><div class="k">TAR signal at decision</div>
+      <div class="v">{% if result.reading %}TAR {{ result.reading.tar }}{% if result.reading.band %}, {{ result.reading.band }}{% endif %}{% else %}no reading{% endif %}</div></div>
+    <div class="cell"><div class="k">Probability</div><div class="v">{{ "{:.0%}".format(result.probability_used) }}</div></div>
+    <div class="cell"><div class="k">Delay assumption</div>
+      <div class="v">{% if input.fields.get('delay_days_estimate') is not none %}{{ "{:,.0f}".format(input.fields.delay_days_estimate) }} days{% else %}&mdash;{% endif %}</div></div>
+    <div class="cell"><div class="k">Status</div>
+      <div class="v"><span class="badge {{ 'ok' if row.status in ('approved', 'executed') else ('hot' if row.status == 'rejected' else '') }}">{{ row.status }}</span></div></div>
+  </div>
+
   {% set pw = result.procurement_window %}
   <p>
   {%- if pw.procurement_window_days is not none -%}
@@ -450,9 +534,11 @@ with updated quotes &mdash;
       <button class="btn" type="submit">Approve</button>
     </form>
     <a class="btn ghost" href="/strategy-decisions/new?decision_id={{ row.id }}">Modify</a>
+    {% if act.timing != "WAIT" %}
     <form method="post" action="/strategy-decisions/{{ row.id }}/reject" style="margin:0">
       <button class="btn ghost" type="submit">Reject</button>
     </form>
+    {% endif %}
   </div>
   {% elif row.status == "approved" %}
   <div class="row" style="margin-top:var(--s4)">

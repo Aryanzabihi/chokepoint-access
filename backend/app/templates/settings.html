@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Settings — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">Settings</div>
+  <h1>Settings</h1>
+  <p class="thesis">Company profile and the financial assumptions that pre-fill a new decision
+  &mdash; every field here is still just a starting point, never silently substituted once a
+  decision is submitted.</p>
+</header>
+
+{% if saved %}<p class="note">Saved.</p>{% endif %}
+
+<form method="post" action="/settings">
+  <section class="panel" style="margin-top:var(--s5)">
+    <h2>Company</h2>
+    <div class="row">
+      <div class="field" style="min-width:260px;flex:1">
+        <label for="company_name">Company name</label>
+        <input type="text" id="company_name" name="company_name" value="{{ user.company_name or '' }}">
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Financial assumptions</h2>
+    <p class="hint" style="margin-top:0">Defaults for a new decision's Economic exposure section
+    &mdash; leave any of these blank to keep asking for it fresh each time. These never touch a
+    decision that's already been submitted, and never apply to market quotes (reroute quote,
+    war-risk insurance, and similar), which always stay live, per-decision figures.</p>
+    <div class="row">
+      <div class="field" style="width:160px">
+        <label for="wacc_pct">WACC</label>
+        <input type="number" id="wacc_pct" name="wacc_pct" step="any" min="0" max="100"
+               value="{{ (user.default_wacc_pct * 100) if user.default_wacc_pct is not none else '' }}"> %
+      </div>
+      <div class="field" style="width:200px">
+        <label for="carrying_cost_pct_pa">Carrying cost (% p.a.)</label>
+        <input type="number" id="carrying_cost_pct_pa" name="carrying_cost_pct_pa" step="any" min="0" max="100"
+               value="{{ (user.default_carrying_cost_pct_pa * 100) if user.default_carrying_cost_pct_pa is not none else '' }}"> %
+      </div>
+      <div class="field" style="width:160px">
+        <label for="gross_margin_pct">Gross margin</label>
+        <input type="number" id="gross_margin_pct" name="gross_margin_pct" step="any" min="0" max="100"
+               value="{{ (user.default_gross_margin_pct * 100) if user.default_gross_margin_pct is not none else '' }}"> %
+      </div>
+      <div class="field" style="width:180px">
+        <label for="penalty_per_day">Penalty per day</label>
+        <input type="number" id="penalty_per_day" name="penalty_per_day" step="any" min="0"
+               value="{{ user.default_penalty_per_day if user.default_penalty_per_day is not none else '' }}">
+      </div>
+    </div>
+  </section>
+
+  <div class="row" style="margin-top:var(--s4)">
+    <button class="btn" type="submit">Save</button>
+  </div>
+</form>
+
+<section class="panel">
+  <h2>Users</h2>
+  <p class="empty">Not available yet &mdash; every account here is fully standalone (no shared
+  company workspace, invitations or roles). Adding that is a real architecture change, not a
+  setting, so it isn't stubbed in here ahead of actually being built.</p>
+</section>
+
+<section class="panel">
+  <h2>Integrations / API</h2>
+  <p style="margin-top:0">API keys are managed on their own page.</p>
+  <a class="btn ghost" href="/account/api-keys">Manage API keys</a>
+</section>
+{% endblock %}

@@ -4,46 +4,54 @@
 <header class="masthead">
   <div class="eyebrow">All clients</div>
   <h1>Home</h1>
-  <p class="thesis">Every exposure you're watching, across every client, worst corridor
-  first. An exposure with no strategy decision yet just says so &mdash; nothing here is
-  computed until you ask for it.</p>
+  <p class="thesis">Procurement decisions affected by current geopolitical exposure &mdash;
+  ACT first, then WAIT, then exposures with no decision built yet. Nothing here is a new
+  judgment: ACT/WAIT is the same call the decision itself already makes, and "no decision
+  yet" means exactly that, not a claim that the exposure is immaterial.</p>
 </header>
 
-<section class="panel" style="margin-top:0">
-  <h2>Exposures ({{ rows|length }})</h2>
-  {% if rows %}
-  <div class="scroll">
-    <table>
-      <thead><tr><th>Client</th><th>Corridor</th><th>Reading</th>
-      <th>Recommended strategy</th><th>Weakest grade</th></tr></thead>
-      <tbody>
-      {% for r in rows %}
-        <tr>
-          <td><a href="/clients/{{ r.client.id }}">{{ r.client.name }}</a></td>
-          <td><a href="/clients/{{ r.client.id }}/exposures/{{ r.exposure.id }}">{{ r.exposure.corridor }}</a></td>
-          {% if r.reading %}
-            <td><span class="badge {{ 'hot' if r.reading.regime == 'in episode' or r.reading.band in ('Critical transition', 'Crisis regime') else 'ok' }}">
-              {% if r.reading.regime == 'in episode' %}In episode
-              {% else %}{{ r.reading.band }}{% endif %}
-            </span></td>
-          {% else %}
-            <td><span class="hint">no reading available</span></td>
-          {% endif %}
-          {% if r.strategy_decision %}
-            <td><a href="/strategy-decisions/{{ r.strategy_decision.id }}">{{ r.sd_result.recommended or "—" }}</a></td>
-            <td>{{ r.sd_result.weakest_grade }}</td>
-          {% else %}
-            <td colspan="2"><span class="empty">no decision yet &mdash;
-              <a href="/strategy-decisions/new?exposure_id={{ r.exposure.id }}">build one</a></span></td>
-          {% endif %}
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+<div class="row" style="margin-bottom:var(--s4)">
+  <a class="btn" href="/decisions/new">+ New decision</a>
+</div>
+
+{% if rows %}
+<div class="cards">
+  {% for r in rows %}
+  <div class="card">
+    <div class="name">{{ r.client.name }} &middot; {{ r.exposure.corridor }}
+      {% if r.act and r.act.timing == "ACT" %}<span class="badge hot">ACT</span>
+      {% elif r.act and r.act.timing == "WAIT" %}<span class="badge warn">WAIT</span>
+      {% else %}<span class="badge">NO DECISION YET</span>{% endif %}
+    </div>
+    {% if r.act and r.act.timing == "ACT" %}
+    <div class="meta">{{ r.act.recommended_strategy }} recommended.</div>
+    {% elif r.act and r.act.timing == "WAIT" %}
+    <div class="meta">{{ r.act.reason or "Maintain current plan." }}</div>
+    {% elif r.strategy_decision %}
+    <div class="meta">{{ r.sd_result.recommended or "—" }} &mdash; baseline strategy
+    couldn't be resolved as an Act/Wait call.</div>
+    {% else %}
+    <div class="meta">no decision yet</div>
+    {% endif %}
+    {% if r.reading %}
+    <div class="meta">Reading:
+      {% if r.reading.regime == 'in episode' %}In episode{% else %}{{ r.reading.band }}{% endif %}</div>
+    {% else %}
+    <div class="meta">No current reading available.</div>
+    {% endif %}
+    <div class="row" style="margin-top:var(--s4)">
+      {% if r.strategy_decision %}
+      <a class="btn ghost" href="/strategy-decisions/{{ r.strategy_decision.id }}">Review</a>
+      {% else %}
+      <a class="btn ghost" href="/strategy-decisions/new?exposure_id={{ r.exposure.id }}">Build a decision</a>
+      {% endif %}
+      <a class="btn ghost" href="/clients/{{ r.client.id }}/exposures/{{ r.exposure.id }}">Exposure</a>
+    </div>
   </div>
-  {% else %}
-  <p class="empty">No exposures yet. <a href="/clients">Add a client</a> and an exposure
-  to get started.</p>
-  {% endif %}
-</section>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty">No exposures yet. <a href="/clients">Add a client</a> and an exposure
+to get started.</p>
+{% endif %}
 {% endblock %}
