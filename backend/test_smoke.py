@@ -518,6 +518,13 @@ def test_strategy_decision_walkthrough(client):
     assert "global monthly TAR alarm series" in r.text        # scope_note, fixed text
     assert "never a projection of what happens next" in r.text  # trend_disclaimer, fixed text
 
+    # low_warning_note() enrichment on corridor_note: unlike recovery_state
+    # above, this describes 4 already-COMPLETED historical Hormuz onsets
+    # (1987/1990/2003/2026), all in the past -- stable, safe to pin exactly,
+    # not subject to the same monthly-drift caveat.
+    assert ("2 of 4 recorded onset(s) occurred with no alarm active the prior month"
+           in r.text)
+
     r = client.get(detail_url + "/report")
     assert r.status_code == 200
     assert "Decision engine v2" in r.text

@@ -51,7 +51,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from tar_ingest import CORRIDORS, POST_ONSET_MONTHS, assign_band, episodes, regime  # noqa: E402
+from tar_ingest import CORRIDORS, ONSETS, POST_ONSET_MONTHS, assign_band, episodes, regime  # noqa: E402
 
 MODEL_VERSION = "recovery-1.0"
 
@@ -411,6 +411,48 @@ def _print_snapshot(s: RecoverySnapshot) -> None:
     print(f"  NOTE: {s.trend_disclaimer}")
 
 
+# --------------------------------------------------------------------------
+# Low-warning history — a second, real sentence for decision_engine.py's own
+# base_rate_context()/corridor_note, not a new signal. Answers "of this
+# corridor's recorded onsets, how many had the alarm already active the
+# prior month" using the SAME alarm/cut mechanism the global hit-rate
+# already uses -- no new threshold invented, no fitting, a plain historical
+# count exactly like corridor_note's own existing "N of 8 headline onsets"
+# sentence. Some onsets are genuine low-warning events (Hormuz 1990: TAR
+# 0.834, "Routine", the month before a real invasion) -- that fact belongs
+# in the record, not smoothed over by only ever reporting counts that look
+# reassuring.
+# --------------------------------------------------------------------------
+
+def low_warning_note(history: dict, corridor: str) -> str | None:
+    """None when this corridor has no recorded onset in tar_ingest.ONSETS
+    (nothing to compute -- decision_engine.py's own corridor_note already
+    covers that case), or when every recorded onset predates this
+    particular history's own coverage (can't look up "the month before" for
+    a month that isn't in the series)."""
+    onsets = ONSETS.get(corridor, [])
+    if not onsets:
+        return None
+    months, alarm = history["months"], history["alarm"]
+    flags: list[bool] = []
+    for onset in onsets:
+        try:
+            idx = months.index(onset)
+        except ValueError:
+            continue   # this history's coverage doesn't reach this onset
+        if idx == 0:
+            continue   # no prior month in this history to check
+        flags.append(bool(alarm[idx - 1]))
+    if not flags:
+        return None
+
+    low_warning = sum(1 for f in flags if not f)
+    if low_warning == 0:
+        return f"All {len(flags)} recorded onset(s) had the alarm already active the prior month."
+    return (f"{low_warning} of {len(flags)} recorded onset(s) occurred with no alarm active "
+           f"the prior month -- a low-warning corridor for part of its history.")
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -615,7 +657,6 @@ def selftest() -> int:
     assert recovered.duration_analogues is not None and recovered.duration_analogues.n == 3
 
     # --- episode_window_remaining: real onset from tar_ingest.ONSETS ---
-    from tar_ingest import ONSETS
     onset = ONSETS["Strait of Hormuz"][-1]   # "2026-02"
     inside = snapshot(_minimal_history("2026-06"), "Strait of Hormuz")   # 4 months after the 2026-02 onset
     assert inside.episode_window_remaining is not None
@@ -642,6 +683,35 @@ def selftest() -> int:
         assert False, "mismatched array lengths should have raised"
     except ValueError:
         pass
+
+    # --- low_warning_note(): reproduces the real, independently-verified
+    # Hormuz pattern (2 of its 4 real recorded onsets -- 1987-07, 1990-08,
+    # 2003-03, 2026-02 -- had no alarm active the prior month) from a
+    # compact, hand-built fixture, not the live file ---
+    hormuz_months = ["1987-06", "1987-07", "1990-07", "1990-08",
+                     "2003-02", "2003-03", "2026-01", "2026-02"]
+    hormuz_alarm = [False, True, False, True, True, True, True, True]
+    hormuz_hist = {"months": hormuz_months, "tar": [1.0] * 8,
+                   "cut": [1.0] * 8, "alarm": hormuz_alarm}
+    note = low_warning_note(hormuz_hist, "Strait of Hormuz")
+    assert note == ("2 of 4 recorded onset(s) occurred with no alarm active the prior "
+                    "month -- a low-warning corridor for part of its history."), note
+
+    # a corridor whose one recorded onset DID have prior warning -> the
+    # "all had warning" branch, not silently omitted just because it's the
+    # reassuring case
+    all_warned_hist = {"months": ["2022-01", "2022-02"], "tar": [2.0, 3.0],
+                       "cut": [1.0, 1.0], "alarm": [True, True]}
+    all_warned = low_warning_note(all_warned_hist, "Turkish Straits / Black Sea")
+    assert all_warned == "All 1 recorded onset(s) had the alarm already active the prior month."
+
+    # a corridor with no recorded onset at all -> nothing to compute
+    assert low_warning_note(all_warned_hist, "Suez Canal") is None
+
+    # an onset that's the very first entry in the history -> no prior
+    # month exists to check, skipped rather than raising or guessing
+    edge_hist = {"months": ["1990-08"], "tar": [9.5], "cut": [1.0], "alarm": [True]}
+    assert low_warning_note(edge_hist, "Strait of Hormuz") is None
 
     print("all checks passed")
     print("  duration_analogues and conditional_remaining both return None -- never a")

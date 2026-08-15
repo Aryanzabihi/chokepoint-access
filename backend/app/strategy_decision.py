@@ -79,10 +79,26 @@ def compute_decision(data: dict, *, as_of: str | None = None) -> dict:
             reading = engine.current_reading(corridor)
         except (FileNotFoundError, ValueError):
             reading = None
-    return build_decision(
+    result = build_decision(
         data, as_of=as_of, reading=reading,
         warrisk_path=WARRISK_PATH if WARRISK_PATH.exists() else None,
         jwc_path=JWC_PATH if JWC_PATH.exists() else None)
+    # Appends recovery.low_warning_note() (a real, computed historical-frequency
+    # fact -- reuses the existing alarm mechanism, no new threshold) onto
+    # base_rate_context()'s own corridor_note, computed once here so every
+    # downstream consumer (detail page, persisted result_json, /report) sees
+    # the same enriched text rather than three independently-drifting copies.
+    if corridor:
+        try:
+            history = engine.history_snapshot()
+        except FileNotFoundError:
+            history = None
+        if history is not None:
+            note = recovery.low_warning_note(history, corridor)
+            base_rate = result.get("base_rate") or {}
+            if note and base_rate.get("corridor_note"):
+                base_rate["corridor_note"] += " " + note
+    return result
 
 
 # --------------------------------------------------------------------------
