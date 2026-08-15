@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Corridors — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">Reference</div>
+  <h1>Corridors</h1>
+  <p class="thesis">The TAR band and cutoff below are global — one signal, one
+  threshold, identical for every corridor by construction (a corridor-specific
+  cutoff was tested against real transit episodes and scored worse than chance;
+  confirmed twice more independently, including by the manuscript's own internal
+  analysis — see the note on each panel). What differs by chokepoint is
+  everything else that's actually known about it: how often it has produced a
+  real onset, whether news coverage detectably responds to incidents there,
+  how much warning its past onsets gave, and how reliably it can even be
+  measured. Each fact below is labeled by what it actually is — none of them
+  are blended into a single score.</p>
+</header>
+
+{% if error %}
+<p class="empty">No current reading available ({{ error }}).</p>
+{% else %}
+
+<div class="status" style="margin-bottom:var(--s5)">
+  <div class="cell"><div class="k">As of</div><div class="v">{{ global_reading.as_of }}</div></div>
+  <div class="cell"><div class="k">Global band</div><div class="v big">{{ global_reading.band }}</div></div>
+  <div class="cell"><div class="k">Percentile</div><div class="v">{{ global_reading.percentile_range }}</div></div>
+  <div class="cell"><div class="k">Horizon</div>
+    <div class="v {{ 'dim' if not global_reading.horizon }}">{{ global_reading.horizon or "n/a — a corridor is in episode" }}</div></div>
+</div>
+
+{% for p in panels %}
+<div class="panel" style="margin-bottom:var(--s4)">
+  <div class="row" style="justify-content:space-between;align-items:baseline">
+    <div class="name" style="font:600 17px/1.3 var(--serif)">{{ p.corridor }}</div>
+    {% if p.regime == "in episode" %}
+      <span class="badge hot">IN EPISODE — {{ p.onset }}, {{ p.months_since_onset }}mo ago</span>
+    {% else %}
+      <span class="badge">AT RISK — anticipatory</span>
+    {% endif %}
+  </div>
+
+  <div class="status" style="margin-top:var(--s4)">
+    <div class="cell"><div class="k">Historical onsets</div>
+      <div class="v">{{ p.onset_count }} <span class="hint">of 8 since 1985</span></div></div>
+    <div class="cell"><div class="k">Onset-frequency grade</div>
+      <div class="v"><span class="badge">{{ p.onset_grade }}</span></div></div>
+    <div class="cell"><div class="k">Response-character grade</div>
+      <div class="v"><span class="badge">{{ p.response_grade }}</span>
+      <span class="hint">{{ p.tested_incident_count }} tested incident{{ "s" if p.tested_incident_count != 1 }}</span></div></div>
+    <div class="cell"><div class="k">Attention share (this month)</div>
+      <div class="v {{ 'dim' if p.share is none }}">
+        {% if p.share is not none %}{{ p.share }}% <span class="hint">vs. {{ p.share_avg }}% long-run avg, z={{ p.salience_z }}</span>
+        {% else %}no country-level coverage{% endif %}</div></div>
+    <div class="cell"><div class="k">Attribution</div>
+      <div class="v"><span class="badge {{ 'warn' if p.attribution == 'proxy' else 'ok' }}">{{ p.attribution }}</span></div></div>
+  </div>
+
+  <p class="note" style="margin-top:var(--s4)">{{ p.onset_note }}</p>
+  {% if p.response_character %}<p class="note">{{ p.response_character }}</p>{% endif %}
+  {% if p.low_warning %}<p class="note">{{ p.low_warning }}</p>{% endif %}
+  {% if p.proxy_note %}<p class="note">Proxy attribution: {{ p.proxy_note }}.</p>{% endif %}
+  {% if p.warrisk_multiple %}
+  <p class="note">War-risk premium on record: {{ p.warrisk_multiple }}x baseline within
+  {{ p.warrisk_days }} days of the {{ p.warrisk_onset }} onset — sourced, published-aggregate data
+  (<code>warrisk.py</code>), not a forecast for the next episode.</p>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% endif %}
+{% endblock %}

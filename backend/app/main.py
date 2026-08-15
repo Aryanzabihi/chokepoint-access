@@ -15,8 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .routers import (
-    api_keys, api_v1, clients, dashboard, decision_wizard, economic, exposures, orders,
-    reports, strategy_decisions,
+    api_keys, api_v1, clients, corridors, dashboard, decision_wizard, economic, exposures,
+    orders, reports, strategy_decisions,
 )
 
 APP_DIR = Path(__file__).resolve().parent
@@ -32,6 +32,7 @@ app.mount("/static", StaticFiles(directory=str(APP_DIR.parent.parent / "src")),
           name="site-assets")
 
 app.include_router(dashboard.router)
+app.include_router(corridors.router, tags=["corridors"])
 app.include_router(clients.router, prefix="/api/v1/clients", tags=["clients"])
 app.include_router(exposures.router, prefix="/api/v1/exposures", tags=["exposures"])
 app.include_router(reports.router, tags=["reports"])

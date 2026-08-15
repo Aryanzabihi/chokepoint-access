@@ -1239,3 +1239,46 @@ def test_settings(client):
     # but never a Tier-3 market quote -- that stays a live, per-decision input
     assert ('id="field_disrupted_freight_quote" name="field_disrupted_freight_quote" step="any"\n'
            '             value="">') in r.text
+
+
+def test_corridors_page(client):
+    """Per-chokepoint threshold panel: same global band shown once, distinct
+    per-corridor evidence never blended into one score. Suez is the sharpest
+    check -- TAR_TRIP_note_corridor_base_rates.md's own documented example of
+    the two grades disagreeing (0 recorded onsets -> onset-frequency grade
+    STRUCTURAL, but real tested incidents -> response-character grade
+    EPISODE_ANALOGUE) -- so asserting both on the same corridor confirms the
+    page keeps them separate rather than merging them."""
+    client.post("/signup", data={"email": "corridors@example.com",
+                                  "password": "correct horse battery staple"})
+
+    r = client.get("/corridors")
+    assert r.status_code == 200
+
+    for corridor in ["Strait of Hormuz", "Bab-el-Mandeb", "Adriatic",
+                     "Turkish Straits / Black Sea", "Suez Canal",
+                     "Strait of Malacca", "Taiwan Strait"]:
+        assert corridor in r.text
+
+    # the global band appears exactly once, not repeated per corridor as if
+    # it varied by chokepoint
+    assert r.text.count('<div class="k">Global band</div>') == 1
+
+    # Suez: onset-frequency STRUCTURAL (0 of 8 headline onsets) vs.
+    # response-character EPISODE_ANALOGUE (real tested incidents) -- both
+    # present, neither overwriting the other
+    suez_start = r.text.index("Suez Canal")
+    suez_block = r.text[suez_start:suez_start + 3000]
+    assert "0 <span" in suez_block and "of 8 since 1985" in suez_block
+    assert "STRUCTURAL" in suez_block and "EPISODE_ANALOGUE" in suez_block
+
+    # Hormuz: 4 of 8 onsets, both grades EPISODE_ANALOGUE (has both onsets
+    # and tested incidents), proxy attribution (Iran unpublished)
+    hormuz_start = r.text.index("Strait of Hormuz")
+    hormuz_block = r.text[hormuz_start:hormuz_start + 3000]
+    assert "4 <span" in hormuz_block and "of 8 since 1985" in hormuz_block
+    assert hormuz_block.count("EPISODE_ANALOGUE") == 2
+    assert "Iran unpublished" in hormuz_block
+
+    # nav link present
+    assert 'href="/corridors"' in r.text
