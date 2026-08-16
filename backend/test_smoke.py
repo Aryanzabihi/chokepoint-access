@@ -1288,6 +1288,32 @@ def test_settings(client):
            '             value="">') in r.text
 
 
+def test_map_page(client):
+    """/map runs on this app (Render), not the separate GitHub Pages site --
+    user's explicit correction after the external-link version felt
+    disconnected from the rest of the product. Iframes /static/map.html
+    (src/ is already mounted there in main.py) rather than re-implementing
+    a whole Leaflet tool, with ?embed=1 telling that page to hide its own
+    standalone nav (Act or wait / Track record) since this page's own nav
+    already wraps it."""
+    r = client.get("/map")
+    assert r.status_code == 401   # not logged in yet -- gated like every other dashboard page
+
+    client.post("/signup", data={"email": "map-user@example.com",
+                                  "password": "correct horse battery staple"})
+
+    r = client.get("/map")
+    assert r.status_code == 200
+    assert 'src="/static/map.html?embed=1"' in r.text
+    assert 'href="/map"' in r.text   # nav points here, not the old external github.io link
+    assert "aryanzabihi.github.io" not in r.text
+
+    # the iframe's actual target really is served by this app, not a 404
+    r = client.get("/static/map.html")
+    assert r.status_code == 200
+    assert "Joint War Committee listed areas" in r.text
+
+
 def test_corridors_page(client):
     """Per-chokepoint threshold panel: same global band shown once, distinct
     per-corridor evidence never blended into one score. Suez is the sharpest

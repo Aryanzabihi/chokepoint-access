@@ -302,6 +302,20 @@ def settings_page(request: Request, user: User = Depends(current_user), saved: s
         {"user": user, "saved": saved is not None})
 
 
+# -------------------------------------------------------------------- map ---
+
+@router.get("/map", response_class=HTMLResponse)
+def map_page(request: Request, user: User = Depends(current_user)):
+    """Runs on this app (Render), not the separate GitHub Pages site --
+    the map itself is real (src/map.html, a full Leaflet tool), so this
+    iframes /static/map.html (src/ is already mounted there, see main.py)
+    rather than re-implementing it. ?embed=1 tells that page to hide its
+    own standalone nav/footer (Act or wait / Track record), since this
+    page's own base.html nav already wraps it -- see the script src/map.html
+    gained for this."""
+    return templates.TemplateResponse(request, "map.html", {"user": user})
+
+
 @router.post("/settings")
 def update_settings(company_name: str = Form(""), wacc_pct: str = Form(""),
                      carrying_cost_pct_pa: str = Form(""), gross_margin_pct: str = Form(""),

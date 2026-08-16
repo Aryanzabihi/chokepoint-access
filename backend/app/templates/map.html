@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Map — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow">Reference</div>
+  <h1>Zone map</h1>
+  <p class="thesis">Joint War Committee listed areas for hull war risk, and every
+  boundary change since 2021 &mdash; the same interactive map published on the
+  public site, served from this app so it isn't a separate destination.</p>
+</header>
+<div class="panel" style="padding:0;overflow:hidden">
+  <iframe src="/static/map.html?embed=1" title="JWC listed areas map"
+    style="width:100%;height:85vh;border:0;display:block"></iframe>
+</div>
+{% endblock %}
