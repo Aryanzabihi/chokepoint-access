@@ -1289,13 +1289,13 @@ def test_settings(client):
 
 
 def test_map_page(client):
-    """/map runs on this app (Render), not the separate GitHub Pages site --
-    user's explicit correction after the external-link version felt
-    disconnected from the rest of the product. Iframes /static/map.html
-    (src/ is already mounted there in main.py) rather than re-implementing
-    a whole Leaflet tool, with ?embed=1 telling that page to hide its own
-    standalone nav (Act or wait / Track record) since this page's own nav
-    already wraps it."""
+    """/map runs on this app (Render), not the separate GitHub Pages site.
+    An iframe version was tried and rejected -- a real problem (map.html's
+    own content nested inside a nested-scrolling box), not a style
+    preference -- so dashboard.py's _map_page_pieces() transplants
+    src/map.html's actual body content directly into this page instead.
+    No standalone nav (Act or wait / Track record) since this page's own
+    base.html nav already covers navigation; no iframe, no nested scroll."""
     r = client.get("/map")
     assert r.status_code == 401   # not logged in yet -- gated like every other dashboard page
 
@@ -1304,14 +1304,23 @@ def test_map_page(client):
 
     r = client.get("/map")
     assert r.status_code == 200
-    assert 'src="/static/map.html?embed=1"' in r.text
+    # the whole page's own content is native, not framed -- MarineTraffic's
+    # own small live-AIS widget (a legitimate third-party embed inside real
+    # content) is the only iframe expected here
+    assert "/static/map.html" not in r.text
+    assert 'title="JWC listed areas map"' not in r.text   # the old wrapper iframe's own title
     assert 'href="/map"' in r.text   # nav points here, not the old external github.io link
     assert "aryanzabihi.github.io" not in r.text
 
-    # the iframe's actual target really is served by this app, not a 404
-    r = client.get("/static/map.html")
-    assert r.status_code == 200
-    assert "Joint War Committee listed areas" in r.text
+    # the real page content is genuinely present, not just linked to
+    assert "Which waters are listed for war risk" in r.text
+    assert 'id="map"' in r.text                       # the Leaflet mount point
+    assert "leaflet.min.js" in r.text                  # the map actually initializes
+    assert 'id="readings-data"' in r.text               # baked data, not a client-side 404
+
+    # its own standalone nav/footer did NOT come along for the ride
+    assert "Act or wait" not in r.text
+    assert "Track record" not in r.text
 
 
 def test_corridors_page(client):

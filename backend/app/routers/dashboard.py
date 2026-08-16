@@ -304,16 +304,70 @@ def settings_page(request: Request, user: User = Depends(current_user), saved: s
 
 # -------------------------------------------------------------------- map ---
 
+MAP_SRC = Path(__file__).resolve().parent.parent.parent.parent / "src" / "map.html"
+
+
+def _map_page_pieces() -> tuple[str, str, str]:
+    """Slices (head_extra, body_content, body_scripts) out of src/map.html --
+    reused directly, not re-implemented, same reasoning as history_timeline_svg()
+    being duplicated rather than shared: this is the one real caller.
+
+    An iframe was tried first and rejected (a real problem, not a style
+    preference -- it means map.html's own real content, real interactivity,
+    and real data render inside a fenced-off nested-scrolling box instead
+    of being genuinely part of this page). This instead transplants
+    map.html's actual body content (the eyebrow through "What this map will
+    not tell you" -- everything except its own standalone nav/footer, which
+    this app's own base.html nav/footer already cover) directly into the
+    response, plus the small map-specific <style> block and Leaflet's CDN
+    CSS/JS it needs (base.html's own site.css link already covers
+    everything else -- map.html's own comment: "Ground, type, nav, panels,
+    tables and Leaflet chrome all come from site.css"), plus the baked
+    <script id="readings-data"> JSON blob so the "Global reading" panel
+    shows real data here exactly like it does on the public page, not a
+    "no data" fallback -- the fetch("readings.json") refresh underneath it
+    would 404 relative to /map (there is no such route), same reasoning
+    documented for the (now-superseded) iframe design.
+
+    Raises ValueError (surfaces as a 500) if any marker isn't found rather
+    than silently serving a mangled page -- if src/map.html's structure
+    ever changes enough to break these, that should be loud, not a quietly
+    broken map."""
+    text = MAP_SRC.read_text(encoding="utf-8")
+
+    def between(start: str, end: str, *, after: int = 0) -> str:
+        s = text.index(start, after)
+        e = text.index(end, s) + len(end)
+        return text[s:e]
+
+    leaflet_css_and_style = between(
+        '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet',
+        "</style>")
+    readings_data = between('<script type="application/json" id="readings-data"', "</script>")
+    head_extra = leaflet_css_and_style + "\n" + readings_data
+
+    body_start = text.index('<div class="eyebrow">Joint War Committee listed areas')
+    body_end = text.index('<footer class="foot" id="siteFooter">')
+    body_content = text[body_start:body_end]
+
+    scripts_start = text.index(
+        '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js">')
+    scripts_end = text.index("</body>")
+    body_scripts = text[scripts_start:scripts_end]
+
+    return head_extra, body_content, body_scripts
+
+
 @router.get("/map", response_class=HTMLResponse)
 def map_page(request: Request, user: User = Depends(current_user)):
     """Runs on this app (Render), not the separate GitHub Pages site --
-    the map itself is real (src/map.html, a full Leaflet tool), so this
-    iframes /static/map.html (src/ is already mounted there, see main.py)
-    rather than re-implementing it. ?embed=1 tells that page to hide its
-    own standalone nav/footer (Act or wait / Track record), since this
-    page's own base.html nav already wraps it -- see the script src/map.html
-    gained for this."""
-    return templates.TemplateResponse(request, "map.html", {"user": user})
+    and unlike the iframe version this replaced, the map's real content is
+    genuinely part of this page (see _map_page_pieces()'s own docstring for
+    why the iframe was rejected), not fenced off in a nested-scrolling box."""
+    head_extra, body_content, body_scripts = _map_page_pieces()
+    return templates.TemplateResponse(request, "map.html",
+        {"user": user, "head_extra": head_extra, "body_content": body_content,
+         "body_scripts": body_scripts})
 
 
 @router.post("/settings")
