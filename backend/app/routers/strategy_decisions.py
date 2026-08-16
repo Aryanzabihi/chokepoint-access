@@ -146,9 +146,9 @@ def _form_to_intake(form: FormData, *, strategies: list[dict] | None = None) -> 
 def _carry_forward_fields(data: dict) -> dict[str, object]:
     """Flattens an intake dict back into the exact POST field names
     _form_to_intake() reads, for hidden-field round-tripping from Input to
-    TAR Exposure to the final Analyze step (mirrors decision_wizard.py's
-    own proven hidden-field pattern, just for the ~21 intake fields instead
-    of 5). Fraction-unit fields convert back to the percentage form the
+    TAR Exposure to the final Analyze step (same hidden-field round-tripping
+    pattern used throughout this router, just for the ~21 intake fields
+    instead of a handful). Fraction-unit fields convert back to the percentage form the
     visible inputs use -- the one place this conversion happens, so a
     later step can never drift out of sync with what field_input() shows."""
     carry: dict[str, object] = {
@@ -229,12 +229,11 @@ def _template_context(order=None, demand_supply: dict | None = None,
         t["fields"]["contract_transit_time_days"] = order.contract_transit_time_days
         t["fields"]["ship_date"] = order.ship_date
     if demand_supply:
-        # Carried forward from the New Decision wizard's demand & supply
-        # step (decision_wizard.py) as query params, not persisted on the
-        # order itself -- these five fields conceptually belong to a
-        # reusable DemandPlan this project has deliberately deferred (see
-        # memory); carrying them as transient wizard state avoids
-        # duplicating that future table ahead of time. They end up
+        # Carried forward as query params, not persisted on the order
+        # itself -- these five fields conceptually belong to a reusable
+        # DemandPlan this project has deliberately deferred (see memory);
+        # carrying them as transient state avoids duplicating that future
+        # table ahead of time. They end up
         # persisted exactly once, inside this StrategyDecision's own
         # intake blob, same as if the client had typed them in directly.
         for name in _DEMAND_SUPPLY_FIELDS:
@@ -353,8 +352,8 @@ async def compute_exposure_page(request: Request, exposure_id: int | None = Form
                                  session: Session = Depends(get_session)):
     """Input -> TAR Exposure. Computes with a single placeholder strategy
     (see _PLACEHOLDER_STRATEGY) and renders the Exposure template directly
-    -- no redirect, nothing persisted yet -- exactly the "POST renders the
-    next template" pattern decision_wizard.py already established. Nothing
+    -- no redirect, nothing persisted yet -- the same "POST renders the
+    next template" pattern this router uses throughout. Nothing
     is inserted into the database until /strategy-decisions/analyze."""
     form = await request.form()
     data = _form_to_intake(form, strategies=_PLACEHOLDER_STRATEGY)
