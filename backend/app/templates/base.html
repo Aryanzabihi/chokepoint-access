@@ -20,7 +20,7 @@
   <a href="/settings" class="{{ 'here' if active == 'settings' else '' }}">Settings</a>
   <a href="/map" class="{{ 'here' if active == 'map' else '' }}">Map</a>
   <span class="spacer"></span>
-  <a class="btn" href="/decisions/new" style="padding:6px 12px">+ New decision</a>
+  <a class="btn" href="/strategy-decisions/new" style="padding:6px 12px">+ New decision</a>
   {% if user %}
     <span class="stamp">{{ user.email }}</span>
     <form method="post" action="/logout" style="display:inline;margin:0">
