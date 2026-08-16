@@ -25,9 +25,35 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import decision_engine
+
 RECORD = Path("record.jsonl")
 OUTCOMES = Path("outcomes.csv")
 PAGE = Path("track-record.html")
+# The live vintage docs/readings.json is gitignored under src/ (a build
+# input, not tracked there -- see .gitignore's own comment on this), but the
+# published copy at docs/readings.json always exists once the pipeline has
+# run once. Optional: render() degrades gracefully without it, same as
+# corridor_panel.py's history_snapshot()/current_reading() do for the
+# backend when this file is absent.
+READINGS_PATH = Path(__file__).resolve().parent.parent / "docs" / "readings.json"
+
+# Same 7 short labels threshold-engine.html's own hand-authored CORRIDORS
+# constant already uses (not re-derived from tar_ingest.CORRIDORS' longer
+# `note` field, e.g. "Iran unpublished; GCC coverage substituted") --
+# reused verbatim so the two pages never describe the same fact two
+# different ways. Onset counts are NOT hardcoded here, unlike that JS
+# constant -- computed live from decision_engine.base_rate_context() below,
+# since a real future onset would make a frozen count silently wrong.
+_CORRIDOR_BASIS: dict[str, str] = {
+    "Strait of Hormuz": "GCC coverage (proxy)",
+    "Bab-el-Mandeb": "Saudi and Egyptian coverage (proxy)",
+    "Adriatic": "Italian, Turkish, Hungarian coverage (proxy)",
+    "Turkish Straits / Black Sea": "Directly covered",
+    "Suez Canal": "Directly covered",
+    "Strait of Malacca": "Directly covered",
+    "Taiwan Strait": "Directly covered",
+}
 
 OUTCOME_COLUMNS = ["as_of", "outcome", "onset_month", "corridor", "note", "source_ref"]
 OUTCOMES_ALLOWED = {"disruption", "no disruption", "too soon"}
@@ -156,6 +182,165 @@ def write_outcomes_template(path: Path = OUTCOMES) -> None:
 
 
 # --------------------------------------------------------------------------
+# Historical context -- ported to this static page from threshold-engine.html's
+# live JS tool (drawHistory()/renderBoard() there), server-rendered once here
+# instead of drawn client-side. This page has never had any JS on it; a full
+# hand-authored dependency chain (those two functions plus every helper they
+# call) wasn't worth introducing just to relocate two sections, so this is a
+# fresh, focused implementation against the same underlying data
+# (docs/readings.json) rather than an extraction. Both are additive -- the
+# live tool on threshold-engine.html is untouched, still has its own copy.
+# --------------------------------------------------------------------------
+
+def _data_quality(attribution: str, share) -> tuple[str, str]:
+    """Same three-way rule as threshold-engine.html's own dataQuality(),
+    ported directly: it only ever depended on attribution and whether share
+    is measurable, both of which are plain fields on a readings.json entry."""
+    proxy = attribution == "proxy"
+    has_share = share is not None
+    if not proxy and has_share:
+        return "strong", "\U0001f7e2"
+    if proxy and not has_share:
+        return "limited", "\U0001f534"
+    return "moderate", "\U0001f7e1"
+
+
+def history_timeline_svg(history: dict) -> str:
+    """All 488 months of history['tar'], one line in var(--ink-faint) except
+    any run where history['alarm'] is true, drawn in var(--amber) -- episodes
+    read as bands rather than needing a tick mark on each alarm month
+    individually. Same construction as
+    backend/app/corridor_panel.history_timeline_svg() (that one feeds the
+    logged-in app's /corridors page); duplicated rather than imported since
+    this script runs standalone in CI with no dependency on the backend
+    package, and the two pages' surrounding markup differs enough that a
+    shared helper would need its own home to be worth it for two callers."""
+    months, tar, alarm = history["months"], history["tar"], history["alarm"]
+    n = len(months)
+    W, H = 780, 220
+    ML, MR, MT, MB = 34, 8, 10, 22
+    plot_w, plot_h = W - ML - MR, H - MT - MB
+    lo, hi = 0.0, max(tar) * 1.08
+
+    def px(i: int) -> float:
+        return ML + (i / (n - 1)) * plot_w
+
+    def py(v: float) -> float:
+        return MT + (1 - (v - lo) / (hi - lo)) * plot_h
+
+    points = [(px(i), py(tar[i])) for i in range(n)]
+
+    runs: list[tuple[bool, int, int]] = []
+    start = 0
+    for i in range(1, n):
+        if alarm[i] != alarm[start]:
+            runs.append((alarm[start], start, i - 1))
+            start = i - 1
+    runs.append((alarm[start], start, n - 1))
+
+    segs = []
+    for is_alarm, s, e in runs:
+        d = "M " + " L ".join(f"{x:.1f} {y:.1f}" for x, y in points[s:e + 1])
+        color = "var(--amber)" if is_alarm else "var(--ink-faint)"
+        segs.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="2" '
+                    f'stroke-linejoin="round" stroke-linecap="round"/>')
+
+    grid = []
+    for gv in (lo, hi):
+        gy = py(gv)
+        grid.append(f'<line x1="{ML}" y1="{gy:.1f}" x2="{W - MR}" y2="{gy:.1f}" '
+                    f'stroke="var(--rule-soft)" stroke-width="1"/>')
+        grid.append(f'<text x="{ML - 6}" y="{gy + 3:.1f}" text-anchor="end" '
+                    f'style="font:10px var(--mono)" fill="var(--ink-faint)">{gv:.1f}</text>')
+
+    ticks = []
+    seen_years: set[int] = set()
+    for i, m in enumerate(months):
+        yr = int(m[:4])
+        if yr % 5 == 0 and yr not in seen_years and m[5:7] in ("01", "02", "03"):
+            seen_years.add(yr)
+            tx = px(i)
+            ticks.append(f'<text x="{tx:.1f}" y="{H - 4}" text-anchor="middle" '
+                        f'style="font:10px var(--mono)" fill="var(--ink-faint)">{yr}</text>')
+
+    last_x, last_y = points[-1]
+    end_color = "var(--amber)" if alarm[-1] else "var(--ink-faint)"
+    endpoint = (f'<circle cx="{last_x:.1f}" cy="{last_y:.1f}" r="4" fill="{end_color}" '
+               f'stroke="var(--sea)" stroke-width="2"/>'
+               f'<text x="{last_x - 8:.1f}" y="{last_y - 10:.1f}" text-anchor="end" '
+               f'style="font:600 11px var(--mono)" fill="{end_color}">{tar[-1]:.2f}</text>')
+
+    return (f'<svg viewBox="0 0 {W} {H}" role="img" '
+           f'aria-label="Global TAR reading, {months[0]} to {months[-1]}, current value '
+           f'{tar[-1]:.2f}" style="width:100%;height:auto;display:block">'
+           + "".join(grid) + "".join(segs) + endpoint + "".join(ticks) + "</svg>")
+
+
+def chokepoint_cards_html(readings: dict) -> str:
+    """Reuses site.css's existing .cards/.card/.gauge classes -- the same
+    ones threshold-engine.html's renderBoard() already targets client-side
+    -- so this is the same visual component, server-rendered, not a new one
+    invented for this page."""
+    by = {r["corridor"]: r for r in readings.get("readings", [])}
+    shares = [r["share"] for r in by.values() if r.get("share") is not None]
+    max_share = max(shares) if shares else 1.0
+
+    cards = []
+    for corridor, basis in _CORRIDOR_BASIS.items():
+        onset_count = decision_engine.base_rate_context(corridor)["corridor_onsets"]
+        onset_text = (f"{onset_count} onset{'s' if onset_count != 1 else ''}"
+                      if onset_count else "no onsets")
+        r = by.get(corridor)
+        if r is None:
+            cards.append(
+                f'<div class="card"><div class="name">{esc(corridor)}</div>'
+                f'<div class="meta">{esc(onset_text)} &middot; {esc(basis)}</div>'
+                f'<div style="margin-top:var(--s3)"><span class="badge none">awaiting '
+                f'ingest</span></div></div>')
+            continue
+
+        ep = r.get("regime") == "in episode"
+        dq_label, dq_emoji = _data_quality(r["attribution"], r.get("share"))
+        badge = (f'<span class="badge hot">disrupted since {esc(r["onset"])}</span>' if ep
+                else '<span class="badge ok">open</span>')
+
+        if r.get("share") is None:
+            body = ('<div class="meta" style="margin-top:var(--s4)">No attention share '
+                   '&mdash; the release carries none of this chokepoint&rsquo;s flanking '
+                   'states, so nothing chokepoint-specific can be measured here.</div>')
+        else:
+            share, share_avg = r["share"], r.get("share_avg")
+            ratio = share / share_avg if share_avg else 1.0
+            up, down = ratio >= 1.02, ratio <= 0.98
+            arrow = "▲" if up else "▼" if down else "–"
+            color = "var(--caution)" if up else "var(--sound)" if down else "var(--ink-soft)"
+            w = max(2.0, (share / max_share) * 100)
+            avg_pos = min(100.0, (share_avg / max_share) * 100) if share_avg else None
+            cut = (f'<i class="cut" style="left:{avg_pos:.1f}%;background:var(--ink-soft)"></i>'
+                  if avg_pos is not None else "")
+            body = (
+                f'<div style="display:flex;align-items:baseline;gap:9px;margin-top:var(--s4)">'
+                f'<span style="font:500 27px/1 var(--mono);letter-spacing:-.02em">{share:.1f}'
+                f'<span style="font-size:14px;color:var(--ink-faint)">%</span></span>'
+                f'<span style="font:11.5px/1 var(--mono);color:{color}">{arrow} '
+                f'{abs(round((ratio - 1) * 100))}% vs its average</span></div>'
+                f'<div class="meta">of world risk coverage sits on its flanking states</div>'
+                f'<div class="gauge"><div class="track"><i class="fill{" hot" if up else ""}" '
+                f'style="width:{w:.1f}%"></i>{cut}</div>'
+                f'<div class="scale"><span>0</span><span>tick = long-run average</span>'
+                f'<span>{max_share:.0f}%</span></div></div>')
+
+        cards.append(
+            f'<div class="card{" ep" if ep else ""}">'
+            f'<div class="name">{esc(corridor)}</div>'
+            f'<div class="meta">{esc(onset_text)} &middot; {esc(basis)}</div>'
+            f'<div class="meta" style="margin-top:3px">{dq_emoji} data quality: '
+            f'{dq_label}</div>'
+            f'<div style="margin-top:var(--s3)">{badge}</div>{body}</div>')
+    return '<div class="cards">' + "".join(cards) + '</div>'
+
+
+# --------------------------------------------------------------------------
 # Static page
 # --------------------------------------------------------------------------
 
@@ -193,6 +378,41 @@ def render(path: Path = PAGE) -> None:
 
     rate = (f"{len(hits)}/{len(resolved)} = {len(hits)/len(resolved):.2f}"
             if resolved else "no resolved months yet")
+
+    # Historical context (Forty years of readings + Chokepoint status) --
+    # optional, same degrade-gracefully rule as the backend's
+    # corridor_panel.py: docs/readings.json is a real file once the pipeline
+    # has run, but a standalone --render invocation before that shouldn't
+    # crash over a section that's additive to this page's real purpose.
+    history_section = ""
+    board_section = ""
+    if READINGS_PATH.exists():
+        live = json.loads(READINGS_PATH.read_text(encoding="utf-8"))
+        history = live.get("history")
+        if history:
+            n_alarm = sum(history["alarm"])
+            history_section = f"""
+<section class="panel">
+  <h2>Forty years of readings</h2>
+  <div class="canvas">{history_timeline_svg(history)}</div>
+  <p class="note">{len(history['months'])} months, {history['months'][0]} to
+  {history['months'][-1]}. {n_alarm} were at or above the alert threshold (amber).
+  Every threshold is built only from months before the one it judges, so this is
+  not hindsight.</p>
+</section>
+"""
+        board_section = f"""
+<section class="panel">
+  <h2>Chokepoint status</h2>
+  {chokepoint_cards_html(live)}
+  <p class="note"><strong>What the percentage is.</strong> The share of the world's
+  country-level risk coverage currently sitting on that chokepoint's flanking states,
+  against its own long-run average. It is a measure of where attention is, not a
+  forecast: a chokepoint can hold a large share for months without anything closing.
+  The risk <em>level</em> shown at the top of this page is global and is the same
+  figure for every chokepoint &mdash; which is why it is shown once, not seven times.</p>
+</section>
+"""
 
     # A sparkline of what has actually been published. One point is not a
     # chart, so below two entries it is omitted rather than faked.
@@ -238,8 +458,6 @@ the outcome was known and tamper-proofed. Misses and false alerts shown alongsid
 <div class="wrap">
 
 <nav class="nav">
-  <a href="threshold-engine.html">Act or wait</a>
-  <a href="map.html">Zone map</a>
   <span class="here">Track record</span>
   <span class="spacer"></span>
   <span class="stamp">generated {date.today()}</span>
@@ -277,7 +495,8 @@ the outcome was known and tamper-proofed. Misses and false alerts shown alongsid
   entry is never touched once an outcome is known &mdash; corrections are added as new,
   labelled entries.</p>
 </section>
-
+{history_section}
+{board_section}
 <section class="panel">
   <h2>Verify this yourself</h2>
   <p class="note">Each entry carries a fingerprint of the one before it, so changing any
@@ -289,8 +508,6 @@ the outcome was known and tamper-proofed. Misses and false alerts shown alongsid
 
 <footer class="foot">
   <span>Chokepoint Access &mdash; maritime war risk timing</span>
-  <a href="threshold-engine.html">Act or wait</a>
-  <a href="map.html">Zone map</a>
   <span class="spacer"></span>
   <span>{len(entries)} entries &middot; chain {'ok' if ok else 'broken'}</span>
 </footer>
