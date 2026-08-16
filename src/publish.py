@@ -30,13 +30,18 @@ import decision_engine
 RECORD = Path("record.jsonl")
 OUTCOMES = Path("outcomes.csv")
 PAGE = Path("track-record.html")
-# The live vintage docs/readings.json is gitignored under src/ (a build
-# input, not tracked there -- see .gitignore's own comment on this), but the
-# published copy at docs/readings.json always exists once the pipeline has
-# run once. Optional: render() degrades gracefully without it, same as
-# corridor_panel.py's history_snapshot()/current_reading() do for the
-# backend when this file is absent.
-READINGS_PATH = Path(__file__).resolve().parent.parent / "docs" / "readings.json"
+# Sibling src/readings.json, NOT docs/readings.json -- same file
+# run_month.py's own READINGS constant and build_site.py's own READINGS
+# constant already point at, and for the same reason: run_month.py writes
+# this FIRST (step 1, tar_ingest.py) and calls publish.py (step 3, this
+# module) well before the GitHub Actions workflow's later, separate
+# "Assemble the public site" step ever copies it to docs/. Reading
+# docs/readings.json here would render this page one month stale on every
+# real automated run -- caught by tracing run_month.py's actual step order,
+# not assumed from this module's own name. Gitignored under src/ (a build
+# input, not tracked there), so render() degrades gracefully without it,
+# same as corridor_panel.py's history_snapshot() does for the backend.
+READINGS_PATH = Path(__file__).resolve().parent / "readings.json"
 
 # Same 7 short labels threshold-engine.html's own hand-authored CORRIDORS
 # constant already uses (not re-derived from tar_ingest.CORRIDORS' longer
