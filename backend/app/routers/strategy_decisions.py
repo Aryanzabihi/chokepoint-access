@@ -106,6 +106,8 @@ def _strategies_from_form(form: FormData) -> list[dict]:
                 "capacity_restored": _pct(form, f"strategy_{i}_capacity_restored", 0.0),
                 "war_risk_premium_multiplier": _pct(form, f"strategy_{i}_war_risk_premium_multiplier"),
                 "days_of_cover_delta": _num(form, f"strategy_{i}_days_of_cover_delta", 0.0),
+                "forward_buy_fraction": _pct(form, f"strategy_{i}_forward_buy_fraction", 0.0),
+                "forward_buy_early_days": _num(form, f"strategy_{i}_forward_buy_early_days", 0.0),
             },
             "is_baseline": i == baseline_idx,
             "notes": form.get(f"strategy_{i}_notes") or "",
@@ -477,7 +479,8 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
     edit_strategies = None
     if row.status == "draft":
         blank_effects = {"delay_days_delta": 0.0, "capacity_restored": 0.0,
-                         "war_risk_premium_multiplier": None, "days_of_cover_delta": 0.0}
+                         "war_risk_premium_multiplier": None, "days_of_cover_delta": 0.0,
+                         "forward_buy_fraction": 0.0, "forward_buy_early_days": 0.0}
         # Every EXISTING strategy's effects is merged onto blank_effects too,
         # not just the padded slots below -- a strategy saved via the raw
         # JSON API (api_create() passes data straight to compute_decision(),

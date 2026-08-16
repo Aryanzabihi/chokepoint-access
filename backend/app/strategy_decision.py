@@ -151,14 +151,15 @@ _STAGE_STRATEGY_DEFAULTS: dict[str | None, list[dict]] = {
 
 
 _ZERO_EFFECTS = {"delay_days_delta": 0.0, "capacity_restored": 0.0,
-                 "war_risk_premium_multiplier": None, "days_of_cover_delta": 0.0}
+                 "war_risk_premium_multiplier": None, "days_of_cover_delta": 0.0,
+                 "forward_buy_fraction": 0.0, "forward_buy_early_days": 0.0}
 
 
 def default_strategies_for_stage(stage: str | None) -> list[dict]:
     """Returns fresh dicts each call (no shared mutable state), each with a
-    complete 4-key effects dict — every entry in _STAGE_STRATEGY_DEFAULTS
+    complete 6-key effects dict — every entry in _STAGE_STRATEGY_DEFAULTS
     above only specifies the effects it overrides, merged onto
-    _ZERO_EFFECTS here, so the strategy-table template (which reads all 4
+    _ZERO_EFFECTS here, so the strategy-table template (which reads all 6
     keys unconditionally) never hits a missing one. `"delivered"` is not a
     key in the table — by that stage a StrategyDecision isn't offered at
     all (see order_detail.html) — falls back to the no-order defaults like

@@ -1186,6 +1186,56 @@ def test_strategy_decision_recompute(client):
     assert r.status_code == 404
 
 
+def test_forward_buy_exposed_on_recompute(client):
+    """Partial commitment (forward_buy_fraction/forward_buy_early_days) was
+    real, tested engine math (decision_engine.forward_buy_cost(), added
+    straight into a strategy's direct_cost -- see build_decision()) but had
+    no input anywhere on the dashboard form. This checks the new
+    edit-strategies columns actually reach the engine and produce a real,
+    graded ledger line -- not just that the page renders."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "forwardbuy@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_url = r.headers["location"]
+    decision_id = int(decision_url.rsplit("/", 1)[-1])
+
+    r = client.post(f"/strategy-decisions/{decision_id}/recompute", data={
+        "baseline_strategy": "0",
+        "strategy_0_name": "Continue", "strategy_0_direct_cost": "0",
+        "strategy_1_name": "Partial reroute", "strategy_1_direct_cost": "700000",
+        "strategy_1_capacity_restored": "40", "strategy_1_war_risk_premium_multiplier": "25",
+        "strategy_1_forward_buy_fraction": "40", "strategy_1_forward_buy_early_days": "30",
+        "strategy_2_name": "",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+
+    # a pre-existing draft (no forward-buy set on any strategy) still
+    # renders clean -- the exact missing-key UndefinedError class fixed
+    # 2026-08-16 (fc97c78) must not come back for these two new keys.
+    r = client.get(decision_url)
+    assert r.status_code == 200
+    assert 'name="strategy_1_forward_buy_fraction"' in r.text
+    assert 'value="40' in r.text
+
+    result = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()["result"]
+    fb_rows = [e for e in result["ledger"] if e["field"] == "forward_buy_cost[Partial reroute]"]
+    assert len(fb_rows) == 1, "forward-buy must produce exactly one graded ledger line"
+    assert fb_rows[0]["value"] > 0, "a 40%/30-day forward buy must cost something, not silently no-op"
+    assert fb_rows[0]["grade"] != "ABSENT"
+
+    reroute = next(s for s in result["strategies"] if s["name"] == "Partial reroute")
+    assert reroute["direct_cost"] > 700_000, \
+        "forward-buy financing cost must be added into the strategy's own direct_cost"
+
+
 def test_alerts_job_runs_without_error(client):
     """alerts.run() opens its own session against app.db.engine, which in
     this process points at DATABASE_URL (the sqlite file), not the

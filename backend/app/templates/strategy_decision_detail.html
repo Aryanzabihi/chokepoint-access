@@ -261,6 +261,7 @@ with updated quotes &mdash;
             <thead><tr><th>Baseline</th><th>Name</th><th class="m">Direct cost</th>
             <th class="m">Delay days, change</th><th class="m">Capacity restored</th>
             <th class="m">War-risk premium &times;</th><th class="m">Days of cover, change</th>
+            <th class="m">Forward-buy</th><th class="m">Forward-buy, days early</th>
             <th>Notes</th></tr></thead>
             <tbody>
             {% for s in edit_strategies %}
@@ -281,6 +282,11 @@ with updated quotes &mdash;
                     value="{{ (s.effects.war_risk_premium_multiplier * 100)|round(0) if s.effects.war_risk_premium_multiplier is not none else '' }}"> %</td>
                 <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_days_of_cover_delta"
                     step="0.5" style="width:90px" value="{{ s.effects.days_of_cover_delta }}"></td>
+                <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_forward_buy_fraction"
+                    min="0" max="100" step="1" style="width:80px"
+                    value="{{ (s.effects.forward_buy_fraction * 100)|round(0) if s.effects.forward_buy_fraction else 0 }}"> %</td>
+                <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_forward_buy_early_days"
+                    step="1" style="width:90px" value="{{ s.effects.forward_buy_early_days }}"></td>
                 <td><input type="text" name="strategy_{{ loop.index0 }}_notes" style="width:140px"
                     value="{{ s.notes }}"></td>
               </tr>
@@ -292,7 +298,10 @@ with updated quotes &mdash;
         baseline (e.g. 40% capacity restored, 25% of the baseline war-risk premium). Leave
         war-risk premium &times; blank to leave the quote as-is. Days of cover, change applies on
         top of whichever days-of-cover figure section 2 resolves to &mdash; direct if you
-        supplied it, derived otherwise.</p>
+        supplied it, derived otherwise. Forward-buy secures that fraction of the position this
+        many days sooner than the contract timeline would have required &mdash; it only adds the
+        financing/carrying cost of committing early, so pair it with capacity restored/war-risk
+        premium &times; if the point is to also reduce risk on the secured fraction.</p>
         <div class="row" style="margin-top:var(--s4)">
           <button class="btn" type="submit">Recompute</button>
         </div>
