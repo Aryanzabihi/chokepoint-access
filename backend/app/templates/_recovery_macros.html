@@ -1,0 +1,38 @@
+{% macro recovery_block(recovery, episode_window_remaining=none) %}
+{% if recovery.recovery_state %}
+{% set rs = recovery.recovery_state %}
+<p class="m">Recovery state:
+  <span class="badge {{ 'hot' if rs.state in ('ESCALATING', 'RE_ESCALATING') else ('ok' if rs.state in ('RECOVERING', 'RECOVERED') else 'warn') }}">{{ rs.state }}</span>
+  &mdash; peaked at {{ rs.peak_value }} ({{ rs.peak_band }}) {{ rs.months_since_peak }} month(s) ago
+  {%- if rs.months_since_episode_end is not none %}, episode closed {{ rs.months_since_episode_end }} month(s) ago{% endif -%},
+  now {{ rs.current_value }} ({{ rs.current_band }}).</p>
+{% endif %}
+
+{% if recovery.duration_analogues %}
+{% set da = recovery.duration_analogues %}
+<p class="m" style="margin-top:var(--s3)">{{ da.n }} completed alarm episodes since 1985 ran
+{{ da.min_months }}&ndash;{{ da.max_months }} months (median {{ da.median_months }}).</p>
+{% else %}
+<p class="empty" style="margin-top:var(--s3)">Not enough completed alarm episodes on record for
+a duration analogue.</p>
+{% endif %}
+
+{% if recovery.conditional_remaining %}
+{% set cr = recovery.conditional_remaining %}
+<p class="m">Of those, {{ cr.n }} ran at least as long as this episode's
+{{ cr.months_so_far }} months so far &mdash; they went on {{ cr.min_remaining }}&ndash;{{ cr.max_remaining }}
+more months (median {{ cr.median_remaining }}).</p>
+{% elif recovery.alarm_now %}
+<p class="empty">Not enough historical episodes ran this long already to say how much longer
+&mdash; insufficient_data, not a guess.</p>
+{% endif %}
+
+{% if episode_window_remaining %}
+{% set ewr = episode_window_remaining %}
+<p class="m">{{ ewr.corridor }}'s own post-onset window: {{ ewr.months_remaining }} month(s)
+remaining (onset {{ ewr.onset_month }}, {{ ewr.months_since_onset }} month(s) ago).</p>
+{% endif %}
+
+<p class="hint" style="margin-top:var(--s3)">{{ recovery.scope_note }}</p>
+<p class="hint">{{ recovery.trend_disclaimer }}</p>
+{% endmacro %}

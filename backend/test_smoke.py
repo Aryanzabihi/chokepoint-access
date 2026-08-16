@@ -1783,6 +1783,30 @@ def test_corridors_page(client):
     # not asserting a specific corridor's percentage, which is also live.
     assert "world risk coverage" in r.text
 
+    # Recovery (src/recovery.py, via corridor_panel.all_panels()'s new global
+    # "recovery" key) -- the same Time Recovery module that was already wired
+    # into a single decision's own detail page (test_strategy_decision_
+    # walkthrough) is now also visible here, at the corridor-overview level,
+    # where a user actually looks for "how is this corridor recovering."
+    # recovery_state/duration_analogues/scope_note/trend_disclaimer describe
+    # the single global TAR series -- shown once, same reasoning as "Global
+    # band" and "Forty years of readings" above -- so assert count==1, and
+    # only structural/fixed text, never today's live recovery_state value
+    # (docs/readings.json updates monthly).
+    assert r.text.count("Recovery state:") == 1
+    assert any(f">{s}</span>" in r.text for s in
+              ("ESCALATING", "PEAKED", "RECOVERING", "STALLED", "RE_ESCALATING", "RECOVERED"))
+    assert r.text.count("completed alarm episodes since 1985") == 1
+    assert r.text.count("global monthly TAR alarm series") == 1        # scope_note, fixed text
+    assert r.text.count("never a projection of what happens next") == 1  # trend_disclaimer
+
+    # episode_window_remaining IS genuinely per-corridor (unlike the block
+    # above) -- Strait of Hormuz is the permanent-history assertion target
+    # everywhere else on this page, but whether it's *currently* inside its
+    # 12-month post-onset window is itself a live fact, so assert only that
+    # at least one corridor shows one, not which corridor or the exact count.
+    assert "own post-onset window" in r.text
+
     # Hormuz: 4 of 8 onsets, both grades EPISODE_ANALOGUE (has both onsets
     # and tested incidents), proxy attribution (Iran unpublished)
     hormuz_start = r.text.index("Strait of Hormuz")
