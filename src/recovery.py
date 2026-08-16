@@ -168,6 +168,13 @@ class RecoverySnapshot:
     duration_analogues: DurationAnalogues | None
     conditional_remaining: ConditionalRemaining | None
     episode_window_remaining: EpisodeWindowRemaining | None
+    # How many months into the CURRENT episode we are, whenever alarm_now is
+    # True -- set even when conditional_remaining ends up None (fewer than 2
+    # historical episodes ran at least this long). snapshot() already
+    # computes this value internally either way; exposing it lets a caller
+    # show WHERE "insufficient_data" comes from (e.g. a reference line on a
+    # duration-analogues chart) instead of only being told the label.
+    episode_months_so_far: int | None = None
     scope_note: str = SCOPE_NOTE
     trend_disclaimer: str = TREND_DISCLAIMER
     model_version: str = MODEL_VERSION
@@ -342,6 +349,7 @@ def snapshot(history: dict, corridor: str, as_of: str | None = None) -> Recovery
     recovery_state: RecoveryState | None = None
     duration_analogues: DurationAnalogues | None = None
     conditional_remaining: ConditionalRemaining | None = None
+    episode_months_so_far: int | None = None
 
     if alarm_now:
         # episodes() groups every True index, including the last, into its
@@ -351,6 +359,7 @@ def snapshot(history: dict, corridor: str, as_of: str | None = None) -> Recovery
         completed = _episode_durations(eps[:-1], months)
         recovery_state = _active_episode_state(months, tar, ep_start, current_idx)
         months_so_far = current_idx - ep_start + 1
+        episode_months_so_far = months_so_far
         duration_analogues = _duration_analogues(completed)
         conditional_remaining = _conditional_remaining(completed, months_so_far)
     elif eps:
@@ -371,7 +380,8 @@ def snapshot(history: dict, corridor: str, as_of: str | None = None) -> Recovery
         as_of=months[current_idx], corridor=corridor, alarm_now=alarm_now,
         recovery_state=recovery_state, duration_analogues=duration_analogues,
         conditional_remaining=conditional_remaining,
-        episode_window_remaining=episode_window_remaining)
+        episode_window_remaining=episode_window_remaining,
+        episode_months_so_far=episode_months_so_far)
 
 
 # --------------------------------------------------------------------------
@@ -401,8 +411,8 @@ def _print_snapshot(s: RecoverySnapshot) -> None:
         print(f"  conditional_remaining (at {cr.months_so_far} months in): n={cr.n} "
              f"min={cr.min_remaining} median={cr.median_remaining:g} max={cr.max_remaining}")
     elif s.alarm_now:
-        print("  conditional_remaining: insufficient_data (fewer than 2 historical "
-             "episodes ran at least this long)")
+        print(f"  conditional_remaining: insufficient_data (fewer than 2 historical "
+             f"episodes ran at least the {s.episode_months_so_far} months this one has)")
     if s.episode_window_remaining:
         ewr = s.episode_window_remaining
         print(f"  episode_window_remaining: {ewr.months_remaining} month(s) "
@@ -563,8 +573,12 @@ def selftest() -> int:
     assert s.duration_analogues.median_months == 2.0
     assert s.duration_analogues.max_months == 65
     # months_so_far = 17: only the 65-month episode ran at least that long
-    # (n=1) -- correctly insufficient, not a fabricated number.
+    # (n=1) -- correctly insufficient, not a fabricated number. Exposed
+    # directly on the snapshot (episode_months_so_far) even though
+    # conditional_remaining itself is None -- a caller (e.g. a chart) can
+    # still show WHERE "insufficient_data" comes from.
     assert s.conditional_remaining is None
+    assert s.episode_months_so_far == 17
 
     # --- as_of back-testing: replays the exact real month-by-month sequence
     # independently hand-verified against the live data before this
@@ -642,10 +656,13 @@ def selftest() -> int:
     thin = snapshot(_build_synthetic_history([3], [5.0, 4.0, 3.0, 2.0]), "Strait of Hormuz")
     assert thin.duration_analogues is None
     assert thin.conditional_remaining is None
+    assert thin.episode_months_so_far == 4   # alarm_now is True here, so this is set
+                                              # even though conditional_remaining isn't
     never = snapshot(_minimal_history("1990-01"), "Strait of Hormuz")
     assert never.recovery_state is None
     assert never.duration_analogues is None
     assert never.alarm_now is False
+    assert never.episode_months_so_far is None   # no ongoing episode -- nothing to count
 
     # --- recovered: episode has closed, alarm_now is False ---
     recovered = snapshot(_build_synthetic_history([1, 2, 5], None, tail_alarm=False),
@@ -655,6 +672,7 @@ def selftest() -> int:
     assert recovered.recovery_state.months_since_episode_end == 2   # the 2-month gap after it
     assert recovered.conditional_remaining is None
     assert recovered.duration_analogues is not None and recovered.duration_analogues.n == 3
+    assert recovered.episode_months_so_far is None   # closed, not ongoing
 
     # --- episode_window_remaining: real onset from tar_ingest.ONSETS ---
     onset = ONSETS["Strait of Hormuz"][-1]   # "2026-02"

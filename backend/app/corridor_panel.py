@@ -28,6 +28,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import sys
+from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -224,6 +225,159 @@ def share_meter_svg(share: float | None, share_avg: float | None,
            + "".join(parts) + "</svg>")
 
 
+def recovery_trajectory_svg(history: dict, recovery_state) -> str:
+    """Server-rendered SVG line from the current episode's own peak through
+    to now -- the exact span recovery_state's peak_month/current_month
+    already describe in words (recovery.py's RecoveryState); this draws it
+    instead of leaving it to a sentence. Same no-client-JS pattern as
+    history_timeline_svg/act_wait_dial_svg. One series, one color (the same
+    status color the state badge already uses), so no legend -- the badge
+    beside it already names what's plotted (dataviz skill: a single series
+    needs no legend box).
+
+    When peak_month == current_month (ESCALATING: this month IS the new
+    high), a single point has no shape to draw -- widened to a short
+    trailing lookback (up to 5 months before) purely for visual context.
+    This never changes what "peak" or "months_since_peak" themselves mean;
+    it only decides how much history the picture shows."""
+    months, tar = history["months"], history["tar"]
+    peak_idx = months.index(recovery_state.peak_month)
+    current_idx = months.index(recovery_state.current_month)
+    start_idx = max(0, min(peak_idx, current_idx - 5))
+
+    win_months = months[start_idx:current_idx + 1]
+    win_tar = tar[start_idx:current_idx + 1]
+    n = len(win_months)
+    peak_pos = peak_idx - start_idx
+
+    color = ("var(--caution)" if recovery_state.state in ("ESCALATING", "RE_ESCALATING")
+             else "var(--sound)" if recovery_state.state in ("RECOVERING", "RECOVERED")
+             else "var(--amber)")   # STALLED
+
+    W, H = 460, 120
+    ML, MR, MT, MB = 8, 50, 14, 20
+    plot_w, plot_h = W - ML - MR, H - MT - MB
+    lo, hi = 0.0, max(win_tar) * 1.15
+
+    def px(i: int) -> float:
+        return ML + (i / (n - 1) if n > 1 else 0.0) * plot_w
+
+    def py(v: float) -> float:
+        return MT + (1 - (v - lo) / (hi - lo)) * plot_h
+
+    pts = [(px(i), py(win_tar[i])) for i in range(n)]
+    line_d = "M " + " L ".join(f"{x:.1f} {y:.1f}" for x, y in pts)
+    px_peak, py_peak = pts[peak_pos]
+    px_cur, py_cur = pts[-1]
+
+    parts = [
+        f'<line x1="{ML}" y1="{py(lo):.1f}" x2="{W - MR}" y2="{py(lo):.1f}" '
+        f'stroke="var(--rule-soft)" stroke-width="1"/>',
+        f'<path d="{line_d}" fill="none" stroke="{color}" stroke-width="2" '
+        f'stroke-linejoin="round" stroke-linecap="round"/>',
+    ]
+    if peak_pos != n - 1:
+        # text-anchor adapts to how close the peak sits to either edge --
+        # a fixed "middle" anchor clips off the viewBox when the peak (as it
+        # usually is, per start_idx's own definition above) sits right at
+        # the plot's left edge, same collision this module's dot-plot
+        # reference-line label already has to dodge (dataviz skill: a label
+        # that won't fit doesn't get clipped, it gets repositioned).
+        peak_anchor = "start" if px_peak < W * 0.15 else "end" if px_peak > W * 0.85 else "middle"
+        peak_label_x = px_peak + 6 if peak_anchor == "start" else px_peak - 6 if peak_anchor == "end" else px_peak
+        parts.append(f'<circle cx="{px_peak:.1f}" cy="{py_peak:.1f}" r="4" '
+                    f'fill="var(--sea)" stroke="var(--ink-faint)" stroke-width="2"/>')
+        parts.append(f'<text x="{peak_label_x:.1f}" y="{max(py_peak - 10, 10):.1f}" text-anchor="{peak_anchor}" '
+                    f'style="font:9.5px var(--mono)" fill="var(--ink-faint)">peak</text>')
+    parts.append(f'<circle cx="{px_cur:.1f}" cy="{py_cur:.1f}" r="4.5" fill="{color}" '
+                f'stroke="var(--sea)" stroke-width="2"/>')
+    parts.append(f'<text x="{px_cur + 9:.1f}" y="{py_cur + 4:.1f}" '
+                f'style="font:600 12px var(--mono)" fill="{color}">{win_tar[-1]:.2f}</text>')
+    parts.append(f'<text x="{ML}" y="{H - 4}" style="font:9.5px var(--mono)" '
+                f'fill="var(--ink-faint)">{win_months[0]}</text>')
+    parts.append(f'<text x="{W - MR}" y="{H - 4}" text-anchor="end" '
+                f'style="font:9.5px var(--mono)" fill="var(--ink-faint)">{win_months[-1]}</text>')
+
+    return (f'<svg viewBox="0 0 {W} {H}" role="img" '
+           f'aria-label="TAR trajectory from peak {win_tar[peak_pos]:.2f} in '
+           f'{months[peak_idx]} to current {win_tar[-1]:.2f} in {win_months[-1]}" '
+           f'style="width:100%;height:auto;display:block">' + "".join(parts) + "</svg>")
+
+
+def duration_dotplot_svg(duration_analogues, episode_months_so_far: int | None) -> str | None:
+    """Server-rendered dot plot of every real completed alarm-episode
+    duration (recovery.py's own DurationAnalogues.episodes -- plural, never
+    averaged, same discipline as the text this supplements). One dot per
+    episode, stacked at repeated duration values rather than overlapping
+    invisibly -- the real shape of the distribution (e.g. a dozen 1-month
+    episodes and one 65-month outlier), not just its min/median/max.
+
+    episode_months_so_far (only set while alarm_now -- see recovery.py's
+    RecoverySnapshot) draws a reference line at the current episode's own
+    age and recolors episodes that already ran at least that long: the same
+    "qualifying" set conditional_remaining() computes, shown directly rather
+    than only stated. Drawn even when conditional_remaining itself is None
+    (fewer than 2 qualifying episodes) so the reader can see *why* --
+    how few dots sit at or past the line -- instead of just reading
+    "insufficient_data"."""
+    if duration_analogues is None:
+        return None
+    durations = [e.duration_months for e in duration_analogues.episodes]
+    counts = Counter(durations)
+    axis_max = max(math.ceil(max(durations) / 10) * 10, 10)
+
+    W = 460
+    ML, MR = 8, 8
+    DOT_D, DOT_GAP = 8, 2
+    max_stack = max(counts.values())
+    plot_h = max_stack * (DOT_D + DOT_GAP) - DOT_GAP
+    MT = 20 if episode_months_so_far is not None else 6
+    MB = 20
+    H = MT + plot_h + MB
+    plot_w = W - ML - MR
+    axis_y = MT + plot_h + 6
+
+    def px(v: float) -> float:
+        return ML + (v / axis_max) * plot_w
+
+    parts = [f'<line x1="{ML}" y1="{axis_y}" x2="{W - MR}" y2="{axis_y}" '
+            f'stroke="var(--rule-soft)" stroke-width="1"/>']
+
+    if episode_months_so_far is not None:
+        rx = px(min(episode_months_so_far, axis_max))
+        parts.append(f'<line x1="{rx:.1f}" y1="4" x2="{rx:.1f}" y2="{axis_y}" '
+                    f'stroke="var(--sea-edge)" stroke-width="1.5" stroke-dasharray="3,2"/>')
+        anchor = "end" if rx > W * 0.7 else "start" if rx < W * 0.3 else "middle"
+        dx = -4 if anchor == "end" else 4 if anchor == "start" else 0
+        parts.append(f'<text x="{rx + dx:.1f}" y="12" text-anchor="{anchor}" '
+                    f'style="font:600 9.5px var(--mono)" fill="var(--ink-soft)">'
+                    f'{episode_months_so_far}mo so far</text>')
+
+    for val, cnt in sorted(counts.items()):
+        cx = px(val)
+        qualifies = episode_months_so_far is not None and val >= episode_months_so_far
+        fill = "var(--sound)" if qualifies else "var(--ink-faint)"
+        for k in range(cnt):
+            cy = axis_y - 6 - DOT_D / 2 - k * (DOT_D + DOT_GAP)
+            parts.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{DOT_D / 2}" '
+                        f'fill="{fill}" stroke="var(--sea)" stroke-width="2"/>')
+
+    median = duration_analogues.median_months
+    mx = px(median)
+    parts.append(f'<path d="M {mx - 4:.1f} {axis_y + 3:.1f} L {mx + 4:.1f} {axis_y + 3:.1f} '
+                f'L {mx:.1f} {axis_y - 3:.1f} Z" fill="var(--ink)"/>')
+    parts.append(f'<text x="{ML}" y="{H - 4}" style="font:9.5px var(--mono)" '
+                f'fill="var(--ink-faint)">0</text>')
+    parts.append(f'<text x="{W - MR}" y="{H - 4}" text-anchor="end" '
+                f'style="font:9.5px var(--mono)" fill="var(--ink-faint)">{axis_max}mo</text>')
+
+    return (f'<svg viewBox="0 0 {W} {H}" role="img" '
+           f'aria-label="{duration_analogues.n} completed episode durations, '
+           f'{duration_analogues.min_months} to {duration_analogues.max_months} months, '
+           f'median {median:g}"'
+           f' style="width:100%;height:auto;display:block">' + "".join(parts) + "</svg>")
+
+
 def all_panels() -> tuple[dict, list[dict]]:
     """(global reading, [panel_for(c) for c in every corridor]). The global
     reading is returned once -- band/TAR/as_of are identical for every
@@ -253,13 +407,18 @@ def all_panels() -> tuple[dict, list[dict]]:
     recovery_global = None
     if history is not None:
         try:
-            snap = dataclasses.asdict(recovery.snapshot(history, next(iter(tar_ingest.CORRIDORS))))
+            raw_snap = recovery.snapshot(history, next(iter(tar_ingest.CORRIDORS)))
         except ValueError:
-            snap = None
-        if snap:
-            snap.pop("episode_window_remaining", None)
-            snap.pop("corridor", None)
-            recovery_global = snap
+            raw_snap = None
+        if raw_snap:
+            recovery_global = dataclasses.asdict(raw_snap)
+            recovery_global.pop("episode_window_remaining", None)
+            recovery_global.pop("corridor", None)
+            recovery_global["trajectory_svg"] = (
+                recovery_trajectory_svg(history, raw_snap.recovery_state)
+                if raw_snap.recovery_state else None)
+            recovery_global["duration_dotplot_svg"] = duration_dotplot_svg(
+                raw_snap.duration_analogues, raw_snap.episode_months_so_far)
 
     global_reading = {
         "as_of": readings["as_of"],

@@ -84,9 +84,7 @@
 
   <p class="note" style="margin-top:var(--s4)">{{ p.onset_note }}</p>
   {% if p.episode_window_remaining %}
-  <p class="note">This corridor's own post-onset window: {{ p.episode_window_remaining.months_remaining }}
-    month(s) remaining (onset {{ p.episode_window_remaining.onset_month }},
-    {{ p.episode_window_remaining.months_since_onset }} month(s) ago).</p>
+  <div style="margin-top:var(--s4);max-width:340px">{{ rm.episode_window_gauge(p.episode_window_remaining) }}</div>
   {% endif %}
   {% if p.response_character %}<p class="note">{{ p.response_character }}</p>{% endif %}
   {% if p.low_warning %}<p class="note">{{ p.low_warning }}</p>{% endif %}

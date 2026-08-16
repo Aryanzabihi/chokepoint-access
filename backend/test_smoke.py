@@ -529,10 +529,12 @@ def test_strategy_decision_walkthrough(client):
     # Strait of Hormuz has had onset history since 1987, so >=2 completed
     # alarm episodes is a permanent historical fact, not something this
     # month's data could regress below.
-    assert "Recovery state:" in r.text
+    assert "peak &mdash;" in r.text and "now &mdash;" in r.text   # peak/now stat tiles
     assert any(f">{s}</span>" in r.text for s in
               ("ESCALATING", "PEAKED", "RECOVERING", "STALLED", "RE_ESCALATING", "RECOVERED"))
+    assert "TAR trajectory from peak" in r.text   # recovery_trajectory_svg's own aria-label
     assert "completed alarm episodes since 1985" in r.text
+    assert "completed episode durations" in r.text   # duration_dotplot_svg's own aria-label
     assert "global monthly TAR alarm series" in r.text        # scope_note, fixed text
     assert "never a projection of what happens next" in r.text  # trend_disclaimer, fixed text
 
@@ -1793,10 +1795,12 @@ def test_corridors_page(client):
     # band" and "Forty years of readings" above -- so assert count==1, and
     # only structural/fixed text, never today's live recovery_state value
     # (docs/readings.json updates monthly).
-    assert r.text.count("Recovery state:") == 1
+    assert r.text.count("peak &mdash;") == 1 and r.text.count("now &mdash;") == 1  # global stat tiles, shown once
     assert any(f">{s}</span>" in r.text for s in
               ("ESCALATING", "PEAKED", "RECOVERING", "STALLED", "RE_ESCALATING", "RECOVERED"))
+    assert r.text.count("TAR trajectory from peak") == 1   # the trajectory sparkline, shown once
     assert r.text.count("completed alarm episodes since 1985") == 1
+    assert r.text.count("completed episode durations") == 1   # the duration dot-plot, shown once
     assert r.text.count("global monthly TAR alarm series") == 1        # scope_note, fixed text
     assert r.text.count("never a projection of what happens next") == 1  # trend_disclaimer
 

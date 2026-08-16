@@ -1,38 +1,61 @@
+{% macro episode_window_gauge(ewr) %}
+{% set window_total = ewr.months_since_onset + ewr.months_remaining %}
+<p class="hint" style="margin:0 0 6px">{{ ewr.corridor }}'s own post-onset window &mdash; onset {{ ewr.onset_month }}</p>
+<div class="gauge">
+  <div class="track"><div class="fill" style="width:{{ (ewr.months_since_onset / window_total * 100) if window_total else 0 }}%"></div></div>
+  <div class="scale"><span>{{ ewr.months_since_onset }}mo elapsed</span><span>{{ ewr.months_remaining }}mo remaining</span></div>
+</div>
+{% endmacro %}
+
 {% macro recovery_block(recovery, episode_window_remaining=none) %}
 {% if recovery.recovery_state %}
 {% set rs = recovery.recovery_state %}
-<p class="m">Recovery state:
+<div class="row" style="justify-content:space-between;align-items:baseline;gap:var(--s3)">
   <span class="badge {{ 'hot' if rs.state in ('ESCALATING', 'RE_ESCALATING') else ('ok' if rs.state in ('RECOVERING', 'RECOVERED') else 'warn') }}">{{ rs.state }}</span>
-  &mdash; peaked at {{ rs.peak_value }} ({{ rs.peak_band }}) {{ rs.months_since_peak }} month(s) ago
-  {%- if rs.months_since_episode_end is not none %}, episode closed {{ rs.months_since_episode_end }} month(s) ago{% endif -%},
-  now {{ rs.current_value }} ({{ rs.current_band }}).</p>
+  <span class="hint" style="margin:0">
+    {%- if rs.months_since_episode_end is not none -%}
+      episode closed {{ rs.months_since_episode_end }} month(s) ago
+    {%- else -%}
+      peaked {{ rs.months_since_peak }} month(s) ago
+    {%- endif -%}
+  </span>
+</div>
+
+<div class="stats" style="margin-top:var(--s3)">
+  <div class="stat"><b>{{ "%.2f"|format(rs.peak_value) }}</b><span>peak &mdash; {{ rs.peak_band }}, {{ rs.peak_month }}</span></div>
+  <div class="stat"><b>{{ "%.2f"|format(rs.current_value) }}</b><span>now &mdash; {{ rs.current_band }}, {{ rs.current_month }}</span></div>
+</div>
+
+{% if recovery.trajectory_svg %}
+<div style="margin-top:var(--s4)">{{ recovery.trajectory_svg | safe }}</div>
+{% endif %}
 {% endif %}
 
-{% if recovery.duration_analogues %}
-{% set da = recovery.duration_analogues %}
-<p class="m" style="margin-top:var(--s3)">{{ da.n }} completed alarm episodes since 1985 ran
-{{ da.min_months }}&ndash;{{ da.max_months }} months (median {{ da.median_months }}).</p>
-{% else %}
-<p class="empty" style="margin-top:var(--s3)">Not enough completed alarm episodes on record for
-a duration analogue.</p>
-{% endif %}
-
-{% if recovery.conditional_remaining %}
-{% set cr = recovery.conditional_remaining %}
-<p class="m">Of those, {{ cr.n }} ran at least as long as this episode's
-{{ cr.months_so_far }} months so far &mdash; they went on {{ cr.min_remaining }}&ndash;{{ cr.max_remaining }}
-more months (median {{ cr.median_remaining }}).</p>
-{% elif recovery.alarm_now %}
-<p class="empty">Not enough historical episodes ran this long already to say how much longer
-&mdash; insufficient_data, not a guess.</p>
-{% endif %}
+<div style="margin-top:var(--s5)">
+  {% if recovery.duration_analogues %}
+  {% set da = recovery.duration_analogues %}
+  <p class="hint" style="margin:0 0 var(--s2)">{{ da.n }} completed alarm episodes since 1985
+    &mdash; {{ da.min_months }}&ndash;{{ da.max_months }} months, median {{ da.median_months }}</p>
+  {% if recovery.duration_dotplot_svg %}{{ recovery.duration_dotplot_svg | safe }}{% endif %}
+  {% if recovery.conditional_remaining %}
+  {% set cr = recovery.conditional_remaining %}
+  <p class="hint" style="margin-top:var(--s2)">{{ cr.n }} of those ran at least this episode's own
+    {{ cr.months_so_far }} months so far (highlighted) &mdash; they went on {{ cr.min_remaining }}&ndash;{{ cr.max_remaining }}
+    more months, median {{ cr.median_remaining }}.</p>
+  {% elif recovery.episode_months_so_far %}
+  <p class="hint" style="margin-top:var(--s2)">Too few historical episodes ran at least this episode's own
+    {{ recovery.episode_months_so_far }} months (see the highlighted dots) to say how much longer &mdash;
+    insufficient_data, not a guess.</p>
+  {% endif %}
+  {% else %}
+  <p class="empty">Not enough completed alarm episodes on record for a duration analogue.</p>
+  {% endif %}
+</div>
 
 {% if episode_window_remaining %}
-{% set ewr = episode_window_remaining %}
-<p class="m">{{ ewr.corridor }}'s own post-onset window: {{ ewr.months_remaining }} month(s)
-remaining (onset {{ ewr.onset_month }}, {{ ewr.months_since_onset }} month(s) ago).</p>
+<div style="margin-top:var(--s5)">{{ episode_window_gauge(episode_window_remaining) }}</div>
 {% endif %}
 
-<p class="hint" style="margin-top:var(--s3)">{{ recovery.scope_note }}</p>
+<p class="hint" style="margin-top:var(--s5)">{{ recovery.scope_note }}</p>
 <p class="hint">{{ recovery.trend_disclaimer }}</p>
 {% endmacro %}

@@ -38,7 +38,7 @@ import recovery  # noqa: E402
 from decision_engine import build_decision, decision_brief_html  # noqa: E402
 from intake import FIELDS, INCOTERM_GROUPS, fields_by_group, fields_for, template  # noqa: E402
 
-from . import engine  # noqa: E402
+from . import corridor_panel, engine  # noqa: E402
 
 WARRISK_PATH = SRC / "warrisk.csv"
 JWC_PATH = SRC / "warrisk_jwc.csv"
@@ -457,4 +457,9 @@ def recovery_snapshot(result: dict) -> dict | None:
         snap = recovery.snapshot(history, corridor)
     except ValueError:
         return None
-    return dataclasses.asdict(snap)
+    out = dataclasses.asdict(snap)
+    out["trajectory_svg"] = (corridor_panel.recovery_trajectory_svg(history, snap.recovery_state)
+                             if snap.recovery_state else None)
+    out["duration_dotplot_svg"] = corridor_panel.duration_dotplot_svg(
+        snap.duration_analogues, snap.episode_months_so_far)
+    return out
