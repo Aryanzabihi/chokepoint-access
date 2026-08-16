@@ -132,4 +132,46 @@
     {% endif %}
   </section>
 </div>
+
+<section class="panel">
+  <h2>Demand, disruption &amp; economic inputs</h2>
+  <p class="hint" style="margin-top:0">Collected here once so a decision built from this order
+  never has to ask again &mdash; <a href="/orders/{{ order.id }}/edit">edit</a> to add or change any
+  of these.</p>
+  {% set ns = namespace(any_set=false) %}
+  {% for key, label, fields in field_groups %}
+    {% set rows = [] %}
+    {% for field in fields %}
+      {% set v = order[field.name] %}
+      {% if v is not none %}{% set _ = rows.append((field, v)) %}{% endif %}
+    {% endfor %}
+    {% if rows %}
+    {% set ns.any_set = true %}
+    <p class="hint" style="margin:var(--s4) 0 0"><strong>{{ label }}</strong></p>
+    <div class="stats" style="margin-top:var(--s3)">
+      {% for field, v in rows %}
+      <div class="stat"><b>{% if field.unit in ('fraction_pa', 'fraction') %}{{ "{:.1f}".format(v * 100) }}%{% elif field.unit == 'currency' %}{{ "{:,.0f}".format(v) }}{% else %}{{ v }}{% endif %}</b>
+        <span>{{ display_label(field.name) }}</span></div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endfor %}
+  {% set has_probability = order.client_probability_estimate is not none or order.probability_range_low is not none %}
+  {% if has_probability %}
+  {% set ns.any_set = true %}
+  <p class="hint" style="margin:var(--s4) 0 0"><strong>Probability</strong></p>
+  <div class="stats" style="margin-top:var(--s3)">
+    {% if order.client_probability_estimate is not none %}
+    <div class="stat"><b>{{ "{:.1f}".format(order.client_probability_estimate * 100) }}%</b><span>disruption probability</span></div>
+    {% endif %}
+    {% if order.probability_range_low is not none and order.probability_range_high is not none %}
+    <div class="stat"><b>{{ "{:.1f}".format(order.probability_range_low * 100) }}%&ndash;{{ "{:.1f}".format(order.probability_range_high * 100) }}%</b><span>sensitivity range</span></div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if not ns.any_set %}
+  <p class="empty">Nothing entered yet &mdash; <a href="/orders/{{ order.id }}/edit">add it</a> so
+  a decision built from this order doesn't have to ask.</p>
+  {% endif %}
+</section>
 {% endblock %}

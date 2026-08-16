@@ -786,6 +786,96 @@ def test_order_walkthrough(client):
     assert r.status_code == 404
 
 
+def test_order_collects_everything_decision_no_longer_asks(client):
+    """The actual point of moving demand_supply/disruption_assumptions/
+    economic_exposure onto ProcurementOrder: an order with all of this on
+    file, and a decision built from it that gets every one of these values
+    from the order's own hidden inputs -- no field_* the analyst types by
+    hand at decision time, matching the real rendered form's own hidden-
+    input behaviour (order_field() macro), not a shortcut around it."""
+    client.post("/signup", data={"email": "full-order@example.com",
+                                  "password": "correct horse battery staple"})
+
+    order_data = {
+        "corridor": "Strait of Hormuz", "stage": "pre_order", "sku": "Full order test",
+        "quantity": "50000", "quantity_unit": "MT", "cargo_value": "5000000",
+        "incoterm": "FOB", "supplier": "Supplier A", "currency": "EUR",
+        "field_days_of_cover": "40",
+        "field_forecast_quantity": "45000", "field_forecast_window_days": "90",
+        "field_current_inventory": "3000", "field_inbound_confirmed_quantity": "1500",
+        "field_safety_stock": "1000", "field_delay_days_estimate": "18",
+        "field_wacc_pct": "9", "field_carrying_cost_pct_pa": "12",
+        "field_gross_margin_pct": "35", "field_penalty_per_day": "2500",
+        "field_disrupted_freight_quote": "600000", "field_reroute_quote": "700000",
+        "field_war_risk_premium_quote": "340000", "field_emergency_replacement_quote": "900000",
+        "client_probability_estimate": "62", "probability_range_low": "20",
+        "probability_range_high": "75",
+    }
+    r = client.post("/orders", data=order_data, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    order_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    # saved and visible on the order's own page, not just accepted silently
+    r = client.get(f"/orders/{order_id}")
+    assert r.status_code == 200
+    assert "9.0%" in r.text          # wacc_pct
+    assert "62.0%" in r.text         # client_probability_estimate
+    assert "Nothing entered yet" not in r.text
+
+    # the decision form shows every one of these as order-sourced. Not a
+    # blanket "no gaps at all" check -- ship_date/contract_freight_rate/
+    # contract_transit_time_days are pre-existing exposure_basics fields
+    # this order never set (by design, collected via "advance stage" later,
+    # not at creation -- see orders_new.html's own subtitle), so those three
+    # legitimately still show "Not on order" here; that's correct, expected
+    # behaviour, not something this change broke.
+    r = client.get(f"/strategy-decisions/new?order_id={order_id}")
+    assert r.status_code == 200
+    for name in ("forecast_quantity", "current_inventory", "safety_stock",
+                "delay_days_estimate", "wacc_pct", "war_risk_premium_quote"):
+        pos = r.text.index(f'name="field_{name}"')
+        assert "from the order" in r.text[max(0, pos - 20):pos + 400], \
+            f"{name} should be order-sourced, not asked again"
+    # demand_supply(6) + disruption_assumptions(1) + economic_exposure(8) +
+    # probability(2, one block for the point estimate, one for the range) = 17
+    assert r.text.count("from the order") >= 17
+
+    # build the decision replicating EXACTLY what those hidden inputs (not
+    # anything hand-typed) would post -- the real proof this needs nothing
+    # else, mirroring order_field()'s own pct(*100)/plain-passthrough rules
+    hidden_form = {
+        "scenario_id": f"Full order test #{order_id}", "corridor": "Strait of Hormuz",
+        "incoterm": "FOB", "tier": "3", "order_id": str(order_id),
+        "field_ship_date": "", "field_cargo_value": "5000000", "field_quantity": "50000",
+        "field_quantity_unit": "MT", "field_days_of_cover": "40", "field_forecast_quantity": "45000",
+        "field_forecast_window_days": "90", "field_current_inventory": "3000",
+        "field_inbound_confirmed_quantity": "1500", "field_safety_stock": "1000",
+        "field_delay_days_estimate": "18", "field_wacc_pct": "9",
+        "field_carrying_cost_pct_pa": "12", "field_gross_margin_pct": "35",
+        "field_penalty_per_day": "2500", "field_disrupted_freight_quote": "600000",
+        "field_reroute_quote": "700000", "field_war_risk_premium_quote": "340000",
+        "field_emergency_replacement_quote": "900000",
+        "client_probability_estimate": "62", "probability_range_low": "20",
+        "probability_range_high": "75",
+    }
+    r = client.post("/strategy-decisions", data=hidden_form)
+    assert r.status_code == 200, r.text
+    r = client.post("/strategy-decisions/analyze", data=hidden_form, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    api = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()
+    input_data, computed = api["input"], api["result"]
+    assert input_data["fields"]["wacc_pct"] == 0.09
+    assert input_data["fields"]["war_risk_premium_quote"] == 340000.0
+    assert input_data["fields"]["forecast_quantity"] == 45000.0
+    assert input_data["client_probability_estimate"] == 0.62
+    assert input_data["probability_range"] == [0.20, 0.75]
+    # proves the probability genuinely came from the order, not a fallback
+    assert computed["probability_used"] == 0.62
+    assert computed["probability_is_published_fallback"] is False
+
+
 def test_order_edit_and_delete(client):
     """Edit corrects the order's own descriptive fields (never the
     stage-transition ones advance-stage owns); delete is blocked while any
@@ -1603,9 +1693,11 @@ def test_settings(client):
     assert r.text.count("From your") == 4
     assert 'href="/settings"' in r.text.split("From your")[1][:50]
 
-    # but never a Tier-3 market quote -- that stays a live, per-decision input
-    assert ('id="field_disrupted_freight_quote" name="field_disrupted_freight_quote" step="any"\n'
-           '             value="">') in r.text
+    # but never a Tier-3 market quote -- that stays a live, per-decision input.
+    # Substring-near-the-id rather than an exact whitespace match, so this
+    # doesn't break on template reformatting alone.
+    quote_pos = r.text.index('id="field_disrupted_freight_quote"')
+    assert 'value="">' in r.text[quote_pos:quote_pos + 200]
 
 
 def test_map_page(client):

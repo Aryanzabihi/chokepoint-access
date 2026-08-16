@@ -182,13 +182,23 @@ def _carry_forward_fields(data: dict) -> dict[str, object]:
 _DEMAND_SUPPLY_FIELDS = ("forecast_quantity", "forecast_window_days", "current_inventory",
                         "inbound_confirmed_quantity", "safety_stock")
 
-# Every field in intake.py's "exposure_basics" group has a same-named
-# attribute directly on ProcurementOrder -- the whole reason that group can
-# collapse into a read-only order recap instead of a data-entry section
+# Every field in intake.FIELDS now has a same-named attribute directly on
+# ProcurementOrder (exposure_basics originally; demand_supply/disruption_
+# assumptions/economic_exposure added so the Order form -- not the Decision
+# form -- is where all of this gets collected) -- the whole reason a field
+# can collapse into a read-only order recap instead of a data-entry input
 # when a decision is linked to an order (never ask the user twice for
-# something the order already has on file).
-_ORDER_SOURCED_FIELDS = ("ship_date", "cargo_value", "quantity", "quantity_unit",
-                        "contract_freight_rate", "contract_transit_time_days")
+# something the order already has on file). Kept as its own tuple derived
+# from FIELDS, rather than hand-listing 21 names, so the two can never drift
+# apart silently.
+_ORDER_SOURCED_FIELDS = tuple(f.name for f in FIELDS)
+
+# Not FieldSpecs (top-level intake keys, not part of the tiered/graded
+# schema), but the same order-sourced treatment applies -- handled specially
+# in _template_context()/the template since order_field() only knows how to
+# render a FieldSpec.
+_ORDER_SOURCED_PROBABILITY_FIELDS = ("client_probability_estimate",
+                                     "probability_range_low", "probability_range_high")
 
 
 def _order_field_values(order) -> dict[str, object]:
@@ -198,7 +208,7 @@ def _order_field_values(order) -> dict[str, object]:
     everywhere else in this form."""
     if order is None:
         return {}
-    return {name: v for name in _ORDER_SOURCED_FIELDS
+    return {name: v for name in _ORDER_SOURCED_FIELDS + _ORDER_SOURCED_PROBABILITY_FIELDS
             if (v := getattr(order, name)) is not None}
 
 

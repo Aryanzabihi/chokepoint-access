@@ -231,4 +231,33 @@ class ProcurementOrder(SQLModel, table=True):
     supplier_lead_time_days: float | None = None
     alternative_supplier: str | None = None
     notes: str | None = None
+    # Everything below mirrors intake.FIELDS' demand_supply/disruption_assumptions/
+    # economic_exposure groups 1:1 by name (exposure_basics already matched above,
+    # pre-existing) -- collected once here instead of re-asked on every decision
+    # built from this order. strategy_decision.py's _ORDER_SOURCED_FIELDS covers
+    # the full FIELDS list now, not just exposure_basics; a decision can still
+    # override any of these for itself without touching the order (see
+    # order_field()'s "for this decision only" branch), and the live market
+    # quotes (disrupted_freight_quote..emergency_replacement_quote) are exactly
+    # what the existing /recalculate loop already exists to refresh later.
+    days_of_cover: float | None = None
+    delay_days_estimate: float | None = None
+    forecast_quantity: float | None = None
+    forecast_window_days: float | None = None
+    current_inventory: float | None = None
+    inbound_confirmed_quantity: float | None = None
+    safety_stock: float | None = None
+    wacc_pct: float | None = None
+    carrying_cost_pct_pa: float | None = None
+    gross_margin_pct: float | None = None
+    penalty_per_day: float | None = None
+    disrupted_freight_quote: float | None = None
+    reroute_quote: float | None = None
+    war_risk_premium_quote: float | None = None
+    emergency_replacement_quote: float | None = None
+    # Not part of intake.FIELDS (top-level intake keys, not a FieldSpec) but the
+    # same "collect once, on the order" treatment applies.
+    client_probability_estimate: float | None = None
+    probability_range_low: float | None = None
+    probability_range_high: float | None = None
     created_at: datetime = Field(default_factory=utcnow)

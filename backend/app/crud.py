@@ -353,6 +353,20 @@ def list_procurement_orders_for_exposure(session: Session,
         .order_by(ProcurementOrder.created_at.desc())))
 
 
+# The full intake.FIELDS set not already covered by create_procurement_order()'s
+# own explicit params above (exposure_basics) -- demand_supply/disruption_
+# assumptions/economic_exposure, plus the 3 top-level probability fields. Passed
+# as **fields (only-if-supplied) rather than ~18 more explicit params, matching
+# update_procurement_order()'s own existing pattern just below.
+_INTAKE_ORDER_FIELDS = (
+    "days_of_cover", "delay_days_estimate", "forecast_quantity", "forecast_window_days",
+    "current_inventory", "inbound_confirmed_quantity", "safety_stock", "wacc_pct",
+    "carrying_cost_pct_pa", "gross_margin_pct", "penalty_per_day", "disrupted_freight_quote",
+    "reroute_quote", "war_risk_premium_quote", "emergency_replacement_quote",
+    "client_probability_estimate", "probability_range_low", "probability_range_high",
+)
+
+
 def create_procurement_order(session: Session, user: User, *, corridor: str, stage: str,
                               sku: str, quantity: float, quantity_unit: str,
                               cargo_value: float | None = None, incoterm: str | None = None,
@@ -362,7 +376,8 @@ def create_procurement_order(session: Session, user: User, *, corridor: str, sta
                               alternative_supplier: str | None = None,
                               unit_price: float | None = None,
                               client_id: int | None = None,
-                              exposure_id: int | None = None) -> ProcurementOrder:
+                              exposure_id: int | None = None,
+                              **intake_fields) -> ProcurementOrder:
     order = ProcurementOrder(owner_user_id=user.id, client_id=client_id, exposure_id=exposure_id,
                               corridor=corridor, stage=stage, sku=sku, quantity=quantity,
                               quantity_unit=quantity_unit, cargo_value=cargo_value,
@@ -370,6 +385,9 @@ def create_procurement_order(session: Session, user: User, *, corridor: str, sta
                               origin=origin, destination=destination,
                               supplier_lead_time_days=supplier_lead_time_days,
                               alternative_supplier=alternative_supplier, unit_price=unit_price)
+    for name in _INTAKE_ORDER_FIELDS:
+        if name in intake_fields and intake_fields[name] is not None:
+            setattr(order, name, intake_fields[name])
     session.add(order)
     session.commit()
     session.refresh(order)
@@ -420,7 +438,7 @@ def advance_procurement_order_stage(session: Session, user: User, order: Procure
 _EDITABLE_ORDER_FIELDS = (
     "corridor", "sku", "quantity", "quantity_unit", "cargo_value", "incoterm",
     "supplier", "currency", "notes",
-)
+) + _INTAKE_ORDER_FIELDS
 
 
 def update_procurement_order(session: Session, user: User, order: ProcurementOrder,

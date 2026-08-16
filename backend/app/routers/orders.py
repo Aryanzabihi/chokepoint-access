@@ -27,14 +27,26 @@ from .. import crud
 from ..db import get_session
 from ..deps import current_principal, current_user
 from ..models import User
-from ..strategy_decision import CORRIDORS, INCOTERM_GROUPS
+from ..strategy_decision import CORRIDORS, FIELDS, INCOTERM_GROUPS, display_label, fields_by_group, intake
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
+templates.env.globals["display_label"] = display_label
 
 STAGES = ("pre_order", "po_placed", "in_transit", "delivered")
 STAGE_LABELS = {"pre_order": "Pre-order", "po_placed": "PO placed",
                "in_transit": "In transit", "delivered": "Delivered"}
+
+# The full intake.FIELDS set the "New order"/"Edit order" forms now collect
+# alongside the original requirement fields above -- everything the Decision
+# form used to ask for, collected once here instead (see crud.py's own
+# _INTAKE_ORDER_FIELDS, the same list). exposure_basics is deliberately
+# excluded: those already have their own named form fields above
+# (quantity/cargo_value/etc.), collected via the plain requirement inputs,
+# not the generic field_ prefix these use.
+_INTAKE_FIELD_GROUPS = ("demand_supply", "disruption_assumptions", "economic_exposure")
+_INTAKE_FIELDS = tuple(f for f in FIELDS if f.group in _INTAKE_FIELD_GROUPS)
+_PCT_UNITS = {"fraction_pa", "fraction"}
 
 
 def _num(form, key: str) -> float | None:
@@ -45,6 +57,28 @@ def _num(form, key: str) -> float | None:
 def _text(form, key: str) -> str | None:
     v = form.get(key)
     return v if v not in (None, "") else None
+
+
+def _pct(form, key: str) -> float | None:
+    v = _num(form, key)
+    return None if v is None else v / 100
+
+
+def _intake_field_value(form, spec) -> float | None:
+    key = f"field_{spec.name}"
+    return _pct(form, key) if spec.unit in _PCT_UNITS else _num(form, key)
+
+
+def _intake_fields_from_form(form) -> dict[str, float | None]:
+    """The 15 demand_supply/disruption_assumptions/economic_exposure fields,
+    plus the 3 top-level probability fields -- same field_ prefix and
+    percentage-unit convention strategy_decisions.py's own _field_value()
+    already established, reused here rather than reinvented."""
+    out = {spec.name: _intake_field_value(form, spec) for spec in _INTAKE_FIELDS}
+    out["client_probability_estimate"] = _pct(form, "client_probability_estimate")
+    out["probability_range_low"] = _pct(form, "probability_range_low")
+    out["probability_range_high"] = _pct(form, "probability_range_high")
+    return out
 
 
 # --------------------------------------------------------------- dashboard ---
@@ -64,6 +98,7 @@ def new_page(request: Request, user: User = Depends(current_user),
     return templates.TemplateResponse(request, "orders_new.html",
         {"user": user, "corridors": sorted(CORRIDORS), "incoterms": sorted(INCOTERM_GROUPS),
          "stages": STAGES, "stage_labels": STAGE_LABELS, "error": None,
+         "field_groups": fields_by_group(_INTAKE_FIELDS),
          "exposure_id": linked_exposure.id if linked_exposure else None,
          "linked_exposure": linked_exposure})
 
@@ -78,6 +113,7 @@ async def create_page(request: Request, exposure_id: int | None = Form(None),
         return templates.TemplateResponse(request, "orders_new.html",
             {"user": user, "corridors": sorted(CORRIDORS), "incoterms": sorted(INCOTERM_GROUPS),
              "stages": STAGES, "stage_labels": STAGE_LABELS,
+             "field_groups": fields_by_group(_INTAKE_FIELDS),
              "error": f"unknown or missing corridor. Known: {sorted(CORRIDORS)}",
              "exposure_id": exposure_id, "linked_exposure": exposure}, status_code=422)
     order = crud.create_procurement_order(
@@ -87,7 +123,8 @@ async def create_page(request: Request, exposure_id: int | None = Form(None),
         incoterm=_text(form, "incoterm"), supplier=_text(form, "supplier"),
         currency=form.get("currency") or "EUR",
         client_id=exposure.client_id if exposure else None,
-        exposure_id=exposure.id if exposure else None)
+        exposure_id=exposure.id if exposure else None,
+        **_intake_fields_from_form(form))
     return RedirectResponse(f"/orders/{order.id}", status_code=303)
 
 
@@ -102,6 +139,7 @@ def detail_page(order_id: int, request: Request, user: User = Depends(current_us
         for d in crud.list_strategy_decisions_for_order(session, order.id)]
     return templates.TemplateResponse(request, "order_detail.html",
         {"user": user, "order": order, "stages": STAGES, "stage_labels": STAGE_LABELS,
+         "field_groups": fields_by_group(_INTAKE_FIELDS),
          "strategy_decisions": strategy_decisions})
 
 
@@ -113,7 +151,8 @@ def edit_page(order_id: int, request: Request, user: User = Depends(current_user
         raise HTTPException(404, "order not found")
     return templates.TemplateResponse(request, "orders_edit.html",
         {"user": user, "order": order, "corridors": sorted(CORRIDORS),
-         "incoterms": sorted(INCOTERM_GROUPS), "error": None})
+         "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(_INTAKE_FIELDS),
+         "error": None})
 
 
 @router.post("/orders/{order_id}/edit")
@@ -127,7 +166,7 @@ async def update_page(order_id: int, request: Request, user: User = Depends(curr
     if corridor not in CORRIDORS:
         return templates.TemplateResponse(request, "orders_edit.html",
             {"user": user, "order": order, "corridors": sorted(CORRIDORS),
-             "incoterms": sorted(INCOTERM_GROUPS),
+             "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(_INTAKE_FIELDS),
              "error": f"unknown or missing corridor. Known: {sorted(CORRIDORS)}"},
             status_code=422)
     crud.update_procurement_order(
@@ -135,7 +174,8 @@ async def update_page(order_id: int, request: Request, user: User = Depends(curr
         quantity=_num(form, "quantity"), quantity_unit=_text(form, "quantity_unit"),
         cargo_value=_num(form, "cargo_value"), incoterm=_text(form, "incoterm"),
         supplier=_text(form, "supplier"), currency=_text(form, "currency"),
-        notes=_text(form, "notes"))
+        notes=_text(form, "notes"),
+        **_intake_fields_from_form(form))
     return RedirectResponse(f"/orders/{order.id}", status_code=303)
 
 
