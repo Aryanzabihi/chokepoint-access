@@ -28,6 +28,18 @@
     <div class="v {{ 'dim' if not global_reading.horizon }}">{{ global_reading.horizon or "n/a — a corridor is in episode" }}</div></div>
 </div>
 
+{% if global_reading.history_svg %}
+<div class="panel" style="margin-bottom:var(--s5)">
+  <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-faint);margin:0 0 var(--s3);padding-bottom:8px;
+    border-bottom:1px solid var(--rule-soft)">Forty years of readings</h3>
+  {{ global_reading.history_svg | safe }}
+  <p class="hint" style="margin-top:var(--s2)">{{ global_reading.history_months_total }} months, {{ global_reading.history_span }}. {{ global_reading.history_months_alarm }} were at or above the alert threshold (amber).
+    Every threshold is built only from months before the one it judges, so this is not hindsight.
+    This is the same global series every corridor's band and cutoff come from; it is one line, not seven, for the same reason the band above is shown once.</p>
+</div>
+{% endif %}
+
 {% for p in panels %}
 <div class="panel" style="margin-bottom:var(--s4)">
   <div class="row" style="justify-content:space-between;align-items:baseline">
@@ -50,6 +62,7 @@
     <div class="cell"><div class="k">Attention share (this month)</div>
       <div class="v {{ 'dim' if p.share is none }}">
         {% if p.share is not none %}{{ p.share }}% <span class="hint">vs. {{ p.share_avg }}% long-run avg, z={{ p.salience_z }}</span>
+        {% if p.share_meter_svg %}{{ p.share_meter_svg | safe }}{% endif %}
         {% else %}no country-level coverage{% endif %}</div></div>
     <div class="cell"><div class="k">Attribution</div>
       <div class="v"><span class="badge {{ 'warn' if p.attribution == 'proxy' else 'ok' }}">{{ p.attribution }}</span></div></div>

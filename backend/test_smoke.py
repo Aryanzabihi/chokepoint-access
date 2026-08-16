@@ -1319,6 +1319,23 @@ def test_corridors_page(client):
     assert "0 <span" in suez_block and "of 8 since 1985" in suez_block
     assert "STRUCTURAL" in suez_block and "EPISODE_ANALOGUE" in suez_block
 
+    # Forty years of readings (corridor_panel.history_timeline_svg): the
+    # global history chart, shown once -- same reasoning as "Global band"
+    # above, it's one series, not seven. Structural/fixed text only, not
+    # today's live month count or alarm count (docs/readings.json updates
+    # monthly, same caution test_strategy_decision_walkthrough already
+    # applies to recovery_state -- asserting an exact live number here
+    # would break next month for reasons unrelated to a real regression).
+    assert r.text.count("Forty years of readings") == 1
+    assert r.text.count('aria-label="Global TAR reading') == 1
+    assert "Every threshold is built only from months before the one it judges" in r.text
+    assert "not hindsight" in r.text
+
+    # Attention-share meter (corridor_panel.share_meter_svg): at least one
+    # corridor has a measurable share, so at least one meter renders --
+    # not asserting a specific corridor's percentage, which is also live.
+    assert "world risk coverage" in r.text
+
     # Hormuz: 4 of 8 onsets, both grades EPISODE_ANALOGUE (has both onsets
     # and tested incidents), proxy attribution (Iran unpublished)
     hormuz_start = r.text.index("Strait of Hormuz")

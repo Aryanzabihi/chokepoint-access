@@ -25,6 +25,7 @@ in separate fields; never merge them.
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -80,6 +81,133 @@ def panel_for(corridor: str, readings: dict, history: dict | None) -> dict:
     }
 
 
+def history_timeline_svg(history: dict) -> str:
+    """Server-rendered SVG line chart of the full global TAR history --
+    same no-client-JS pattern as strategy_decision.act_wait_dial_svg(), and
+    the same underlying data recovery.py's recovery_state already reads
+    (engine.history_snapshot() -> docs/readings.json['history']), just
+    drawn as a line instead of reduced to a state label.
+
+    The line is drawn in var(--ink-faint), except any run of months where
+    history['alarm'] is true, which is drawn in var(--amber) -- so the 166-
+    ish alarm months (of 488) read as visible episode bands rather than
+    needing a separate tick mark on every one of them (dataviz skill:
+    "never a number on every point"). history['cut'] (the walk-forward
+    threshold alarm is computed against) is not drawn as its own line --
+    it's what the amber coloring already encodes, and it is None for the
+    early months before it's computable, so a second line would need its
+    own gap-handling for no added information.
+    """
+    months, tar, alarm = history["months"], history["tar"], history["alarm"]
+    n = len(months)
+    W, H = 900, 200
+    ML, MR, MT, MB = 34, 8, 10, 22
+    plot_w, plot_h = W - ML - MR, H - MT - MB
+    lo, hi = 0.0, max(tar) * 1.08
+
+    def px(i: int) -> float:
+        return ML + (i / (n - 1)) * plot_w
+
+    def py(v: float) -> float:
+        return MT + (1 - (v - lo) / (hi - lo)) * plot_h
+
+    points = [(px(i), py(tar[i])) for i in range(n)]
+
+    # Contiguous alarm/non-alarm runs, each starting one point into the
+    # previous run so adjacent segments share their boundary point and the
+    # line never visibly gaps at a color change.
+    runs: list[tuple[bool, int, int]] = []
+    start = 0
+    for i in range(1, n):
+        if alarm[i] != alarm[start]:
+            runs.append((alarm[start], start, i - 1))
+            start = i - 1
+    runs.append((alarm[start], start, n - 1))
+
+    segs = []
+    for is_alarm, s, e in runs:
+        d = "M " + " L ".join(f"{x:.1f} {y:.1f}" for x, y in points[s:e + 1])
+        color = "var(--amber)" if is_alarm else "var(--ink-faint)"
+        segs.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="2" '
+                    f'stroke-linejoin="round" stroke-linecap="round"/>')
+
+    grid = []
+    for gv in (lo, hi):
+        gy = py(gv)
+        grid.append(f'<line x1="{ML}" y1="{gy:.1f}" x2="{W - MR}" y2="{gy:.1f}" '
+                    f'stroke="var(--rule-soft)" stroke-width="1"/>')
+        grid.append(f'<text x="{ML - 6}" y="{gy + 3:.1f}" text-anchor="end" '
+                    f'style="font:10px var(--mono)" fill="var(--ink-faint)">{gv:.1f}</text>')
+
+    ticks = []
+    seen_years: set[int] = set()
+    for i, m in enumerate(months):
+        yr = int(m[:4])
+        if yr % 5 == 0 and yr not in seen_years and m[5:7] in ("01", "02", "03"):
+            seen_years.add(yr)
+            tx = px(i)
+            ticks.append(f'<text x="{tx:.1f}" y="{H - 4}" text-anchor="middle" '
+                        f'style="font:10px var(--mono)" fill="var(--ink-faint)">{yr}</text>')
+
+    # Direct label on the endpoint only (dataviz skill: label the endpoint
+    # or the extreme, never every point) -- "where are we now," in the same
+    # color the line itself is currently drawn in.
+    last_x, last_y = points[-1]
+    end_color = "var(--amber)" if alarm[-1] else "var(--ink-faint)"
+    endpoint = (f'<circle cx="{last_x:.1f}" cy="{last_y:.1f}" r="4" fill="{end_color}" '
+               f'stroke="var(--sea)" stroke-width="2"/>'
+               f'<text x="{last_x - 8:.1f}" y="{last_y - 10:.1f}" text-anchor="end" '
+               f'style="font:600 11px var(--mono)" fill="{end_color}">{tar[-1]:.2f}</text>')
+
+    return (f'<svg viewBox="0 0 {W} {H}" role="img" '
+           f'aria-label="Global TAR reading, {months[0]} to {months[-1]}, current value '
+           f'{tar[-1]:.2f}" style="width:100%;height:auto;display:block">'
+           + "".join(grid) + "".join(segs) + endpoint + "".join(ticks) + "</svg>")
+
+
+def share_meter_svg(share: float | None, share_avg: float | None,
+                    max_share: float | None) -> str | None:
+    """Meter (dataviz skill: "a single ratio against a limit" -> Meter, same-
+    ramp track, not a 2-slice pie) for one corridor's current attention
+    share against its own long-run average. max_share is computed once
+    across every corridor in all_panels() and passed in here, so every
+    corridor's meter shares one scale -- a corridor is never silently
+    rescaled onto its own axis, which would make bars look comparable when
+    they aren't (the same reasoning the dataviz skill gives against dual-
+    axis charts). Purely the visual bar -- the numeric value/average
+    already render as text next to this in corridors.html, so the SVG
+    doesn't repeat the number a second time on top of itself.
+
+    None when share (or max_share, which is None only when no corridor
+    has a measurable share at all) is unmeasured -- the proxy corridors
+    with no country-level coverage, same gating corridors.html already
+    applies to the text version of this fact."""
+    if share is None or max_share is None:
+        return None
+    W, H, TRACK_H = 200, 14, 8
+    track_y = (H - TRACK_H) / 2
+
+    def x(v: float) -> float:
+        return (min(max(v, 0.0), max_share) / max_share) * W
+
+    fill_w = x(share)
+    parts = [
+        f'<rect x="0" y="{track_y:.1f}" width="{W}" height="{TRACK_H}" '
+        f'rx="{TRACK_H / 2}" fill="var(--rule-soft)"/>',
+        f'<rect x="0" y="{track_y:.1f}" width="{fill_w:.1f}" height="{TRACK_H}" '
+        f'rx="{TRACK_H / 2}" fill="var(--sound)"/>',
+    ]
+    aria = f"{share:.1f}% of world risk coverage"
+    if share_avg is not None:
+        ax = x(share_avg)
+        parts.append(f'<line x1="{ax:.1f}" y1="0" x2="{ax:.1f}" y2="{H}" '
+                    f'stroke="var(--ink-faint)" stroke-width="1.5"/>')
+        aria += f", long-run average {share_avg:.1f}%"
+    return (f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{aria}" '
+           f'style="width:100%;max-width:200px;height:auto;display:block;margin-top:4px">'
+           + "".join(parts) + "</svg>")
+
+
 def all_panels() -> tuple[dict, list[dict]]:
     """(global reading, [panel_for(c) for c in every corridor]). The global
     reading is returned once -- band/TAR/as_of are identical for every
@@ -92,11 +220,22 @@ def all_panels() -> tuple[dict, list[dict]]:
     except FileNotFoundError:
         history = None
     panels = [panel_for(c, readings, history) for c in sorted(tar_ingest.CORRIDORS)]
+
+    shares = [v for p in panels for v in (p["share"], p["share_avg"]) if v is not None]
+    max_share = math.ceil(max(shares) / 2) * 2 if shares else None
+    for p in panels:
+        p["share_meter_svg"] = share_meter_svg(p["share"], p["share_avg"], max_share)
+
     global_reading = {
         "as_of": readings["as_of"],
         "band": readings["band"],
         "percentile_range": readings["percentile_range"],
         "horizon": readings["horizon"],
         "alarm_now": readings.get("alarm_now"),
+        "history_svg": history_timeline_svg(history) if history else None,
+        "history_months_total": len(history["months"]) if history else None,
+        "history_months_alarm": sum(history["alarm"]) if history else None,
+        "history_span": (f'{history["months"][0]} to {history["months"][-1]}'
+                         if history else None),
     }
     return global_reading, panels
