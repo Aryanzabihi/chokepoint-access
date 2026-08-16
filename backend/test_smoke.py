@@ -577,6 +577,53 @@ def test_strategy_decision_walkthrough(client):
     assert f"{expected_avoidable:,}" in r.text, (expected_avoidable, r.text)
 
 
+def test_decision_detail_tolerates_missing_procurement_window(client):
+    """Regression test for a live 500 on Render: a StrategyDecision saved
+    before build_decision() started returning a "procurement_window" key
+    has a result_json that lacks it entirely. strategy_decision_detail.html
+    used to do `{% set pw = result.procurement_window %}` then read
+    `pw.procurement_window_days` unconditionally, which raises
+    jinja2.exceptions.UndefinedError on a dict missing that key (confirmed
+    against the real Render logs, not guessed). decision_brief_html()
+    (decision_engine.py) already guards this same field with
+    `decision.get("procurement_window") or {}` -- the template now matches
+    that same established pattern instead of assuming the key exists."""
+    import sys
+    from pathlib import Path
+
+    from sqlmodel import select
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    from app import strategy_decision as sd
+    from app.models import StrategyDecision, User
+
+    client.post("/signup", data={"email": "old-decision-shape@example.com",
+                                  "password": "correct horse battery staple"})
+
+    sample = _sample_intake()
+    result = sd.compute_decision(sample)
+    assert "procurement_window" in result   # current engine always sets it
+    del result["procurement_window"]        # simulate a pre-existing-field row
+
+    with Session(TEST_ENGINE) as session:
+        user = session.exec(
+            select(User).where(User.email == "old-decision-shape@example.com")).first()
+        decision = StrategyDecision(
+            owner_user_id=user.id, scenario_id=sample["scenario_id"],
+            corridor=sample["corridor"],
+            input_json=json.dumps(sample), result_json=json.dumps(result))
+        session.add(decision)
+        session.commit()
+        session.refresh(decision)
+        decision_id = decision.id
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200, r.text   # used to be a bare 500 on old rows
+    assert "Decision record" in r.text    # rest of the page still renders
+
+
 def test_order_walkthrough(client):
     """ProcurementOrder: the pre-order / PO-placed / in-transit / delivered
     lifecycle. Unlike exposure_id linking (which pre-fills nothing on the

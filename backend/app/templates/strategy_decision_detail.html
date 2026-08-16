@@ -528,7 +528,8 @@ with updated quotes &mdash;
       <div class="v"><span class="badge {{ 'ok' if row.status in ('approved', 'executed') else ('hot' if row.status == 'rejected' else '') }}">{{ row.status }}</span></div></div>
   </div>
 
-  {% set pw = result.procurement_window %}
+  {% set pw = result.get('procurement_window') %}
+  {% if pw %}
   <p>
   {%- if pw.procurement_window_days is not none -%}
     {%- if pw.procurement_window_days >= 0 -%}
@@ -547,6 +548,7 @@ with updated quotes &mdash;
     <span class="hint">Procurement window not computable &mdash; ship date not supplied.</span>
   {%- endif -%}
   </p>
+  {% endif %}
 
   {% if result.reassess_triggers %}
   <p style="margin-top:var(--s4)"><strong>Reassess if:</strong></p>

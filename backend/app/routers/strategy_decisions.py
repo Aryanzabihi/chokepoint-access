@@ -453,9 +453,20 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
     # included. Once status leaves "draft" this is simply unused.
     edit_strategies = None
     if row.status == "draft":
-        edit_strategies = list(input_data.get("strategies", []))
         blank_effects = {"delay_days_delta": 0.0, "capacity_restored": 0.0,
                          "war_risk_premium_multiplier": None, "days_of_cover_delta": 0.0}
+        # Every EXISTING strategy's effects is merged onto blank_effects too,
+        # not just the padded slots below -- a strategy saved via the raw
+        # JSON API (api_create() passes data straight to compute_decision(),
+        # skipping _strategies_from_form()'s normalization) can have an
+        # effects dict missing one of these 4 keys, which used to reach the
+        # template as a real gap (jinja2.UndefinedError on the chained
+        # `s.effects.war_risk_premium_multiplier * 100`), not just a blank one.
+        edit_strategies = []
+        for s in input_data.get("strategies", []):
+            effects = dict(blank_effects)
+            effects.update(s.get("effects") or {})
+            edit_strategies.append({**s, "effects": effects})
         while len(edit_strategies) < _STRATEGY_SLOT_COUNT:
             edit_strategies.append({"name": "", "direct_cost": 0.0, "is_baseline": False,
                                     "notes": "", "effects": dict(blank_effects)})
