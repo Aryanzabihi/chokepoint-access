@@ -24,6 +24,10 @@
              value="{{ value if value is not none else '' }}">
       <p class="hint">{{ field.unit }} &mdash; {{ field.system_of_record }}</p>
     {% endif %}
+    {% if settings_defaulted and field.name in settings_defaulted %}
+      <p class="hint">From your <a href="/settings">Settings</a> default &mdash; still editable
+      for this decision only.</p>
+    {% endif %}
   </div>
 {% endmacro %}
 
@@ -46,7 +50,13 @@
       {% else %}
         <input type="number" id="field_{{ field.name }}" name="field_{{ field.name }}" step="any">
       {% endif %}
+      {% if linked_order %}
+      <p class="hint">Not on order #{{ linked_order.id }}. Filled in here, it's used for this
+      decision only &mdash; <a href="/orders/{{ linked_order.id }}/edit">update the order instead</a>
+      if it should be on file permanently.</p>
+      {% else %}
       <p class="hint">Not provided on the order &mdash; enter it here for this decision.</p>
+      {% endif %}
     </div>
   {% endif %}
 {% endmacro %}

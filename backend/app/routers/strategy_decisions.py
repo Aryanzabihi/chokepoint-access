@@ -200,7 +200,8 @@ _FINANCIAL_DEFAULT_FIELDS = (("wacc_pct", "default_wacc_pct"),
                             ("penalty_per_day", "default_penalty_per_day"))
 
 
-def _template_context(order=None, demand_supply: dict | None = None, user=None) -> dict:
+def _template_context(order=None, demand_supply: dict | None = None,
+                      user=None) -> tuple[dict, set[str]]:
     # template(3): every field gets a None placeholder regardless of tier,
     # so the form always has a key to look up (fields left above the
     # client's chosen tier just stay blank -- see intake.py, supplying one
@@ -239,6 +240,10 @@ def _template_context(order=None, demand_supply: dict | None = None, user=None) 
         for name in _DEMAND_SUPPLY_FIELDS:
             if demand_supply.get(name) is not None:
                 t["fields"][name] = demand_supply[name]
+    # Which fields end up filled from a Settings default, not typed/order-
+    # sourced -- section 25's "data provenance" ask, made visible in the
+    # template rather than tracked only in this function's own comment.
+    settings_defaulted: set[str] = set()
     if user is not None:
         # Settings' financial-assumption defaults (Batch D) -- a last-resort
         # fill only, since neither order nor demand_supply above ever touch
@@ -248,7 +253,8 @@ def _template_context(order=None, demand_supply: dict | None = None, user=None) 
             default_value = getattr(user, attr_name)
             if default_value is not None and t["fields"].get(field_name) is None:
                 t["fields"][field_name] = default_value
-    return t
+                settings_defaulted.add(field_name)
+    return t, settings_defaulted
 
 
 # --------------------------------------------------------------- dashboard ---
@@ -287,6 +293,22 @@ def new_page(request: Request, user: User = Depends(current_user),
              forecast_quantity: float | None = None,
              forecast_window_days: float | None = None, current_inventory: float | None = None,
              inbound_confirmed_quantity: float | None = None, safety_stock: float | None = None):
+    # Every real entry point (the "+ New decision" wizard, an order's own
+    # "Build a strategy decision" CTA, exposure_id linking, Modify) already
+    # arrives here with one of these three set. Landing here with NONE of
+    # them set -- a bare /strategy-decisions/new, reachable from the
+    # Decisions list page's own "New decision"/"Build one" links -- used to
+    # render the full blank form, asking again for everything an order
+    # would have supplied. Guarding it here, at the one route every path
+    # funnels through, fixes every entry point at once rather than patching
+    # individual links one at a time. exposure_id-linking is a separate,
+    # already-existing provenance (a client exposure, not a procurement
+    # order) and is deliberately left alone -- this is about orders only.
+    if order_id is None and exposure_id is None and decision_id is None:
+        orders = crud.list_procurement_orders_for_user(session, user)
+        return templates.TemplateResponse(request, "strategy_decision_pick_order.html",
+            {"user": user, "orders": orders})
+
     linked_exposure = crud.get_exposure_owned(session, user, exposure_id) if exposure_id else None
     linked_order = crud.get_procurement_order_owned(session, user, order_id) if order_id else None
     if decision_id is not None:
@@ -305,20 +327,22 @@ def new_page(request: Request, user: User = Depends(current_user),
         # row.order_id still points right at it.
         if linked_order is None and row.order_id is not None:
             linked_order = crud.get_procurement_order_owned(session, user, row.order_id)
+        settings_defaulted: set[str] = set()
     else:
         demand_supply = {"forecast_quantity": forecast_quantity,
                          "forecast_window_days": forecast_window_days,
                          "current_inventory": current_inventory,
                          "inbound_confirmed_quantity": inbound_confirmed_quantity,
                          "safety_stock": safety_stock}
-        t = _template_context(linked_order, demand_supply, user)
+        t, settings_defaulted = _template_context(linked_order, demand_supply, user)
     return templates.TemplateResponse(request, "strategy_decision_new.html",
         {"user": user, "t": t, "corridors": sorted(CORRIDORS),
          "incoterms": sorted(INCOTERM_GROUPS), "field_groups": fields_by_group(FIELDS),
          "error": None, "exposure_id": linked_exposure.id if linked_exposure else None,
          "linked_exposure": linked_exposure,
          "order_id": linked_order.id if linked_order else None, "linked_order": linked_order,
-         "order_field_values": _order_field_values(linked_order), "decision_id": decision_id})
+         "order_field_values": _order_field_values(linked_order), "decision_id": decision_id,
+         "settings_defaulted": settings_defaulted})
 
 
 @router.post("/strategy-decisions", response_class=HTMLResponse)

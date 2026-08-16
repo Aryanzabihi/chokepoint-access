@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Select an order — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/strategy-decisions" style="color:inherit">Strategy decisions</a>
+  &middot; new</div>
+  <h1>Which order do you want to analyze?</h1>
+  <p class="thesis">A decision is an analysis run against an order you've already entered &mdash;
+  its quantity, cargo value, corridor and incoterm carry straight into the engine, so you're
+  never asked for them twice. Pick the order below, or create one first if it isn't listed yet.</p>
+</header>
+
+{% if orders %}
+<section class="panel" style="margin-top:0">
+  <h2>Orders ({{ orders|length }})</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>SKU</th><th>Corridor</th><th>Stage</th>
+      <th class="m">Quantity</th><th class="m">Cargo value</th><th></th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+        <tr>
+          <td><a href="/orders/{{ o.id }}">{{ o.sku }}</a></td>
+          <td>{{ o.corridor }}</td>
+          <td><span class="badge">{{ o.stage.replace('_', ' ') }}</span></td>
+          <td class="m">{{ "{:,.0f}".format(o.quantity) }} {{ o.quantity_unit }}</td>
+          <td class="m">{{ "{:,.0f} {}".format(o.cargo_value, o.currency) if o.cargo_value is not none else "—" }}</td>
+          <td><a class="btn" href="/strategy-decisions/new?order_id={{ o.id }}"
+                 style="padding:6px 12px">Analyze this order</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<p class="empty">No orders yet. <a href="/orders/new">Create an order</a> first &mdash; a decision
+analyzes an order that already exists.</p>
+{% endif %}
+{% endblock %}
