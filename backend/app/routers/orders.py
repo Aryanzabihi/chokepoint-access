@@ -105,6 +105,63 @@ def detail_page(order_id: int, request: Request, user: User = Depends(current_us
          "strategy_decisions": strategy_decisions})
 
 
+@router.get("/orders/{order_id}/edit", response_class=HTMLResponse)
+def edit_page(order_id: int, request: Request, user: User = Depends(current_user),
+              session: Session = Depends(get_session)):
+    order = crud.get_procurement_order_owned(session, user, order_id)
+    if order is None:
+        raise HTTPException(404, "order not found")
+    return templates.TemplateResponse(request, "orders_edit.html",
+        {"user": user, "order": order, "corridors": sorted(CORRIDORS),
+         "incoterms": sorted(INCOTERM_GROUPS), "error": None})
+
+
+@router.post("/orders/{order_id}/edit")
+async def update_page(order_id: int, request: Request, user: User = Depends(current_user),
+                       session: Session = Depends(get_session)):
+    order = crud.get_procurement_order_owned(session, user, order_id)
+    if order is None:
+        raise HTTPException(404, "order not found")
+    form = await request.form()
+    corridor = form.get("corridor") or ""
+    if corridor not in CORRIDORS:
+        return templates.TemplateResponse(request, "orders_edit.html",
+            {"user": user, "order": order, "corridors": sorted(CORRIDORS),
+             "incoterms": sorted(INCOTERM_GROUPS),
+             "error": f"unknown or missing corridor. Known: {sorted(CORRIDORS)}"},
+            status_code=422)
+    crud.update_procurement_order(
+        session, user, order, corridor=corridor, sku=_text(form, "sku"),
+        quantity=_num(form, "quantity"), quantity_unit=_text(form, "quantity_unit"),
+        cargo_value=_num(form, "cargo_value"), incoterm=_text(form, "incoterm"),
+        supplier=_text(form, "supplier"), currency=_text(form, "currency"),
+        notes=_text(form, "notes"))
+    return RedirectResponse(f"/orders/{order.id}", status_code=303)
+
+
+@router.post("/orders/{order_id}/delete")
+def delete_page(order_id: int, request: Request, user: User = Depends(current_user),
+                 session: Session = Depends(get_session)):
+    order = crud.get_procurement_order_owned(session, user, order_id)
+    if order is None:
+        raise HTTPException(404, "order not found")
+    linked = crud.list_strategy_decisions_for_order(session, order.id)
+    if linked:
+        strategy_decisions = [
+            {"row": d, "recommended": json.loads(d.result_json).get("recommended")}
+            for d in linked]
+        return templates.TemplateResponse(request, "order_detail.html",
+            {"user": user, "order": order, "stages": STAGES, "stage_labels": STAGE_LABELS,
+             "strategy_decisions": strategy_decisions,
+             "delete_error": f"Can't delete #{order.id} — {len(linked)} strategy "
+                             f"decision{'s' if len(linked) != 1 else ''} still reference it. "
+                             f"Those stay real records of what was actually decided; delete "
+                             f"isn't offered while any exist."},
+            status_code=409)
+    crud.delete_procurement_order(session, user, order)
+    return RedirectResponse("/orders", status_code=303)
+
+
 @router.post("/orders/{order_id}/advance-stage")
 async def advance_stage_page(order_id: int, request: Request, user: User = Depends(current_user),
                               session: Session = Depends(get_session)):

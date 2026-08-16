@@ -417,6 +417,52 @@ def advance_procurement_order_stage(session: Session, user: User, order: Procure
     return order
 
 
+_EDITABLE_ORDER_FIELDS = (
+    "corridor", "sku", "quantity", "quantity_unit", "cargo_value", "incoterm",
+    "supplier", "currency", "notes",
+)
+
+
+def update_procurement_order(session: Session, user: User, order: ProcurementOrder,
+                              **fields) -> ProcurementOrder:
+    """Corrects the order's own descriptive fields -- the ones the "New
+    order" form collects, not the stage-transition fields
+    advance_procurement_order_stage() already owns (po_number/unit_price/
+    ship_date/contract_transit_time_days/contract_freight_rate), keeping the
+    two update paths from overlapping. Same only-if-supplied convention and
+    audit-snapshot pattern as advance_procurement_order_stage() -- this is
+    additive to that one exception to "everything here is create-only", not
+    a second one. Never rewrites any StrategyDecision already computed from
+    this order: those persisted their own input_json snapshot at
+    computation time, so an edit here only changes what a *future* decision
+    would pre-fill."""
+    changed: dict = {}
+    for name in _EDITABLE_ORDER_FIELDS:
+        if name in fields and fields[name] is not None:
+            setattr(order, name, fields[name])
+            changed[name] = fields[name]
+    session.add(order)
+    session.commit()
+    audit(session, user.id, "procurement_order", order.id, "updated", json.dumps(changed))
+    session.commit()
+    session.refresh(order)
+    return order
+
+
+def delete_procurement_order(session: Session, user: User, order: ProcurementOrder) -> None:
+    """The caller (routers/orders.py) must already have confirmed no
+    StrategyDecision references this order -- deleting out from under one
+    would leave a real, previously-computed decision pointing at nothing.
+    Logged before the row is gone since AuditEvent.entity_id is a plain int
+    field with no foreign_key= constraint (confirmed by reading models.py),
+    so the record survives the row it describes -- the point of an audit
+    trail."""
+    audit(session, user.id, "procurement_order", order.id, "deleted",
+          f"{order.corridor} {order.sku}")
+    session.delete(order)
+    session.commit()
+
+
 # -------------------------------------------------------------- api keys ---
 
 def list_api_keys(session: Session, user: User) -> list[ApiKey]:

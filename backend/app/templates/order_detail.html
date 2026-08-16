@@ -3,8 +3,13 @@
 {% block content %}
 <header class="masthead">
   <div class="eyebrow"><a href="/orders" style="color:inherit">Orders</a> &middot; {{ order.corridor }}</div>
-  <h1>{{ order.sku }}</h1>
+  <div class="row" style="justify-content:space-between;align-items:baseline">
+    <h1>{{ order.sku }}</h1>
+    <a class="btn ghost" href="/orders/{{ order.id }}/edit" style="padding:6px 12px">Edit</a>
+  </div>
 </header>
+
+{% if delete_error %}<p class="note hot"><strong>{{ delete_error }}</strong></p>{% endif %}
 
 <div class="status">
   <div class="cell"><div class="k">Stage</div>
@@ -75,6 +80,23 @@
         </form>
         <p class="hint" style="margin:var(--s3) 0 0">Only fields you fill in change &mdash; leave
         the rest blank to keep what's already on file.</p>
+      </div>
+    </details>
+
+    <details style="margin-top:var(--s4)">
+      <summary>Delete this order</summary>
+      <div class="inner">
+        {% if strategy_decisions %}
+        <p class="hint" style="margin-top:0">Not available &mdash; {{ strategy_decisions|length }}
+        strategy decision{{ "s" if strategy_decisions|length != 1 }} already reference this order.
+        Those stay real records of what was actually decided.</p>
+        {% else %}
+        <p class="hint" style="margin-top:0">Permanent &mdash; there's nothing to restore this
+        from once it's gone. Only possible because no strategy decision references it yet.</p>
+        <form method="post" action="/orders/{{ order.id }}/delete">
+          <button class="btn ghost" type="submit">Delete order #{{ order.id }}</button>
+        </form>
+        {% endif %}
       </div>
     </details>
   </section>

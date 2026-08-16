@@ -768,6 +768,101 @@ def test_order_walkthrough(client):
     assert r.status_code == 404
 
 
+def test_order_edit_and_delete(client):
+    """Edit corrects the order's own descriptive fields (never the
+    stage-transition ones advance-stage owns); delete is blocked while any
+    StrategyDecision references the order, and only unblocked once none do
+    -- this app's first real deletion, so the guard is the point of the
+    test, not an afterthought."""
+    client.post("/signup", data={"email": "order-edit-delete@example.com",
+                                  "password": "correct horse battery staple"})
+
+    r = client.post("/orders", data={
+        "corridor": "Strait of Hormuz", "stage": "pre_order", "sku": "Widget A",
+        "quantity": "100", "quantity_unit": "MT", "cargo_value": "50000",
+    }, follow_redirects=False)
+    order_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    r = client.get(f"/orders/{order_id}/edit")
+    assert r.status_code == 200
+    assert 'value="Widget A"' in r.text
+    assert 'value="100' in r.text
+
+    # unknown corridor rejected, same as create
+    r = client.post(f"/orders/{order_id}/edit", data={
+        "corridor": "Not A Real Strait", "sku": "Widget A", "quantity": "100",
+        "quantity_unit": "MT",
+    })
+    assert r.status_code == 422
+
+    r = client.post(f"/orders/{order_id}/edit", data={
+        "corridor": "Bab-el-Mandeb", "sku": "Widget A2", "quantity": "250",
+        "quantity_unit": "MT", "cargo_value": "75000", "supplier": "New Supplier Ltd",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    r = client.get(f"/orders/{order_id}")
+    assert r.status_code == 200
+    assert "Widget A2" in r.text and "Bab-el-Mandeb" in r.text and "New Supplier Ltd" in r.text
+    assert "250" in r.text
+
+    from sqlmodel import select
+
+    from app.models import AuditEvent
+
+    session = next(app.dependency_overrides[get_session]())
+    update_event = next(e for e in session.exec(
+        select(AuditEvent).where(AuditEvent.entity_type == "procurement_order",
+                                 AuditEvent.action == "updated")))
+    changed = json.loads(update_event.detail)
+    assert changed["sku"] == "Widget A2" and changed["corridor"] == "Bab-el-Mandeb"
+
+    # build a real decision against this order, then confirm delete is blocked
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    sample = dict(_sample_intake(), corridor="Bab-el-Mandeb")
+    r = client.post("/strategy-decisions/analyze",
+                    data=_decision_form(sample) | {"order_id": str(order_id)},
+                    follow_redirects=False)
+    assert r.status_code == 303, r.text
+
+    r = client.post(f"/orders/{order_id}/delete")
+    assert r.status_code == 409
+    assert "strategy decision" in r.text.lower()
+    r = client.get(f"/orders/{order_id}")
+    assert r.status_code == 200   # still there -- delete was refused, not silently ignored
+
+    # a second order with no decisions against it deletes cleanly
+    r = client.post("/orders", data={
+        "corridor": "Suez Canal", "stage": "pre_order", "sku": "Widget B",
+        "quantity": "10", "quantity_unit": "MT",
+    }, follow_redirects=False)
+    order2_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    r = client.post(f"/orders/{order2_id}/delete", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/orders"
+    r = client.get(f"/orders/{order2_id}")
+    assert r.status_code == 404
+
+    session = next(app.dependency_overrides[get_session]())
+    delete_event = next(e for e in session.exec(
+        select(AuditEvent).where(AuditEvent.entity_type == "procurement_order",
+                                 AuditEvent.action == "deleted")))
+    assert "Widget B" in delete_event.detail
+
+    # cross-user isolation holds for edit/delete too
+    other = TestClient(app)
+    other.post("/signup", data={"email": "other-order-edit-delete@example.com",
+                                 "password": "a different password"})
+    assert other.get(f"/orders/{order_id}/edit").status_code == 404
+    assert other.post(f"/orders/{order_id}/edit", data={"corridor": "Suez Canal"}).status_code == 404
+    assert other.post(f"/orders/{order_id}/delete").status_code == 404
+
+
 def test_decision_wizard(client):
     """The "+ New Decision" guided entry point (workflow.md steps 1-4):
     what are you deciding -> demand & supply -> procurement/order -> hands

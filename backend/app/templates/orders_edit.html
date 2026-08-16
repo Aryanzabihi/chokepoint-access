@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ order.sku }} — Chokepoint Access{% endblock %}
+{% block content %}
+<header class="masthead">
+  <div class="eyebrow"><a href="/orders/{{ order.id }}" style="color:inherit">{{ order.sku }}</a>
+  &middot; edit</div>
+  <h1>Edit order</h1>
+  <p class="thesis">Corrects the order's own details. Stage, PO number, price and ship date are
+  edited separately, via "Advance stage" on the order's own page.</p>
+</header>
+
+{% if error %}<p class="note hot"><strong>Could not save this order.</strong> {{ error }}</p>{% endif %}
+
+<form class="panel" method="post" action="/orders/{{ order.id }}/edit" style="margin-top:0">
+  <div class="row">
+    <div class="field" style="min-width:200px;flex:1">
+      <label for="sku">SKU / product</label>
+      <input type="text" id="sku" name="sku" required value="{{ order.sku }}">
+    </div>
+    <div class="field" style="min-width:220px;flex:1">
+      <label for="corridor">Chokepoint</label>
+      <select id="corridor" name="corridor" required>
+        {% for c in corridors %}
+        <option value="{{ c }}" {{ "selected" if c == order.corridor else "" }}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <div class="field" style="width:160px">
+      <label for="quantity">Quantity</label>
+      <input type="number" id="quantity" name="quantity" step="any" required value="{{ order.quantity }}">
+    </div>
+    <div class="field" style="width:140px">
+      <label for="quantity_unit">Unit</label>
+      <input type="text" id="quantity_unit" name="quantity_unit" required value="{{ order.quantity_unit }}">
+    </div>
+    <div class="field" style="width:180px">
+      <label for="cargo_value">Cargo value</label>
+      <input type="number" id="cargo_value" name="cargo_value" step="any"
+             value="{{ order.cargo_value if order.cargo_value is not none else '' }}">
+    </div>
+    <div class="field" style="width:120px">
+      <label for="currency">Currency</label>
+      <input type="text" id="currency" name="currency" value="{{ order.currency }}">
+    </div>
+  </div>
+  <div class="row">
+    <div class="field" style="width:140px">
+      <label for="incoterm">Incoterm</label>
+      <select id="incoterm" name="incoterm">
+        <option value="">&mdash;</option>
+        {% for i in incoterms %}
+        <option value="{{ i }}" {{ "selected" if i == order.incoterm else "" }}>{{ i }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field" style="min-width:200px;flex:1">
+      <label for="supplier">Supplier</label>
+      <input type="text" id="supplier" name="supplier" value="{{ order.supplier or '' }}">
+    </div>
+  </div>
+  <div class="row">
+    <div class="field" style="min-width:300px;flex:1">
+      <label for="notes">Notes</label>
+      <input type="text" id="notes" name="notes" value="{{ order.notes or '' }}">
+    </div>
+  </div>
+  <button class="btn" type="submit">Save changes</button>
+  <a class="btn ghost" href="/orders/{{ order.id }}">Cancel</a>
+</form>
+{% endblock %}
