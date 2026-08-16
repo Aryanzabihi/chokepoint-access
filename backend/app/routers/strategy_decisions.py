@@ -44,9 +44,15 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 templates.env.globals["display_label"] = display_label
 
-_STRATEGY_SLOT_COUNT = 3   # fixed slots (mirrors economic's fixed _STRATEGY_DEFS rather than
-                          # dynamic add/remove-row JS) -- every stage's default set in
-                          # strategy_decision.default_strategies_for_stage() has exactly this many
+_STRATEGY_SLOT_COUNT = 5   # fixed slots (mirrors economic's fixed _STRATEGY_DEFS rather than
+                          # dynamic add/remove-row JS). Stage defaults in
+                          # strategy_decision.default_strategies_for_stage() only ever populate 3
+                          # (2 named + 1 blank) -- the extra 2 slots are headroom for hand-composed
+                          # blended strategies ("enumeration, not optimization": this project
+                          # deliberately doesn't auto-blend strategy effects, since they don't
+                          # compose linearly -- see enginev2.md section 8.8. A user who wants
+                          # "60% reroute / 40% continue" types it in as its own named row with its
+                          # own hand-computed direct_cost/effects, compared like any other strategy.)
 
 # The Tier-3 "live market data" fields (workflow.md step 5) -- the only
 # fields the recalculate loop ("go to market -> reassess with TAR") ever

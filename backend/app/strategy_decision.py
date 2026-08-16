@@ -197,6 +197,28 @@ def decision_framing_for_stage(stage: str | None) -> str | None:
 # subtraction that nothing else in this codebase already computes.
 # --------------------------------------------------------------------------
 
+def _gather_reason(result: dict, evpi_max: float) -> str:
+    """Always has something concrete to name -- client_probability_estimate/
+    probability_range are top-level intake keys, not members of
+    intake.FIELDS, so what_would_sharpen() can never itself suggest "get a
+    better probability estimate." Built from probability_is_published_
+    fallback instead (always present on result)."""
+    regret = result["regret"]
+    lo, hi = regret["low"], regret["high"]
+    if result.get("probability_is_published_fallback"):
+        ask = ("get your own probability estimate for this specific shipping window (a war-risk "
+              "desk, underwriter or analyst covering the corridor) rather than relying on the "
+              "published cross-corridor base rate")
+    else:
+        ask = ("get a probability RANGE reflecting your own uncertainty, not just a single point "
+              "estimate, so this can be checked against your own range instead of the published one")
+    sharpen = result.get("what_would_sharpen") or []
+    extra = " Also: " + "; ".join(sharpen) + "." if sharpen else ""
+    return (f"{lo['best']} would be cheaper if the true probability is near {lo['probability']:.0%}; "
+           f"{hi['best']} would be cheaper near {hi['probability']:.0%}. Knowing which is worth up "
+           f"to {evpi_max:,.0f} in avoided regret. Before committing, {ask}.{extra}")
+
+
 def act_or_wait(result: dict) -> dict:
     """Resolves the baseline the same way decision_engine.build_decision()
     does internally (decision_engine.py's own baseline_candidates[0] else
@@ -207,7 +229,10 @@ def act_or_wait(result: dict) -> dict:
     checked, then Recompute) -- so this recovers the name from
     recommended_break_even.baseline when no row is flagged, and only gives
     up (timing=None) when neither source has an answer, rather than ever
-    silently mislabeling a real recommendation as WAIT."""
+    silently mislabeling a real recommendation as WAIT. A third timing,
+    GATHER, can override WAIT or ACT when there's real, nonzero value in
+    resolving probability uncertainty before committing -- see the EVPI
+    check at the end of this function."""
     strategies = result.get("strategies", [])
     by_name = {s["name"]: s for s in strategies}
     recommended_name = result.get("recommended")
@@ -223,7 +248,8 @@ def act_or_wait(result: dict) -> dict:
         return {"timing": None, "recommended_strategy": recommended_name,
                 "baseline_strategy": None, "net_benefit": None,
                 "cheapest_mitigation": None, "strategies_with_net_benefit": strategies,
-                "reason": None}
+                "reason": None, "gather_reason": None,
+                "value_of_information": result.get("value_of_information")}
 
     timing = "WAIT" if recommended_name == baseline_name else "ACT"
     recommended_row = by_name.get(recommended_name)
@@ -254,11 +280,32 @@ def act_or_wait(result: dict) -> dict:
         reason = (f"{recommended_name} costs {net_benefit:,.0f} less in expectation than "
                  f"{baseline_name} at the {p:.0%} probability used.")
 
-    return {"timing": timing,
-            "recommended_strategy": None if timing == "WAIT" else recommended_name,
-            "baseline_strategy": baseline_name, "net_benefit": net_benefit,
-            "cheapest_mitigation": cheapest_mitigation,
-            "strategies_with_net_benefit": augmented, "reason": reason}
+    out = {"timing": timing,
+           "recommended_strategy": None if timing == "WAIT" else recommended_name,
+           "baseline_strategy": baseline_name, "net_benefit": net_benefit,
+           "cheapest_mitigation": cheapest_mitigation,
+           "strategies_with_net_benefit": augmented, "reason": reason, "gather_reason": None}
+
+    # GATHER: real, nonzero value in resolving probability uncertainty
+    # before committing, gated on EVPI itself and nothing else -- no
+    # invented threshold. Checking EVPI directly (rather than e.g.
+    # decision_confidence=="weak" or the range endpoints disagreeing) is
+    # provably the more correct gate: a strategy can win at BOTH ends of
+    # the published range yet still not be what the probability actually
+    # used for ranking would pick, whenever that probability sits outside
+    # the published range itself -- decision_confidence's own robustness
+    # check never verifies that, so it can call a pick "robust" even when
+    # real avoidable regret exists. That's a pre-existing gap in
+    # decision_confidence, not something this check papers over.
+    voi = result.get("value_of_information")
+    if voi and len(strategies) >= 2:
+        evpi_max = max(voi["low"]["value"], voi["high"]["value"])
+        if evpi_max > 0:
+            out["timing"] = "GATHER"
+            out["recommended_strategy"] = None
+            out["gather_reason"] = _gather_reason(result, evpi_max)
+    out["value_of_information"] = voi
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -361,9 +408,16 @@ def act_wait_dial_svg(result: dict, act: dict) -> dict | None:
     parts.append(f'<circle cx="{CX}" cy="{CY}" r="11" fill="var(--sea)" stroke="var(--ink)" stroke-width="2.4"/>')
 
     # the answer, centred under the arc
-    verdict = "WAIT" if act["timing"] == "WAIT" else f"ACT — {_esc(act['recommended_strategy'])}"
-    verdict_color = "var(--ink-faint)" if act["timing"] == "WAIT" else "var(--sound)"
-    sub = "cheaper to hold" if act["timing"] == "WAIT" else f"{_esc(other_name)} pays"
+    if act["timing"] == "WAIT":
+        verdict, verdict_color, sub = "WAIT", "var(--ink-faint)", "cheaper to hold"
+    elif act["timing"] == "GATHER":
+        voi = act.get("value_of_information") or {}
+        evpi_max = max((voi.get("low") or {}).get("value", 0), (voi.get("high") or {}).get("value", 0))
+        verdict, verdict_color = "GATHER", "var(--amber)"
+        sub = f"up to {evpi_max:,.0f} in avoided regret to learn first"
+    else:
+        verdict = f"ACT — {_esc(act['recommended_strategy'])}"
+        verdict_color, sub = "var(--sound)", f"{_esc(other_name)} pays"
     parts.append(f'<text x="{CX}" y="{CY - 96}" text-anchor="middle" '
                 f'style="font:600 34px var(--serif);letter-spacing:-.02em" fill="{verdict_color}">{verdict}</text>')
     parts.append(f'<text x="{CX}" y="{CY - 66}" text-anchor="middle" '

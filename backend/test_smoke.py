@@ -1105,10 +1105,14 @@ def test_act_or_wait(client):
     assert "ACT &mdash;" not in r.text
     assert "Net benefit" in r.text
 
-    # --- ACT: the same verified quote change test_decision_lifecycle uses,
-    # which flips Continue -> Partial reroute ---
+    # --- ACT: a war_risk_premium_quote high enough that Partial reroute wins
+    # at BOTH ends of the published probability range (hand-verified: 10M ->
+    # decision_confidence "robust", value_of_information 0 at both ends) --
+    # a clean ACT case, distinct from test_gather_verdict's own 3.5M case
+    # below, which flips the SAME two strategies but only outside the low
+    # end of that range (real EVPI, GATHER fires there instead) ---
     r = client.post(f"/strategy-decisions/{decision_url.rsplit('/', 1)[-1]}/recalculate",
-                     data={"field_war_risk_premium_quote": "3500000"}, follow_redirects=False)
+                     data={"field_war_risk_premium_quote": "10000000"}, follow_redirects=False)
     assert r.status_code == 303, r.text
     r = client.get(r.headers["location"])
     assert r.status_code == 200
@@ -1130,6 +1134,56 @@ def test_act_or_wait(client):
     r = client.get(r.headers["location"])
     assert r.status_code == 200, "must not 500 when no strategy row is flagged is_baseline"
     assert "WAIT" in r.text or "ACT" in r.text, "must resolve a real Decision, not go blank"
+
+
+def test_gather_verdict(client):
+    """GATHER: a third act_or_wait() timing, gated on real nonzero EVPI
+    (value_of_information), not an invented threshold. Reuses the exact
+    3.5M war-risk-premium-quote scenario test_act_or_wait's own ACT case
+    used to use -- hand-verified directly against build_decision(), fed
+    default_strategies_for_stage(None)'s own strategies (what /analyze and
+    /recalculate actually use, NOT _sample_intake()'s own separate baked-in
+    strategy list, which has a differently-priced Partial reroute and gives
+    a different, also-real number): at that quote, Partial reroute wins at
+    the 27% probability used for ranking, but Continue still wins at the
+    low end (10%) of the published range, with real avoidable regret
+    (427,500.0) if the true probability turns out to be there --
+    decision_confidence was already "weak" for this exact case before this
+    feature existed; GATHER now quantifies it in dollar terms instead of
+    leaving it as a qualitative note only."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "gather@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    r = client.post(f"/strategy-decisions/{decision_id}/recalculate",
+                     data={"field_war_risk_premium_quote": "3500000"}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    new_url = r.headers["location"]
+    r = client.get(new_url)
+    assert r.status_code == 200
+    assert "GATHER" in r.text
+    assert "ACT &mdash; Partial reroute" not in r.text   # the verdict itself, not the dial's
+                                                         # own static "WAIT vs ACT" axis caption
+    assert "427,500" in r.text   # value_of_information.low.value, hand-verified below
+    assert "Value of information" in r.text
+
+    new_id = int(new_url.rsplit("/", 1)[-1])
+    result = client.get(f"/api/v1/strategy-decisions/{new_id}").json()["result"]
+    assert result["value_of_information"]["low"]["value"] == 427500.0
+    assert result["value_of_information"]["high"]["value"] == 0.0
+    voi_rows = [e for e in result["ledger"] if e["field"] == "value_of_information"]
+    assert len(voi_rows) == 1
+    assert voi_rows[0]["grade"] in ("CLIENT_QUOTED", "CLIENT_SYSTEM", "DERIVED", "EPISODE_ANALOGUE",
+                                    "STRUCTURAL", "PUBLISHED")   # a real grade, never ABSENT here
 
 
 def test_strategy_decision_recompute(client):
@@ -1234,6 +1288,97 @@ def test_forward_buy_exposed_on_recompute(client):
     reroute = next(s for s in result["strategies"] if s["name"] == "Partial reroute")
     assert reroute["direct_cost"] > 700_000, \
         "forward-buy financing cost must be added into the strategy's own direct_cost"
+
+
+def test_strategy_decision_extra_slots_roundtrip(client):
+    """Strategy portfolios, "enumeration not optimization" (enginev2.md
+    section 8.8 explicitly rules out an automatic weight-blending
+    optimiser, since effects don't compose linearly): _STRATEGY_SLOT_COUNT
+    raised 3 -> 5 so a user can hand-type a blended strategy (its own
+    name, its own hand-computed direct_cost/effects) as a real row
+    alongside the pure ones, compared like any other strategy -- no new
+    engine math, just headroom. Also proves the ceiling is real, not
+    accidentally unlimited."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "portfolio@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    r = client.post(f"/strategy-decisions/{decision_id}/recompute", data={
+        "baseline_strategy": "0",
+        "strategy_0_name": "Continue", "strategy_0_direct_cost": "0",
+        "strategy_1_name": "Partial reroute", "strategy_1_direct_cost": "700000",
+        "strategy_1_capacity_restored": "40", "strategy_1_war_risk_premium_multiplier": "25",
+        "strategy_2_name": "Split: 60% reroute / 40% continue", "strategy_2_direct_cost": "420000",
+        "strategy_2_capacity_restored": "24", "strategy_2_war_risk_premium_multiplier": "55",
+        "strategy_3_name": "", "strategy_4_name": "",
+        # slot 5 doesn't exist (_STRATEGY_SLOT_COUNT == 5, valid indices 0-4)
+        # -- must be silently dropped, same "blank/absent means unused slot"
+        # convention as every other slot, not a 500 or a phantom 4th strategy.
+        "strategy_5_name": "Should not appear", "strategy_5_direct_cost": "999999",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    decision_url = r.headers["location"]
+
+    r = client.get(decision_url)
+    assert r.status_code == 200
+    assert "Split: 60% reroute / 40% continue" in r.text
+    assert "Should not appear" not in r.text
+
+    result = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()["result"]
+    names = [s["name"] for s in result["strategies"]]
+    assert names == ["Continue", "Partial reroute", "Split: 60% reroute / 40% continue"], \
+        "the two blank slots and the nonexistent 6th slot must not produce phantom strategies"
+    blend = next(s for s in result["strategies"] if s["name"] == "Split: 60% reroute / 40% continue")
+    assert blend["direct_cost"] == 420_000.0
+    # expected_cost must be freshly derived from THIS blend's own direct_cost/
+    # conditional_loss, not stale or copy-pasted from another row -- proves
+    # the new slot is really wired through compute_decision(), not just
+    # rendered as inert text.
+    expected = round(blend["direct_cost"] + result["probability_used"] * blend["conditional_loss"], 2)
+    assert blend["expected_cost"] == expected
+
+
+def test_cost_of_waiting_by_strategy_honest_absence(client):
+    """The default sample scenario (delay_days_estimate=11) is, against the
+    real committed src/warrisk.csv, below every corridor's earliest
+    comparable post-onset observation (~day 139) -- cost_of_waiting is
+    genuinely unavailable here, for every corridor alike, not a per-
+    corridor coverage gap. Checks the honest reason renders in each
+    strategy's own Cost breakdown panel and does not misname it as
+    corridor-specific."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "cow-absence@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    result = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()["result"]
+    assert result["cost_of_waiting_by_strategy"] is None
+    assert result["cost_of_waiting_unavailable_reason"] is not None
+    # names the corridor only to say the absence ISN'T specific to it (episodes.py
+    # pools every corridor's observations together) -- must not claim the opposite.
+    assert "Not specific to" in result["cost_of_waiting_unavailable_reason"], \
+        "the reason must be framed as a register-depth fact, never a claim that this corridor lacks data"
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200
+    assert "Cost of waiting not shown" in r.text
 
 
 def test_alerts_job_runs_without_error(client):

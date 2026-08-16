@@ -590,6 +590,22 @@ def regret_at_range(strategies: list[Strategy], intake_data: dict,
     return out
 
 
+def value_of_information(regret: dict, recommended: str) -> dict:
+    """EVPI(p) = E[C_recommended](p) - min_strategy E[C_strategy](p) is, by
+    definition, exactly regret[p]['regret'][recommended] -- this relabels
+    an existing number computed by regret_at_range(), it does not recompute
+    one, so it can never drift from the Regret table shown alongside it.
+    Two honest endpoints, always -- never blended into one prior-weighted
+    figure, which would mean inventing a probability of being in the low-
+    vs high-probability state (exactly what section 10's "no invented
+    priors" rules out; same discipline as recovery.py's duration analogues,
+    which are never averaged into one number either)."""
+    return {"low": {"probability": regret["low"]["probability"],
+                    "value": regret["low"]["regret"][recommended]},
+           "high": {"probability": regret["high"]["probability"],
+                   "value": regret["high"]["regret"][recommended]}}
+
+
 # --------------------------------------------------------------------------
 # Cost of waiting (section 8.5)
 # --------------------------------------------------------------------------
@@ -657,6 +673,47 @@ def cost_of_waiting(intake_data: dict, strategy: Strategy, day_offsets: list[int
             cow_points.append((d, round(e_then - e_t0, 2)))
         paths.append(CostOfWaitingPath(episode_label=label, points=cow_points))
     return CostOfWaiting(paths=paths)
+
+
+def cost_of_waiting_by_strategy(intake_data: dict, strategies: list[Strategy], day_offsets: list[int],
+                                corridor: str, probability: float, *, warrisk_path: Path | None = None,
+                                jwc_path: Path | None = None, as_of: str | None = None
+                                ) -> dict[str, "CostOfWaiting | None"]:
+    """cost_of_waiting() for every compared strategy, not just the winner.
+    Episode-observation timing doesn't depend on which strategy is being
+    priced (day_offsets/corridor/intake_data are shared across the call),
+    so this is all-or-nothing per DECISION, not per strategy or per
+    corridor: either the register has enough comparable observations at
+    these offsets, in which case every strategy gets a real trajectory
+    (genuinely different strategy to strategy, by each one's own war-risk-
+    premium-multiplier/capacity-restored sensitivity -- see
+    conditional_loss()), or none does. Comparison enrichment only -- never
+    feeds back into expected_cost/recommended, which are already chosen by
+    the time this runs."""
+    return {s.name: cost_of_waiting(intake_data, s, day_offsets, corridor, probability,
+                                    warrisk_path=warrisk_path, jwc_path=jwc_path, as_of=as_of)
+           for s in strategies}
+
+
+def cost_of_waiting_unavailable_reason(intake_data: dict, corridor: str, day_offset_anchor: int,
+                                       premium_analogue: "episodes.Analogue | None") -> str | None:
+    """None when cost-of-waiting IS available. Otherwise names the real
+    reason -- never a corridor-coverage claim, since episodes.py pools its
+    register across every corridor by design (a corridor with zero rows of
+    its own still receives the full pooled analogue set -- see episodes.py's
+    own docstring/selftest). The two real reasons are a missing currency
+    anchor, or a delay estimate shorter than the register's own earliest
+    comparable post-onset observation -- both true regardless of corridor."""
+    if premium_analogue is not None:
+        return None
+    anchor = intake_data.get("fields", {}).get("war_risk_premium_quote")
+    if anchor is None:
+        return ("No war-risk premium quote on file — nothing to anchor a cost-of-waiting "
+               "trajectory to in currency terms.")
+    return (f"The premium register's comparable post-onset observations don't yet reach back "
+           f"to day {day_offset_anchor} (your estimated delay). Not specific to {corridor} — "
+           f"episodes.py pools every corridor's observations together, and none currently "
+           f"covers a horizon this short.")
 
 
 # --------------------------------------------------------------------------
@@ -920,7 +977,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         recommended_be = min(solvable, key=lambda b: b.p_star) if solvable else (
             break_even[0] if break_even else None)
 
-    cow = None
+    cow_by_strategy = None
     if premium_analogue is not None:
         # Start from the LATEST day_offset_used among the episodes already
         # pooled at the anchor offset (every episode in premium_analogue has
@@ -930,15 +987,29 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         # per-episode day_offset_used could.
         start = max(o.day_offset_used for o in premium_analogue.observations)
         offsets = sorted({start, start + 7, start + 14})
-        recommended_strategy = next(s for s in strategies if s.name == recommended)
-        cow = cost_of_waiting(intake_data, recommended_strategy, offsets, corridor,
-                              ranking_probability, warrisk_path=warrisk_path,
-                              jwc_path=jwc_path, as_of=as_of)
+        cow_by_strategy = cost_of_waiting_by_strategy(intake_data, strategies, offsets, corridor,
+                                                       ranking_probability, warrisk_path=warrisk_path,
+                                                       jwc_path=jwc_path, as_of=as_of)
+    # cow (the recommended strategy's own trajectory, today's existing single-
+    # strategy key) is now DERIVED from cow_by_strategy rather than computed
+    # separately -- one source of truth, never two independent calls that
+    # could drift apart.
+    cow = cow_by_strategy.get(recommended) if cow_by_strategy else None
+    cow_unavailable_reason = cost_of_waiting_unavailable_reason(intake_data, corridor,
+                                                                 day_offset_anchor, premium_analogue)
 
     flips = solve_flips(intake_data, strategies, premium_analogue, ranking_probability)
     regret = regret_at_range(strategies, intake_data, premium_analogue,
                              tuple(intake_data["probability_range"])
                              if intake_data.get("probability_range") else None)
+    voi = value_of_information(regret, recommended)
+    _voi_contributors = {recommended, regret["low"]["best"], regret["high"]["best"]}
+    _voi_grade = max((row["grade"] for row in strategy_rows if row["name"] in _voi_contributors),
+                     key=lambda g: GRADE_STRENGTH[g])
+    ledger.record("value_of_information", {"low": voi["low"]["value"], "high": voi["high"]["value"]},
+                 unit="currency", grade=_voi_grade,
+                 formula="regret_at_range()'s own regret[recommended] at each end of the "
+                         "published range -- relabelled, not a new computation")
 
     # Recommendation confidence: don't present a razor-thin or fragile pick
     # as a strong call. Two independent checks, neither inventing a new
@@ -1036,8 +1107,15 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         },
         "cost_of_waiting": ({"paths": [{"episode_label": p.episode_label, "points": p.points}
                                        for p in cow.paths]} if cow else None),
+        "cost_of_waiting_by_strategy": ({name: ({"paths": [{"episode_label": p.episode_label,
+                                                            "points": p.points} for p in c.paths]}
+                                                if c else None)
+                                        for name, c in cow_by_strategy.items()}
+                                       if cow_by_strategy else None),
+        "cost_of_waiting_unavailable_reason": cow_unavailable_reason,
         "flip_points": [asdict(fp) for fp in flips],
         "regret": regret,
+        "value_of_information": voi,
         "exposure": {"baseline": round(baseline_cb.total, 2), "disrupted": round(disrupted_cb.total, 2),
                     "avoidable": round(gap["private"], 2)},
         "ledger": ledger.as_list(),
@@ -1525,6 +1603,69 @@ def selftest() -> int:
     result_high_p = build_decision(high_p_data)
     assert result_high_p["probability_is_published_fallback"] is False
     assert result_high_p["recommended"] == "Partial reroute", result_high_p["recommended"]
+
+    # --- value_of_information: relabels regret_at_range()'s own
+    # regret[recommended] at each end, never a new computation. At the base
+    # rate, Continue wins at both ends of the published range too, so EVPI
+    # is genuinely zero -- nothing to gain from more information. At p=0.80
+    # (outside the published range), Continue still wins at BOTH ends of
+    # that range, yet "recommended" (Partial reroute, chosen at 0.80) does
+    # not -- real, hand-verified avoidable regret exists at both ends
+    # despite decision_confidence calling this case "robust" below (a real,
+    # pre-existing gap between what "robust" measures and real EVPI -- see
+    # act_or_wait()'s own GATHER docstring in strategy_decision.py).
+    assert result_low_p["value_of_information"] == {"low": {"probability": 0.1, "value": 0.0},
+                                                     "high": {"probability": 0.57, "value": 0.0}}
+    voi_high_p = result_high_p["value_of_information"]
+    assert voi_high_p["low"]["value"] == 593363.01, voi_high_p
+    assert voi_high_p["high"]["value"] == 92169.18, voi_high_p
+    assert voi_high_p["low"]["value"] == result_high_p["regret"]["low"]["regret"]["Partial reroute"]
+    assert voi_high_p["high"]["value"] == result_high_p["regret"]["high"]["regret"]["Partial reroute"]
+
+    # --- cost_of_waiting_by_strategy(): a synthetic register (episodes.py's
+    # own selftest fixture, early enough observations to clear the n>=2
+    # floor -- the real, committed src/warrisk.csv doesn't, at any
+    # realistic delay, see below) proves two strategies with different
+    # war_risk_premium_multiplier sensitivity get genuinely different
+    # trajectories, not one path copied onto both.
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        cow_warrisk_path = Path(d) / "warrisk.csv"
+        cow_jwc_path = Path(d) / "warrisk_jwc.csv"
+        episodes._write_warrisk_csv(cow_warrisk_path)
+        episodes._write_jwc_csv(cow_jwc_path)
+        cow_data = json.loads(json.dumps(data))
+        # 10, not 18 (Hormuz's own fixture peak) -- at anchor=18 every
+        # offset this produces (18/25/32) still resolves to the SAME
+        # latest-available reading in both fixture episodes (no further
+        # data past day 18/day 10 until day 104), so every strategy's
+        # trajectory is flat and indistinguishable regardless of its own
+        # multiplier -- not a bug, just the wrong anchor to prove the point
+        # with. At anchor=10, stepping to offset 24 crosses Hormuz's real
+        # day-18 peak, producing genuine day-to-day change.
+        cow_data["fields"]["delay_days_estimate"] = 10
+        result_cow = build_decision(cow_data, warrisk_path=cow_warrisk_path, jwc_path=cow_jwc_path)
+        assert result_cow["cost_of_waiting"] is not None
+        assert result_cow["cost_of_waiting_unavailable_reason"] is None
+        cbs = result_cow["cost_of_waiting_by_strategy"]
+        assert cbs is not None and set(cbs) == {"Continue", "Partial reroute"}
+        assert cbs["Continue"] is not None and cbs["Partial reroute"] is not None
+        # compare the whole paths list (both episodes), not just paths[0] --
+        # Bab-el-Mandeb's own trajectory happens to stay flat for both
+        # strategies at this anchor (no fixture data between its day-10 and
+        # day-104 readings); the real divergence is in Hormuz's path, which
+        # crosses its fixture peak at offset 24.
+        assert cbs["Continue"]["paths"] != cbs["Partial reroute"]["paths"], \
+            "different war_risk_premium_multiplier must produce different trajectories, not a copy"
+
+    # --- against the REAL, committed src/warrisk.csv: cost-of-waiting is
+    # genuinely unavailable at this scenario's realistic delay (Hormuz's
+    # only real post-onset observation is ~day 139), and the reason names
+    # this as a register-depth fact, never a per-corridor coverage claim.
+    assert result_low_p["cost_of_waiting_by_strategy"] is None
+    cow_reason = result_low_p["cost_of_waiting_unavailable_reason"]
+    assert cow_reason is not None
+    assert "Not specific to" in cow_reason, cow_reason
 
     result = result_low_p
     assert result["weakest_grade"] in GRADES

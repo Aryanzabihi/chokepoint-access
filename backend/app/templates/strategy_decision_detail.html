@@ -231,6 +231,7 @@ with updated quotes &mdash;
   </div>
 
   <div class="row" style="margin-top:var(--s4);flex-direction:column;align-items:stretch">
+  {% set cbs = result.get('cost_of_waiting_by_strategy') %}
   {% for r in result.strategies %}
     <details>
       <summary>Cost breakdown &mdash; {{ r.name }}</summary>
@@ -242,6 +243,25 @@ with updated quotes &mdash;
           <div class="stat"><b>{{ "{:,.0f}".format(r.components.inventory) }}</b><span>inventory</span></div>
           <div class="stat"><b>{{ "{:,.0f}".format(r.components.commodity) }}</b><span>commodity</span></div>
         </div>
+        {% if cbs and cbs.get(r.name) %}
+        <div class="scroll" style="margin-top:var(--s3)">
+        <table>
+          <thead><tr><th>Cost of waiting</th>
+          {% for d, _ in cbs[r.name].paths[0].points %}<th class="m">Day {{ d }}</th>{% endfor %}</tr></thead>
+          <tbody>
+          {% for p in cbs[r.name].paths %}
+            <tr><td>{{ p.episode_label }}</td>
+            {% for d, v in p.points %}<td class="m">{{ "{:+,.0f}".format(v) }}</td>{% endfor %}</tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        <p class="hint">Change in {{ r.name }}'s own expected cost if you wait, from observed
+        episode analogues &mdash; never a fitted curve.</p>
+        {% elif result.cost_of_waiting_unavailable_reason %}
+        <p class="empty" style="margin-top:var(--s3)">Cost of waiting not shown &mdash;
+        {{ result.cost_of_waiting_unavailable_reason }}</p>
+        {% endif %}
       </div>
     </details>
   {% endfor %}
@@ -314,14 +334,16 @@ with updated quotes &mdash;
 <section class="panel">
   <h2>6 &middot; Decision</h2>
   {% if decision_framing %}<p class="hint" style="margin-top:0">{{ decision_framing }}</p>{% endif %}
-  <div class="verdict {{ 'pos' if result.decision_confidence == 'robust' else 'warn' }}">
+  <div class="verdict {{ 'pos' if (result.decision_confidence == 'robust' and act.timing != 'GATHER') else 'warn' }}">
     <div class="tag">Decision</div>
     <div class="call">
       {%- if act.timing == "WAIT" %}WAIT
       {%- elif act.timing == "ACT" %}ACT &mdash; {{ act.recommended_strategy }}
+      {%- elif act.timing == "GATHER" %}GATHER
       {%- else %}{{ result.recommended }}{% endif -%}
     </div>
-    {% if act.reason %}<p>{{ act.reason }}</p>{% endif %}
+    {% if act.timing == "GATHER" %}<p>{{ act.gather_reason }}</p>
+    {% elif act.reason %}<p>{{ act.reason }}</p>{% endif %}
     {% if act.timing is none %}
     <p class="hint">Baseline strategy couldn't be determined for this decision &mdash; shown as
     the plain recommendation, not an Act/Wait call.</p>
@@ -471,8 +493,8 @@ with updated quotes &mdash;
   <p class="hint">Change in expected cost of the recommended strategy if you wait, taken from
   observed episode analogues at each day offset &mdash; never a fitted curve.</p>
   {% else %}
-  <p class="empty">Not shown &mdash; insufficient episode register coverage for a cost-of-waiting
-  trajectory.</p>
+  <p class="empty">Not shown &mdash; {{ result.cost_of_waiting_unavailable_reason or
+  "insufficient episode register coverage for a cost-of-waiting trajectory." }}</p>
   {% endif %}
 
   {% if result.regret %}
@@ -501,6 +523,22 @@ with updated quotes &mdash;
   supplied probability range &mdash; how much it would cost to have picked wrong.</p>
   {% endif %}
 
+  {% if result.value_of_information %}
+  <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
+    border-bottom:1px solid var(--rule-soft)">Value of information</h3>
+  <div class="stats">
+    <div class="stat"><b>{{ "{:,.0f}".format(result.value_of_information.low.value) }}</b>
+      <span>if the true probability is {{ "{:.0%}".format(result.value_of_information.low.probability) }} (low end)</span></div>
+    <div class="stat"><b>{{ "{:,.0f}".format(result.value_of_information.high.value) }}</b>
+      <span>if the true probability is {{ "{:.0%}".format(result.value_of_information.high.probability) }} (high end)</span></div>
+  </div>
+  <p class="hint">What it would be worth to know, for certain, which end of the range the true
+  probability sits at &mdash; the recommendation's own regret at each end. Two honest numbers,
+  never blended into one: doing so would mean inventing a prior probability of being in the low-
+  vs high-probability state.</p>
+  {% endif %}
+
   <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
     color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
     border-bottom:1px solid var(--rule-soft)">Not claimed</h3>
@@ -521,7 +559,7 @@ with updated quotes &mdash;
       <div class="v">{% if linked_order %}<a href="/orders/{{ linked_order.id }}">{{ linked_order.sku }} #{{ linked_order.id }}</a>{% else %}{{ row.scenario_id }}{% endif %}</div></div>
     <div class="cell"><div class="k">Chokepoint</div><div class="v">{{ row.corridor }}</div></div>
     <div class="cell"><div class="k">Decision</div>
-      <div class="v">{% if act.timing == "WAIT" %}WAIT{% elif act.timing == "ACT" %}ACT &mdash; {{ act.recommended_strategy }}{% else %}{{ result.recommended }}{% endif %}</div></div>
+      <div class="v">{% if act.timing == "WAIT" %}WAIT{% elif act.timing == "ACT" %}ACT &mdash; {{ act.recommended_strategy }}{% elif act.timing == "GATHER" %}GATHER{% else %}{{ result.recommended }}{% endif %}</div></div>
     <div class="cell"><div class="k">{% if linked_order %}Order quantity{% else %}Quantity{% endif %}</div>
       <div class="v">{% if linked_order and linked_order.quantity is not none %}{{ "{:,.0f}".format(linked_order.quantity) }} {{ linked_order.quantity_unit }}{% else %}&mdash;{% endif %}</div></div>
     <div class="cell"><div class="k">{{ "Approved cost" if row.status in ("approved", "executed") else "Estimated cost" }}</div>
