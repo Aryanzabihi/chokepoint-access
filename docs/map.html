@@ -2996,13 +2996,29 @@ details .inner .field:first-child{margin-top:var(--s3)}
 <body>
 <div class="wrap">
 
-<nav class="nav">
+<nav class="nav" id="siteNav">
   <a href="threshold-engine.html">Act or wait</a>
   <span class="here">Zone map</span>
   <a href="index.html">Track record</a>
   <span class="spacer"></span>
   <span class="stamp">JWLA-034 &middot; 29 July 2026</span>
 </nav>
+<script>
+/* embed=1 (set by the backend app's own /map route, which iframes this
+   page inside its own nav) hides this page's OWN nav/footer -- otherwise
+   a visitor would see two navs stacked: the app's real one outside the
+   iframe, and this standalone page's Act-or-wait/Track-record one inside
+   it. Public, non-embedded visitors (search, direct link, the other two
+   public pages' own cross-links) see this page exactly as before. */
+if (new URLSearchParams(location.search).get("embed") === "1") {
+  document.addEventListener("DOMContentLoaded", () => {
+    const nav = document.getElementById("siteNav");
+    const foot = document.getElementById("siteFooter");
+    if (nav) nav.style.display = "none";
+    if (foot) foot.style.display = "none";
+  });
+}
+</script>
 
 <div class="eyebrow">Joint War Committee listed areas &middot; war risk zones, mapped</div>
 <h1>Which waters are listed for war risk &mdash; and when they changed</h1>
@@ -3102,7 +3118,7 @@ JWC circular. Switch to <em>Both</em> to see the water added on 29 July 2026.</p
   treat it as situational awareness, not a data source this app draws conclusions from.</p>
 </section>
 
-<footer class="foot">
+<footer class="foot" id="siteFooter">
   <span>Chokepoint Access &mdash; maritime war risk timing</span>
   <a href="threshold-engine.html">Act or wait</a>
   <a href="index.html">Track record</a>
