@@ -25,7 +25,6 @@ in separate fields; never merge them.
 
 from __future__ import annotations
 
-import dataclasses
 import math
 import sys
 from collections import Counter
@@ -60,20 +59,6 @@ def panel_for(corridor: str, readings: dict, history: dict | None) -> dict:
     low_warning = recovery.low_warning_note(history, corridor) if history else None
     wr = WARRISK_BY_CORRIDOR.get(corridor)
 
-    # episode_window_remaining is the one field of recovery.snapshot() that's
-    # genuinely per-corridor (a fixed post-onset window on THIS corridor's own
-    # known onset date) -- recovery_state/duration_analogues/conditional_remaining
-    # describe the single global TAR series instead (recovery.py's own
-    # SCOPE_NOTE) and are computed once in all_panels(), not repeated here.
-    episode_window_remaining = None
-    if history is not None:
-        try:
-            snap = recovery.snapshot(history, corridor)
-        except ValueError:
-            snap = None
-        if snap and snap.episode_window_remaining:
-            episode_window_remaining = dataclasses.asdict(snap.episode_window_remaining)
-
     return {
         "corridor": corridor,
         "regime": match["regime"],
@@ -91,7 +76,6 @@ def panel_for(corridor: str, readings: dict, history: dict | None) -> dict:
         "response_character": profile.response_character,
         "tested_incident_count": len(profile.tested_incidents),
         "low_warning": low_warning,
-        "episode_window_remaining": episode_window_remaining,
         "warrisk_multiple": wr.multiple if wr else None,
         "warrisk_days": wr.days if wr else None,
         "warrisk_onset": str(wr.onset) if wr else None,
@@ -396,30 +380,6 @@ def all_panels() -> tuple[dict, list[dict]]:
     for p in panels:
         p["share_meter_svg"] = share_meter_svg(p["share"], p["share_avg"], max_share)
 
-    # recovery_state/duration_analogues/conditional_remaining (src/recovery.py)
-    # describe the single global TAR series -- identical for every corridor by
-    # construction (recovery.snapshot()'s own SCOPE_NOTE) -- so computed once
-    # here, not per corridor. snapshot() still requires *a* corridor argument;
-    # any real one gives the same global fields, confirmed directly against
-    # recovery.py's source (corridor only gates the unknown-corridor check and
-    # the per-corridor episode_window_remaining, dropped below since that
-    # field is NOT global and panel_for() already attaches each corridor's own).
-    recovery_global = None
-    if history is not None:
-        try:
-            raw_snap = recovery.snapshot(history, next(iter(tar_ingest.CORRIDORS)))
-        except ValueError:
-            raw_snap = None
-        if raw_snap:
-            recovery_global = dataclasses.asdict(raw_snap)
-            recovery_global.pop("episode_window_remaining", None)
-            recovery_global.pop("corridor", None)
-            recovery_global["trajectory_svg"] = (
-                recovery_trajectory_svg(history, raw_snap.recovery_state)
-                if raw_snap.recovery_state else None)
-            recovery_global["duration_dotplot_svg"] = duration_dotplot_svg(
-                raw_snap.duration_analogues, raw_snap.episode_months_so_far)
-
     global_reading = {
         "as_of": readings["as_of"],
         "band": readings["band"],
@@ -431,6 +391,5 @@ def all_panels() -> tuple[dict, list[dict]]:
         "history_months_alarm": sum(history["alarm"]) if history else None,
         "history_span": (f'{history["months"][0]} to {history["months"][-1]}'
                          if history else None),
-        "recovery": recovery_global,
     }
     return global_reading, panels

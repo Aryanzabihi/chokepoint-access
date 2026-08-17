@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% import "_recovery_macros.html" as rm %}
 {% block title %}Corridors — Chokepoint Access{% endblock %}
 {% block content %}
 <header class="masthead">
@@ -41,19 +40,6 @@
 </div>
 {% endif %}
 
-{% if global_reading.recovery %}
-<div class="panel" style="margin-bottom:var(--s5)">
-  <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
-    color:var(--ink-faint);margin:0 0 var(--s3);padding-bottom:8px;
-    border-bottom:1px solid var(--rule-soft)">Recovery</h3>
-  <p class="hint" style="margin-bottom:var(--s3)">How the current global alarm episode is
-    de-escalating (src/recovery.py, the TAR Time Recovery module) — one trajectory, shown
-    once, for the same reason the band and the chart above are each shown once. Each
-    corridor's own post-onset window, below, is a different notion of "episode."</p>
-  {{ rm.recovery_block(global_reading.recovery) }}
-</div>
-{% endif %}
-
 {% for p in panels %}
 <div class="panel" style="margin-bottom:var(--s4)">
   <div class="row" style="justify-content:space-between;align-items:baseline">
@@ -83,9 +69,6 @@
   </div>
 
   <p class="note" style="margin-top:var(--s4)">{{ p.onset_note }}</p>
-  {% if p.episode_window_remaining %}
-  <div style="margin-top:var(--s4);max-width:340px">{{ rm.episode_window_gauge(p.episode_window_remaining) }}</div>
-  {% endif %}
   {% if p.response_character %}<p class="note">{{ p.response_character }}</p>{% endif %}
   {% if p.low_warning %}<p class="note">{{ p.low_warning }}</p>{% endif %}
   {% if p.proxy_note %}<p class="note">Proxy attribution: {{ p.proxy_note }}.</p>{% endif %}
