@@ -397,8 +397,10 @@ with updated quotes &mdash;
   {% endif %}
 
   {% set dd = result.get('decision_deadline') %}
-  {% if dd %}
+  {% set ponr = result.get('point_of_no_return') %}
+  {% if dd or ponr %}
   <div class="stats" style="margin-top:var(--s4)">
+    {% if dd %}
     <div class="stat">
       <b>{% if dd.estimated_deadline_day is none %}&mdash;{% else %}{{ "%g"|format(dd.estimated_deadline_day) }}{% endif %}</b>
       <span>estimated decision deadline, in days from today &mdash;
@@ -406,6 +408,15 @@ with updated quotes &mdash;
       {%- elif dd.basis == "operational_schedule" %} operational schedule
       {%- else %} not computable{% endif %}</span>
     </div>
+    {% endif %}
+    {% if ponr %}
+    <div class="stat">
+      <b>{% if ponr.estimated_point_of_no_return_day is none %}&mdash;{% else %}{{ "%g"|format(ponr.estimated_point_of_no_return_day) }}{% endif %}</b>
+      <span>estimated point of no return, in days from today &mdash;
+      {%- if ponr.binding_constraint %} {{ ponr.binding_constraint }}
+      {%- else %} not determinable{% endif %}</span>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 
@@ -559,10 +570,11 @@ with updated quotes &mdash;
   vs high-probability state.</p>
   {% endif %}
 
-  {% if dd %}
+  {% if dd or ponr %}
   <details style="margin-top:var(--s4)">
     <summary>Timing</summary>
     <div class="inner">
+      {% if dd %}
       <div class="stats">
         <div class="stat">
           <b>{% if dd.estimated_deadline_day is none %}&mdash;{% else %}{{ "%g"|format(dd.estimated_deadline_day) }}{% endif %}</b>
@@ -585,6 +597,27 @@ with updated quotes &mdash;
       </div>
       <p class="hint" style="margin-top:var(--s3)">Basis: {{ dd.basis.replace('_', ' ') }}.
       {{ dd.explanation }}</p>
+      {% endif %}
+
+      {% if ponr %}
+      <div class="stats" style="margin-top:{{ 'var(--s4)' if dd else '0' }}">
+        <div class="stat">
+          <b>{% if ponr.estimated_point_of_no_return_day is none %}&mdash;{% else %}{{ "%g"|format(ponr.estimated_point_of_no_return_day) }}{% endif %}</b>
+          <span>estimated point of no return, in days from today (negative = already past)</span>
+        </div>
+        <div class="stat">
+          <b>{{ ponr.binding_constraint or "—" }}</b>
+          <span>binding constraint</span>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:var(--s3)">{{ ponr.explanation }}</p>
+      {% if ponr.not_determinable_constraints %}
+      <p class="hint" style="margin-top:var(--s3)">Not determinable from available data:</p>
+      <ul>
+        {% for c in ponr.not_determinable_constraints %}<li>{{ c.constraint }} &mdash; {{ c.reason }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% endif %}
     </div>
   </details>
   {% endif %}

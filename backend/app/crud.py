@@ -363,6 +363,7 @@ _INTAKE_ORDER_FIELDS = (
     "current_inventory", "inbound_confirmed_quantity", "safety_stock", "wacc_pct",
     "carrying_cost_pct_pa", "gross_margin_pct", "penalty_per_day", "disrupted_freight_quote",
     "reroute_quote", "war_risk_premium_quote", "emergency_replacement_quote",
+    "supplier_lead_time_days",
     "client_probability_estimate", "probability_range_low", "probability_range_high",
 )
 

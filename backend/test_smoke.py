@@ -806,6 +806,7 @@ def test_order_collects_everything_decision_no_longer_asks(client):
         "field_forecast_quantity": "45000", "field_forecast_window_days": "90",
         "field_current_inventory": "3000", "field_inbound_confirmed_quantity": "1500",
         "field_safety_stock": "1000", "field_delay_days_estimate": "18",
+        "field_supplier_lead_time_days": "21",
         "field_wacc_pct": "9", "field_carrying_cost_pct_pa": "12",
         "field_gross_margin_pct": "35", "field_penalty_per_day": "2500",
         "field_disrupted_freight_quote": "600000", "field_reroute_quote": "700000",
@@ -834,13 +835,16 @@ def test_order_collects_everything_decision_no_longer_asks(client):
     r = client.get(f"/strategy-decisions/new?order_id={order_id}")
     assert r.status_code == 200
     for name in ("forecast_quantity", "current_inventory", "safety_stock",
-                "delay_days_estimate", "wacc_pct", "war_risk_premium_quote"):
+                "delay_days_estimate", "supplier_lead_time_days", "wacc_pct",
+                "war_risk_premium_quote"):
         pos = r.text.index(f'name="field_{name}"')
         assert "from the order" in r.text[max(0, pos - 20):pos + 400], \
             f"{name} should be order-sourced, not asked again"
-    # demand_supply(6) + disruption_assumptions(1) + economic_exposure(8) +
-    # probability(2, one block for the point estimate, one for the range) = 17
-    assert r.text.count("from the order") >= 17
+    # demand_supply(6) + disruption_assumptions(2, module 3 added
+    # supplier_lead_time_days alongside delay_days_estimate) +
+    # economic_exposure(8) + probability(2, one block for the point
+    # estimate, one for the range) = 18
+    assert r.text.count("from the order") >= 18
 
     # build the decision replicating EXACTLY what those hidden inputs (not
     # anything hand-typed) would post -- the real proof this needs nothing
@@ -852,7 +856,8 @@ def test_order_collects_everything_decision_no_longer_asks(client):
         "field_quantity_unit": "MT", "field_days_of_cover": "40", "field_forecast_quantity": "45000",
         "field_forecast_window_days": "90", "field_current_inventory": "3000",
         "field_inbound_confirmed_quantity": "1500", "field_safety_stock": "1000",
-        "field_delay_days_estimate": "18", "field_wacc_pct": "9",
+        "field_delay_days_estimate": "18", "field_supplier_lead_time_days": "21",
+        "field_wacc_pct": "9",
         "field_carrying_cost_pct_pa": "12", "field_gross_margin_pct": "35",
         "field_penalty_per_day": "2500", "field_disrupted_freight_quote": "600000",
         "field_reroute_quote": "700000", "field_war_risk_premium_quote": "340000",
@@ -871,6 +876,7 @@ def test_order_collects_everything_decision_no_longer_asks(client):
     assert input_data["fields"]["wacc_pct"] == 0.09
     assert input_data["fields"]["war_risk_premium_quote"] == 340000.0
     assert input_data["fields"]["forecast_quantity"] == 45000.0
+    assert input_data["fields"]["supplier_lead_time_days"] == 21.0
     assert input_data["client_probability_estimate"] == 0.62
     assert input_data["probability_range"] == [0.20, 0.75]
     # proves the probability genuinely came from the order, not a fallback
@@ -1685,6 +1691,139 @@ def test_decision_detail_tolerates_missing_decision_deadline(client):
     with Session(TEST_ENGINE) as session:
         user = session.exec(
             select(User).where(User.email == "old-deadline-shape@example.com")).first()
+        decision = StrategyDecision(
+            owner_user_id=user.id, scenario_id=sample["scenario_id"],
+            corridor=sample["corridor"],
+            input_json=json.dumps(sample), result_json=json.dumps(result))
+        session.add(decision)
+        session.commit()
+        session.refresh(decision)
+        decision_id = decision.id
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200, r.text
+    assert "Decision record" in r.text
+
+
+def test_point_of_no_return_self_consistent(client):
+    """The default sample now sets supplier_lead_time_days (15 days,
+    added alongside module 3 so intake.py's own "every Tier-1 field
+    filled" selftest invariant stays true) alongside its existing
+    days_of_cover/ship_date/contract_transit_time_days -- point_of_no_
+    return() has three real candidates to compare. Which one wins depends
+    on the real wall-clock date this test runs on (procurement_window_days
+    is ship_date-minus-today), so this asserts self-consistency against
+    the decision's own computed facts rather than a hardcoded day count --
+    same discipline as test_decision_deadline_operational_fallback."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "ponr-self-consistent@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    result = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()["result"]
+    ponr = result["point_of_no_return"]
+    assert ponr["binding_constraint"] in ("inventory remaining", "required delivery date",
+                                          "alternative supplier lead time")
+    candidate_days = {c["constraint"]: c["day_offset"] for c in ponr["candidate_constraints"]}
+    assert candidate_days[ponr["binding_constraint"]] == ponr["estimated_point_of_no_return_day"]
+    assert "alternative supplier lead time" in candidate_days   # real, computable for this sample
+    assert candidate_days["required delivery date"] == result["procurement_window"]["procurement_window_days"]
+    # supplier_lead_time_days (15) is shorter than contract_transit_time_days (25) in this
+    # sample, so the alt-supplier candidate is structurally always later than the
+    # procurement-window one, regardless of what day the test happens to run on.
+    assert candidate_days["alternative supplier lead time"] > candidate_days["required delivery date"]
+    assert len(ponr["not_determinable_constraints"]) == 8   # the 8 always-absent constraints only
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200
+    assert "Timing" in r.text
+    assert "estimated point of no return" in r.text
+    assert "binding constraint" in r.text
+
+
+def test_point_of_no_return_alternative_supplier_binding(client):
+    """A real order-form round trip: supplier_lead_time_days, posted
+    through the actual /orders form (not the JSON API, which deliberately
+    doesn't get this field -- see the module's own scope notes), renders
+    back on the order's own detail page, round-trips into a linked
+    decision as an order-sourced "from the order" field, and reaches
+    point_of_no_return() as a real candidate constraint. The tie-break
+    arithmetic itself is already hand-verified in decision_engine.py's own
+    selftest -- this test is about the plumbing, not re-deriving that
+    math."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "ponr-alt-supplier@example.com",
+                                  "password": "correct horse battery staple"})
+
+    r = client.post("/orders", data={
+        "corridor": "Strait of Hormuz", "stage": "pre_order", "sku": "widget",
+        "quantity": "1000", "quantity_unit": "MT", "incoterm": "FOB",
+        "field_ship_date": "2026-12-01", "field_supplier_lead_time_days": "10",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    order_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    r = client.get(f"/orders/{order_id}")
+    assert r.status_code == 200
+    assert "10" in r.text   # the lead time renders back on the order's own detail page
+
+    r = client.get(f"/strategy-decisions/new?order_id={order_id}")
+    assert r.status_code == 200
+    pos = r.text.index('name="field_supplier_lead_time_days"')
+    assert "from the order" in r.text[max(0, pos - 20):pos + 400]
+
+    sample = _sample_intake()
+    r = _create_decision(client, sample, order_id=order_id)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    result = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()["result"]
+    ponr = result["point_of_no_return"]
+    assert any(c["constraint"] == "alternative supplier lead time"
+              for c in ponr["candidate_constraints"])
+
+
+def test_decision_detail_tolerates_missing_point_of_no_return(client):
+    """Same regression pattern as
+    test_decision_detail_tolerates_missing_decision_deadline: a
+    StrategyDecision saved before this key existed has a result_json
+    missing it entirely -- both new template blocks must use
+    result.get(...), never dot access."""
+    import sys
+    from pathlib import Path
+
+    from sqlmodel import select
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    from app import strategy_decision as sd
+    from app.models import StrategyDecision, User
+
+    client.post("/signup", data={"email": "old-ponr-shape@example.com",
+                                  "password": "correct horse battery staple"})
+
+    sample = _sample_intake()
+    result = sd.compute_decision(sample)
+    assert "point_of_no_return" in result   # current engine always sets it
+    del result["point_of_no_return"]        # simulate a pre-existing-field row
+
+    with Session(TEST_ENGINE) as session:
+        user = session.exec(
+            select(User).where(User.email == "old-ponr-shape@example.com")).first()
         decision = StrategyDecision(
             owner_user_id=user.id, scenario_id=sample["scenario_id"],
             corridor=sample["corridor"],

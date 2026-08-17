@@ -64,6 +64,7 @@ DISPLAY_LABELS: dict[str, str] = {
     "contract_transit_time_days": "Contract Transit Time",
     "delay_days_estimate": "Estimated Delay",
     "forecast_window_days": "Forecast Window",
+    "supplier_lead_time_days": "Alternative Supplier Lead Time",
 }
 
 

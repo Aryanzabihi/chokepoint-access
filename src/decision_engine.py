@@ -927,6 +927,159 @@ def decision_deadline(matrix: list[dict], robustness: dict, recommended: str,
 
 
 # --------------------------------------------------------------------------
+# Point-of-No-Return Detector (module 3) — "when may the ability to act
+# effectively disappear" (newmodules.txt module_3_point_of_no_return_
+# detector), distinct from decision_deadline() by the spec's own words:
+# "decision_deadline: when should I act? point_of_no_return: when may the
+# ability to act effectively disappear?" -- so this compares the latest day
+# each mitigation option can still satisfy operational requirements, never
+# an economic preference crossover.
+#
+# Three of newmodules.txt's eleven tracked_constraints have real data
+# behind them anywhere in this codebase, each already computed elsewhere,
+# reused here, never recomputed: inventory remaining
+# (demand_supply_stockout_date()), required delivery date
+# (procurement_window()'s procurement_window_days), and alternative
+# supplier lead time (procurement_window()'s supply_window_days -- ship_date
+# alone, deliberately not procurement_window_days, since contract transit
+# time is a freight concept unrelated to an alternative supplier's own lead
+# time -- minus supplier_lead_time_days). The other eight have no field
+# anywhere in this codebase and are always reported not_determinable, by
+# name, never silently omitted -- the spec's own "if no reliable data
+# exists ... return 'not determinable from available data' rather than
+# inventing a date."
+# --------------------------------------------------------------------------
+
+ALWAYS_NOT_DETERMINABLE_CONSTRAINTS = (
+    ("supplier capacity",
+     "no supplier-capacity field exists anywhere in this codebase."),
+    ("alternative supplier availability",
+     "no field captures confirmed alternative-supplier capacity/availability -- "
+     "supplier_lead_time_days, when supplied, is a lead-time estimate, not an "
+     "availability confirmation."),
+    ("freight capacity",
+     "no freight-capacity field exists anywhere in this codebase."),
+    ("alternative route availability",
+     "no alternative-route field exists anywhere in this codebase."),
+    ("production schedule",
+     "no production-schedule field exists anywhere in this codebase."),
+    ("contractual constraints",
+     "no contractual-flexibility field exists anywhere in this codebase."),
+    ("minimum feasible mitigation lead time",
+     "no field aggregates a minimum lead time across mitigation options -- only "
+     "the alternative supplier's own lead time is ever tracked, and only when "
+     "supplied."),
+    ("expected price escalation",
+     "disruption_attributable_price_change was deliberately removed as an input "
+     "(enginev2.md section 5) -- separating a market-wide commodity move from the "
+     "share attributable to one disruption is an econometric judgment, not a "
+     "company record."),
+)
+
+
+def point_of_no_return(intake_data: dict, proc_window: ProcurementWindow,
+                       stockout_date: str | None, *, today: date | None = None) -> dict:
+    """estimated_point_of_no_return_day/binding_constraint/basis/
+    candidate_constraints/not_determinable_constraints/explanation.
+
+    Compares up to three real, already-computed candidate dates (never a
+    new forecast) and reports whichever is EARLIEST as the binding
+    constraint, by name -- see the module comment above for where each
+    comes from. Every other newmodules.txt tracked_constraint this
+    codebase has no data for is listed in not_determinable_constraints,
+    always, whether or not any candidate was computable for this decision.
+
+    estimated_point_of_no_return_day is a day offset from today (negative =
+    already past), matching decision_deadline()'s own estimated_deadline_
+    day convention. binding_constraint/basis are None/"not_determinable"
+    only when NONE of the three candidates are computable for this
+    decision.
+
+    today defaults to the real current date, like procurement_window() and
+    demand_supply_stockout_date() -- a countdown that didn't move with real
+    time would be the wrong kind of honest -- but accepts an explicit
+    today= for reproducible testing, same convention. Not threaded through
+    by build_decision() itself, same as those two."""
+    today = today or datetime.now(timezone.utc).date()
+    f = intake_data.get("fields", {})
+
+    candidates: list[dict] = []
+    not_determinable: list[dict] = []
+
+    if stockout_date is not None:
+        candidates.append({
+            "constraint": "inventory remaining",
+            "day_offset": (date.fromisoformat(stockout_date) - today).days,
+            "detail": f"on-hand and inbound cover would be exhausted by {stockout_date}",
+        })
+    else:
+        not_determinable.append({
+            "constraint": "inventory remaining",
+            "reason": "no days-of-cover figure (direct or netted from forecast/inventory/"
+                     "inbound/safety-stock fields) on file for this decision.",
+        })
+
+    if proc_window.procurement_window_days is not None:
+        candidates.append({
+            "constraint": "required delivery date",
+            "day_offset": proc_window.procurement_window_days,
+            "detail": "a normal-schedule purchase could no longer be placed in time to meet "
+                     "the required ship date by normal lead time",
+        })
+    else:
+        reason = ("ship_date not supplied." if proc_window.supply_window_days is None else
+                  "contract_transit_time_days not supplied, so the normal-schedule purchase "
+                  "window can't be computed.")
+        not_determinable.append({"constraint": "required delivery date", "reason": reason})
+
+    lead_time = f.get("supplier_lead_time_days")
+    if proc_window.supply_window_days is not None and lead_time is not None:
+        candidates.append({
+            "constraint": "alternative supplier lead time",
+            "day_offset": proc_window.supply_window_days - int(lead_time),
+            "detail": f"the alternative supplier's own quoted lead time ({lead_time:g} days) "
+                     f"would no longer fit before the required ship date",
+        })
+    else:
+        reason = ("no alternative-supplier lead time on file." if lead_time is None else
+                  "ship_date not supplied.")
+        not_determinable.append({"constraint": "alternative supplier lead time", "reason": reason})
+
+    not_determinable.extend({"constraint": c, "reason": r}
+                            for c, r in ALWAYS_NOT_DETERMINABLE_CONSTRAINTS)
+
+    if not candidates:
+        conditional_reasons = "; ".join(
+            f"{c['constraint']} ({c['reason']})" for c in not_determinable[:3])
+        return {
+            "estimated_point_of_no_return_day": None,
+            "binding_constraint": None,
+            "basis": "not_determinable",
+            "candidate_constraints": [],
+            "not_determinable_constraints": not_determinable,
+            "explanation": f"Not determinable from available data: {conditional_reasons}",
+        }
+
+    earliest = min(candidates, key=lambda c: c["day_offset"])
+    others = [c for c in candidates if c is not earliest]
+    others_note = " ".join(f"{c['constraint']} would bind on day {c['day_offset']}." for c in others)
+    when = (f"day {earliest['day_offset']}" if earliest["day_offset"] >= 0 else
+           f"{-earliest['day_offset']} day(s) ago (day {earliest['day_offset']})")
+    return {
+        "estimated_point_of_no_return_day": earliest["day_offset"],
+        "binding_constraint": earliest["constraint"],
+        "basis": earliest["constraint"].replace(" ", "_"),
+        "candidate_constraints": candidates,
+        "not_determinable_constraints": not_determinable,
+        "explanation": (
+            f"Estimated point of no return: {when}, bound by {earliest['constraint']} — "
+            f"{earliest['detail']}. {others_note} "
+            f"{len(not_determinable)} other tracked constraint(s) could not be determined "
+            f"from available data (see not_determinable_constraints)."),
+    }
+
+
+# --------------------------------------------------------------------------
 # Ledger and grades (section 9)
 # --------------------------------------------------------------------------
 
@@ -1220,6 +1373,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
     strategy_ranking = [r["name"] for r in sorted(strategy_rows, key=lambda r: r["expected_cost"])
                         if r["name"]]
     deadline = decision_deadline(counterfactual, robustness, recommended, proc_window)
+    ponr = point_of_no_return(intake_data, proc_window, stockout_date)
 
     flips = solve_flips(intake_data, strategies, premium_analogue, ranking_probability)
     regret = regret_at_range(strategies, intake_data, premium_analogue,
@@ -1340,6 +1494,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         "scenario_robustness": robustness,
         "strategy_ranking": strategy_ranking,
         "decision_deadline": deadline,
+        "point_of_no_return": ponr,
         "flip_points": [asdict(fp) for fp in flips],
         "regret": regret,
         "value_of_information": voi,
@@ -1626,6 +1781,7 @@ def _sample_intake() -> dict:
             "ship_date": "2026-09-01", "cargo_value": 5_000_000, "quantity": 50_000,
             "quantity_unit": "MT", "contract_freight_rate": 400_000,
             "contract_transit_time_days": 25, "days_of_cover": 10, "delay_days_estimate": 11,
+            "supplier_lead_time_days": 15,
             # Demand & supply netting: 45,000 MT forecast over 90 days (500/day),
             # 3,000 on hand + 1,500 confirmed inbound - 1,000 safety stock =
             # 3,500 net available -> derives to 7 days of cover, DIFFERENT from
@@ -2077,6 +2233,78 @@ def selftest() -> int:
     assert result_pw["decision_deadline"]["basis"] == "operational_schedule"
     assert result_pw["decision_deadline"]["estimated_deadline_day"] == \
         result_pw["procurement_window"]["procurement_window_days"]
+
+    # --- point_of_no_return() (module 3): compares up to three real
+    # candidate dates and reports the earliest as binding, by name.
+    today_ponr = date(2026, 8, 13)
+
+    # "inventory remaining" wins: cover runs out well before the
+    # procurement window closes.
+    pw_far = ProcurementWindow(supply_window_days=100, procurement_window_days=80, grade="DERIVED")
+    stockout_soon = demand_supply_stockout_date(15, today=today_ponr)
+    ponr_stockout = point_of_no_return({"fields": {}}, pw_far, stockout_soon, today=today_ponr)
+    assert ponr_stockout["binding_constraint"] == "inventory remaining"
+    assert ponr_stockout["estimated_point_of_no_return_day"] == 15, ponr_stockout
+    assert ponr_stockout["basis"] == "inventory_remaining"
+
+    # "required delivery date" wins: the procurement window closes sooner
+    # than inventory exhaustion (and no alternative-supplier data at all).
+    pw_soon = ProcurementWindow(supply_window_days=30, procurement_window_days=5, grade="DERIVED")
+    stockout_later = demand_supply_stockout_date(40, today=today_ponr)
+    ponr_pw = point_of_no_return({"fields": {}}, pw_soon, stockout_later, today=today_ponr)
+    assert ponr_pw["binding_constraint"] == "required delivery date"
+    assert ponr_pw["estimated_point_of_no_return_day"] == 5, ponr_pw
+    assert ponr_pw["basis"] == "required_delivery_date"
+
+    # "alternative supplier lead time" wins -- the real differentiator vs
+    # decision_deadline(), which has no equivalent axis at all.
+    pw_alt = ProcurementWindow(supply_window_days=30, procurement_window_days=20, grade="DERIVED")
+    stockout_alt = demand_supply_stockout_date(25, today=today_ponr)
+    alt_data = {"fields": {"supplier_lead_time_days": 28}}   # 30 - 28 = day 2
+    ponr_alt = point_of_no_return(alt_data, pw_alt, stockout_alt, today=today_ponr)
+    assert ponr_alt["binding_constraint"] == "alternative supplier lead time"
+    assert ponr_alt["estimated_point_of_no_return_day"] == 2, ponr_alt
+    assert ponr_alt["basis"] == "alternative_supplier_lead_time"
+    assert any(c["constraint"] == "alternative supplier lead time"
+              for c in ponr_alt["candidate_constraints"])
+
+    # not determinable: nothing on file at all -- the module's own explicit
+    # rule, never an invented date. All 11 tracked_constraints named.
+    ponr_none = point_of_no_return({"fields": {}}, ProcurementWindow(None, None, "ABSENT"), None,
+                                   today=today_ponr)
+    assert ponr_none["estimated_point_of_no_return_day"] is None
+    assert ponr_none["binding_constraint"] is None
+    assert ponr_none["basis"] == "not_determinable"
+    assert "not determinable from available data" in ponr_none["explanation"].lower()
+    assert len(ponr_none["not_determinable_constraints"]) == 11, ponr_none["not_determinable_constraints"]
+
+    # every other newmodules.txt tracked_constraint is explicitly named,
+    # not silently dropped, regardless of whether this decision has a
+    # binding constraint.
+    nd_names = {c["constraint"] for c in ponr_alt["not_determinable_constraints"]}
+    assert {"supplier capacity", "alternative supplier availability", "freight capacity",
+           "alternative route availability", "production schedule", "contractual constraints",
+           "minimum feasible mitigation lead time", "expected price escalation"} <= nd_names
+
+    # end to end: build_decision() wires it through under its own key,
+    # using its own real wall-clock proc_window/stockout_date -- structural
+    # check only (wall-clock-dependent by design), same convention as
+    # result_pw's own procurement_window assertions above. The sample
+    # intake now DOES set supplier_lead_time_days (15 days, added this
+    # module so the "every Tier-1 field filled" invariant a few sections up
+    # stays true), so it must appear as a real candidate, not not_determinable.
+    result_ponr = build_decision(data)
+    assert "point_of_no_return" in result_ponr
+    assert result_ponr["point_of_no_return"]["basis"] in (
+        "inventory_remaining", "required_delivery_date", "alternative_supplier_lead_time")
+    assert any(c["constraint"] == "alternative supplier lead time"
+              for c in result_ponr["point_of_no_return"]["candidate_constraints"])
+
+    no_alt_supplier_data = json.loads(json.dumps(data))
+    no_alt_supplier_data["fields"]["supplier_lead_time_days"] = None
+    result_ponr_no_alt = build_decision(no_alt_supplier_data)
+    assert any(c["constraint"] == "alternative supplier lead time"
+              for c in result_ponr_no_alt["point_of_no_return"]["not_determinable_constraints"])
 
     # --- reassess triggers: named plainly from state already computed,
     # never a new prediction of when they'll fire. The sample scenario has

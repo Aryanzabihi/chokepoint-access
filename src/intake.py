@@ -161,6 +161,9 @@ FIELDS: list[FieldSpec] = [
     FieldSpec("days_of_cover", 1, "logistics", "ERP / WMS", "days", group="demand_supply"),
     FieldSpec("delay_days_estimate", 1, "procurement", "shipping schedule / broker estimate",
              "days", group="disruption_assumptions"),
+    FieldSpec("supplier_lead_time_days", 1, "procurement",
+             "alternative supplier quote / broker estimate", "days",
+             group="disruption_assumptions"),
 
     # Demand & supply netting (forecast + inventory + inbound + safety
     # stock -> days of cover, stockout date, demand/quantity at risk --
@@ -649,10 +652,12 @@ def selftest() -> int:
     assert t1 < t2 < t3, (len(t1), len(t2), len(t3))
     # section 4.2's 8 Tier-1 fields (quantity split in two) + 5 demand/supply
     # netting fields (forecast_quantity, forecast_window_days,
-    # current_inventory, inbound_confirmed_quantity, safety_stock)
-    assert len(t1) == 13, sorted(t1)
-    assert len(t2) == 17, sorted(t2)         # + 4 Tier-2 fields
-    assert len(t3) == 21, sorted(t3)         # + 4 Tier-3 fields
+    # current_inventory, inbound_confirmed_quantity, safety_stock) +
+    # supplier_lead_time_days (module 3, Point-of-No-Return's alternative-
+    # supplier candidate)
+    assert len(t1) == 14, sorted(t1)
+    assert len(t2) == 18, sorted(t2)         # + 4 Tier-2 fields
+    assert len(t3) == 22, sorted(t3)         # + 4 Tier-3 fields
 
     # fields_by_group: every field appears in exactly one group, in
     # GROUPS's order, and no group is shown empty.
