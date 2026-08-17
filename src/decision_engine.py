@@ -1080,6 +1080,100 @@ def point_of_no_return(intake_data: dict, proc_window: ProcurementWindow,
 
 
 # --------------------------------------------------------------------------
+# Shadow Price of Geopolitical Risk Engine (module 4) -- "how much expected
+# economic cost is attributable to the geopolitical disruption relative to a
+# baseline" (newmodules.txt module_4_shadow_price_engine). Pure repackaging:
+# baseline_costbreakdown()/disrupted_costbreakdown()/welfare_gap() already
+# compute every number this needs (build_decision() calls all three just
+# above); this only relabels them into the spec's own vocabulary
+# (baseline_cost/risk_adjusted_cost/shadow_price) and adds the per-component
+# breakdown and honest gap list newmodules.txt itself asks for ("if some
+# cost components are missing, identify them explicitly"). No new intake
+# read, no recomputation -- shadow_price == gap["private"] ==
+# result["exposure"]["avoidable"] always, same subtraction under a third
+# name.
+#
+# Two of the spec's 11 cost_components are deliberately NOT in
+# COST_COMPONENTS_NOT_COMPUTED below, because they are not separate gaps:
+#   "freight" -- this codebase has exactly one freight/transport cost path
+#     (contract_freight_rate / disrupted_freight_quote -> CostBreakdown's
+#     "transport" key); "freight" and "transport" are the same computed
+#     quantity here, not two components.
+#   "disruption loss" -- this is what shadow_price itself already equals
+#     (disrupted_cb.total - baseline_cb.total); listing it as missing would
+#     misname the module's own headline result as an uncounted input.
+#
+# Not ledgered: baseline_costbreakdown()/disrupted_costbreakdown()'s own
+# components were never individually ledgered either -- result["exposure"]
+# has shipped without ledger backing since module 1. This keeps the same
+# dollar figure consistently graded (or ungraded) under both names rather
+# than making shadow_price stricter than the exposure key it repackages.
+# --------------------------------------------------------------------------
+
+COST_COMPONENTS_NOT_COMPUTED = (
+    ("commodity",
+     "always 0 in both baseline and disrupted breakdowns by deliberate design "
+     "(enginev2.md section 5) -- disruption_attributable_price_change was removed as an "
+     "input because separating a market-wide commodity move from the share attributable "
+     "to one disruption is an econometric judgment, not a company record; a real "
+     "commodity exposure on this shipment, if any, is not reflected here."),
+    ("expediting",
+     "no expedited-freight cost field or computation exists anywhere in this codebase."),
+    ("rerouting",
+     "reroute_quote is a real Tier-3 intake field but is not read by any cost "
+     "computation (conditional_loss/baseline_costbreakdown/disrupted_costbreakdown) -- "
+     "collected, if supplied, but not priced into a component."),
+    ("service-related economic loss",
+     "no standalone figure is computed; the overlapping pieces this codebase does track "
+     "(contractual late-delivery penalty, stockout-triggered gross-margin loss) are "
+     "already folded into the delay component above, not broken out separately."),
+    ("working-capital impact",
+     "CostBreakdown has no cash/working-capital component. The only working-capital-"
+     "shaped figure in this codebase is cash_impact (forward_buy_cost()), which is "
+     "per-strategy, answers a different question -- the financing cost of committing to "
+     "a specific mitigation early, not how the disruption itself changes working-capital "
+     "needs -- and never feeds CostBreakdown, so it cannot be pulled in here."),
+)
+
+
+def shadow_price_of_geopolitical_risk(baseline_cb: CostBreakdown, disrupted_cb: CostBreakdown,
+                                       gap: dict) -> dict:
+    """baseline_cost/risk_adjusted_cost/shadow_price/components/
+    cost_components_not_computed/interpretation -- newmodules.txt's own
+    vocabulary over exactly the three objects build_decision() already has
+    in hand. No recomputation, no intake_data argument needed.
+
+    components: per-component {baseline, disrupted, delta} for each of
+    CostBreakdown's 5 named keys -- the breakdown Section 4 and the (4) card
+    never show (they only ever display the two totals and the gap)."""
+    components = {
+        name: {"baseline": round(baseline_cb.components[name], 2),
+              "disrupted": round(disrupted_cb.components[name], 2),
+              "delta": round(disrupted_cb.components[name] - baseline_cb.components[name], 2)}
+        for name in baseline_cb.components
+    }
+    baseline_cost = round(baseline_cb.total, 2)
+    risk_adjusted_cost = round(disrupted_cb.total, 2)
+    shadow_price = round(gap["private"], 2)
+    return {
+        "baseline_cost": baseline_cost,
+        "risk_adjusted_cost": risk_adjusted_cost,
+        "shadow_price": shadow_price,
+        "components": components,
+        "cost_components_not_computed": [{"component": c, "reason": r}
+                                         for c, r in COST_COMPONENTS_NOT_COMPUTED],
+        "interpretation": (
+            f"Under the stated baseline and disruption assumptions, geopolitical exposure "
+            f"adds an estimated {shadow_price:,.0f} to expected procurement cost "
+            f"({baseline_cost:,.0f} baseline vs {risk_adjusted_cost:,.0f} under the modeled "
+            f"disruption) — a modeled comparison, not an observed market price, and not a "
+            f"claim that the disruption alone caused this figure beyond what the priced "
+            f"components support. {len(COST_COMPONENTS_NOT_COMPUTED)} cost component(s) this "
+            f"module has no data for are listed separately."),
+    }
+
+
+# --------------------------------------------------------------------------
 # Ledger and grades (section 9)
 # --------------------------------------------------------------------------
 
@@ -1425,6 +1519,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
     baseline_cb = baseline_costbreakdown(intake_data)
     disrupted_cb = disrupted_costbreakdown(intake_data)
     gap = welfare_gap(disrupted_cb, baseline_cb)
+    shadow_price = shadow_price_of_geopolitical_risk(baseline_cb, disrupted_cb, gap)
 
     missing = intake.missing_fields(intake_data)
     for m in missing:
@@ -1500,6 +1595,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         "value_of_information": voi,
         "exposure": {"baseline": round(baseline_cb.total, 2), "disrupted": round(disrupted_cb.total, 2),
                     "avoidable": round(gap["private"], 2)},
+        "shadow_price": shadow_price,
         "ledger": ledger.as_list(),
         "weakest_grade": ledger.weakest(),
         "what_would_sharpen": what_would_sharpen(missing),
@@ -1839,6 +1935,24 @@ def selftest() -> int:
     expected_total_r = expected_delay_r + expected_inventory_r + expected_transport_r + expected_insurance_r
     assert abs(cl_reroute.total - expected_total_r) < 1e-6, (cl_reroute.total, expected_total_r)
     assert cl_reroute.total < cl_continue.total   # the mitigation genuinely mitigates
+
+    # --- module 4 (Shadow Price of Geopolitical Risk Engine): same
+    # subtraction as exposure/gap above, relabelled -- not re-derived.
+    baseline_cb = baseline_costbreakdown(data)
+    disrupted_cb = disrupted_costbreakdown(data)
+    gap_check = welfare_gap(disrupted_cb, baseline_cb)
+    assert abs(baseline_cb.total - 400_000.0) < 1e-6
+    assert abs(disrupted_cb.total - 1_744_178.082191781) < 1e-3
+    assert abs(gap_check["private"] - cl_continue.total) < 1e-6   # same number, cross-checked
+    sp = shadow_price_of_geopolitical_risk(baseline_cb, disrupted_cb, gap_check)
+    assert sp["baseline_cost"] == round(baseline_cb.total, 2)
+    assert sp["risk_adjusted_cost"] == round(disrupted_cb.total, 2)
+    assert sp["shadow_price"] == round(gap_check["private"], 2)
+    assert sp["components"]["commodity"] == {"baseline": 0.0, "disrupted": 0.0, "delta": 0.0}
+    missing_names = {c["component"] for c in sp["cost_components_not_computed"]}
+    assert missing_names == {"commodity", "expediting", "rerouting",
+                             "service-related economic loss", "working-capital impact"}
+    assert "freight" not in missing_names and "disruption loss" not in missing_names
 
     # E[C_s] with an explicit probability — assertion #1.
     p = 0.22

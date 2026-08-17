@@ -398,7 +398,8 @@ with updated quotes &mdash;
 
   {% set dd = result.get('decision_deadline') %}
   {% set ponr = result.get('point_of_no_return') %}
-  {% if dd or ponr %}
+  {% set shadow = result.get('shadow_price') %}
+  {% if dd or ponr or shadow %}
   <div class="stats" style="margin-top:var(--s4)">
     {% if dd %}
     <div class="stat">
@@ -415,6 +416,12 @@ with updated quotes &mdash;
       <span>estimated point of no return, in days from today &mdash;
       {%- if ponr.binding_constraint %} {{ ponr.binding_constraint }}
       {%- else %} not determinable{% endif %}</span>
+    </div>
+    {% endif %}
+    {% if shadow %}
+    <div class="stat">
+      <b>{{ "{:,.0f}".format(shadow.shadow_price) }}</b>
+      <span>shadow price of geopolitical risk &mdash; risk-adjusted cost minus baseline</span>
     </div>
     {% endif %}
   </div>
@@ -617,6 +624,65 @@ with updated quotes &mdash;
         {% for c in ponr.not_determinable_constraints %}<li>{{ c.constraint }} &mdash; {{ c.reason }}</li>{% endfor %}
       </ul>
       {% endif %}
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if shadow %}
+  <details style="margin-top:var(--s4)">
+    <summary>Valuation</summary>
+    <div class="inner">
+      <div class="stats">
+        <div class="stat">
+          <b>{{ "{:,.0f}".format(shadow.baseline_cost) }}</b>
+          <span>baseline cost &mdash; reference, no additional disruption</span>
+        </div>
+        <div class="stat">
+          <b>{{ "{:,.0f}".format(shadow.risk_adjusted_cost) }}</b>
+          <span>risk-adjusted cost &mdash; under the modeled disruption</span>
+        </div>
+        <div class="stat">
+          <b>{{ "{:,.0f}".format(shadow.shadow_price) }}</b>
+          <span>shadow price &mdash; risk-adjusted minus baseline</span>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:var(--s3)">{{ shadow.interpretation }}</p>
+
+      <p class="hint" style="margin-top:var(--s3)">Cost components, baseline vs. disrupted:</p>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Component</th><th class="m">Baseline</th><th class="m">Disrupted</th><th class="m">Delta</th></tr></thead>
+        <tbody>
+          <tr><td>transport</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.transport.baseline) }}</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.transport.disrupted) }}</td>
+            <td class="m">{{ "{:+,.0f}".format(shadow.components.transport.delta) }}</td></tr>
+          <tr><td>insurance</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.insurance.baseline) }}</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.insurance.disrupted) }}</td>
+            <td class="m">{{ "{:+,.0f}".format(shadow.components.insurance.delta) }}</td></tr>
+          <tr><td>delay</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.delay.baseline) }}</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.delay.disrupted) }}</td>
+            <td class="m">{{ "{:+,.0f}".format(shadow.components.delay.delta) }}</td></tr>
+          <tr><td>inventory</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.inventory.baseline) }}</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.inventory.disrupted) }}</td>
+            <td class="m">{{ "{:+,.0f}".format(shadow.components.inventory.delta) }}</td></tr>
+          <tr><td>commodity</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.commodity.baseline) }}</td>
+            <td class="m">{{ "{:,.0f}".format(shadow.components.commodity.disrupted) }}</td>
+            <td class="m">{{ "{:+,.0f}".format(shadow.components.commodity.delta) }}</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      {% if shadow.cost_components_not_computed %}
+      <p class="hint" style="margin-top:var(--s3)">Cost components this module has no data for:</p>
+      <ul>
+        {% for c in shadow.cost_components_not_computed %}<li>{{ c.component }} &mdash; {{ c.reason }}</li>{% endfor %}
+      </ul>
       {% endif %}
     </div>
   </details>
