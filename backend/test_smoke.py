@@ -1595,6 +1595,110 @@ def test_decision_detail_tolerates_missing_counterfactual_matrix(client):
     assert "Decision record" in r.text
 
 
+def test_decision_deadline_operational_fallback(client):
+    """The default sample scenario has no economic crossover data at
+    delay_days_estimate=11 (same register-depth fact as
+    test_cost_of_waiting_by_strategy_honest_absence), but it does have a
+    real ship_date -- decision_deadline() falls back to the operational
+    procurement_window fact rather than reporting nothing. Cross-checked
+    against the decision's own procurement_window figure, never a
+    hardcoded day count (it's wall-clock-dependent by design)."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "deadline-operational@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    result = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()["result"]
+    dd = result["decision_deadline"]
+    assert dd["basis"] == "operational_schedule"
+    assert dd["estimated_deadline_day"] == result["procurement_window"]["procurement_window_days"]
+    assert dd["uncertainty_range"] is None
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200
+    assert "Timing" in r.text
+    assert "operational schedule" in r.text
+    assert "estimated decision deadline" in r.text
+
+
+def test_decision_deadline_not_computable(client):
+    """No ship_date -> no operational fallback either, on top of the same
+    register-depth economic absence -- decision_deadline() states this
+    plainly rather than defaulting to a fabricated number."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "deadline-not-computable@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    sample["fields"]["ship_date"] = None
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    result = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()["result"]
+    dd = result["decision_deadline"]
+    assert dd["basis"] == "not_computable"
+    assert dd["estimated_deadline_day"] is None
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200
+    assert "not computable" in r.text
+
+
+def test_decision_detail_tolerates_missing_decision_deadline(client):
+    """Same regression pattern as
+    test_decision_detail_tolerates_missing_counterfactual_matrix: a
+    StrategyDecision saved before this key existed has a result_json
+    missing it entirely -- both new template blocks must use
+    result.get(...), never dot access."""
+    import sys
+    from pathlib import Path
+
+    from sqlmodel import select
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    from app import strategy_decision as sd
+    from app.models import StrategyDecision, User
+
+    client.post("/signup", data={"email": "old-deadline-shape@example.com",
+                                  "password": "correct horse battery staple"})
+
+    sample = _sample_intake()
+    result = sd.compute_decision(sample)
+    assert "decision_deadline" in result   # current engine always sets it
+    del result["decision_deadline"]        # simulate a pre-existing-field row
+
+    with Session(TEST_ENGINE) as session:
+        user = session.exec(
+            select(User).where(User.email == "old-deadline-shape@example.com")).first()
+        decision = StrategyDecision(
+            owner_user_id=user.id, scenario_id=sample["scenario_id"],
+            corridor=sample["corridor"],
+            input_json=json.dumps(sample), result_json=json.dumps(result))
+        session.add(decision)
+        session.commit()
+        session.refresh(decision)
+        decision_id = decision.id
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200, r.text
+    assert "Decision record" in r.text
+
+
 def test_alerts_job_runs_without_error(client):
     """alerts.run() opens its own session against app.db.engine, which in
     this process points at DATABASE_URL (the sqlite file), not the

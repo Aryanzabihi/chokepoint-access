@@ -396,6 +396,19 @@ with updated quotes &mdash;
 
   {% endif %}
 
+  {% set dd = result.get('decision_deadline') %}
+  {% if dd %}
+  <div class="stats" style="margin-top:var(--s4)">
+    <div class="stat">
+      <b>{% if dd.estimated_deadline_day is none %}&mdash;{% else %}{{ "%g"|format(dd.estimated_deadline_day) }}{% endif %}</b>
+      <span>estimated decision deadline, in days from today &mdash;
+      {%- if dd.basis == "economic_crossover" %} economic crossover
+      {%- elif dd.basis == "operational_schedule" %} operational schedule
+      {%- else %} not computable{% endif %}</span>
+    </div>
+  </div>
+  {% endif %}
+
   <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;
     color:var(--ink-faint);margin:var(--s5) 0 var(--s3);padding-bottom:8px;
     border-bottom:1px solid var(--rule-soft)">Why TAR recommends this</h3>
@@ -544,6 +557,36 @@ with updated quotes &mdash;
   probability sits at &mdash; the recommendation's own regret at each end. Two honest numbers,
   never blended into one: doing so would mean inventing a prior probability of being in the low-
   vs high-probability state.</p>
+  {% endif %}
+
+  {% if dd %}
+  <details style="margin-top:var(--s4)">
+    <summary>Timing</summary>
+    <div class="inner">
+      <div class="stats">
+        <div class="stat">
+          <b>{% if dd.estimated_deadline_day is none %}&mdash;{% else %}{{ "%g"|format(dd.estimated_deadline_day) }}{% endif %}</b>
+          <span>estimated decision deadline, in days from today (negative = already past)</span>
+        </div>
+        <div class="stat">
+          <b>{{ dd.preferred_action_before_deadline or "—" }}</b>
+          <span>preferred before the deadline</span>
+        </div>
+        <div class="stat">
+          <b>{{ dd.preferred_action_after_deadline or "—" }}</b>
+          <span>{% if dd.preferred_action_after_deadline %}preferred after the deadline{% else %}no specific action named after &mdash; see below{% endif %}</span>
+        </div>
+        {% if dd.uncertainty_range %}
+        <div class="stat">
+          <b>{{ dd.uncertainty_range.lower_bound_day if dd.uncertainty_range.lower_bound_day is not none else "—" }}&ndash;{{ dd.uncertainty_range.upper_bound_day }}</b>
+          <span>uncertainty range, day offset</span>
+        </div>
+        {% endif %}
+      </div>
+      <p class="hint" style="margin-top:var(--s3)">Basis: {{ dd.basis.replace('_', ' ') }}.
+      {{ dd.explanation }}</p>
+    </div>
+  </details>
   {% endif %}
 
   <h3 style="font:600 11px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;

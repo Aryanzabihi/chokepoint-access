@@ -822,6 +822,111 @@ def scenario_robustness(matrix: list[dict], recommended: str) -> dict:
 
 
 # --------------------------------------------------------------------------
+# Decision Deadline Engine (module 2) — "how long can I wait before acting
+# becomes economically preferable" (newmodules.txt module_2_decision_
+# deadline_engine). Tries a real economic crossover first, reusing
+# scenario_robustness()'s own disagreements rather than re-scanning a day
+# grid; falls back to the real operational procurement_window fact when the
+# economic axis has nothing to say (newmodules.txt itself allows "linked to
+# procurement economics AND operational constraints") -- never a third,
+# invented basis. Against the real committed register today the economic
+# basis is reachable in code but empirically dead (episodes.analogue()
+# returns None below day 139 and is flat from day 139 onward -- see
+# cost_of_waiting_unavailable_reason); it activates automatically the
+# moment the register gets a second post-peak observation, with no engine
+# change needed.
+# --------------------------------------------------------------------------
+
+def decision_deadline(matrix: list[dict], robustness: dict, recommended: str,
+                      proc_window: ProcurementWindow) -> dict:
+    """estimated_deadline_day/basis/preferred_action_before_deadline/
+    preferred_action_after_deadline/uncertainty_range/explanation.
+
+    basis="economic_crossover": the earliest day_offset among robustness's
+    own disagreements. uncertainty_range brackets between the last checked
+    day that still agreed with `recommended` and that flip day -- both real,
+    checked, dated grid points, never interpolated.
+
+    basis="operational_schedule": proc_window.procurement_window_days when
+    the economic axis found nothing. No uncertainty_range -- ship_date/
+    contract_transit_time_days are treated as fixed client-supplied facts
+    everywhere else in this engine (procurement_window() itself reports no
+    uncertainty), so this module does not invent one around them.
+    preferred_action_after_deadline is None here on purpose: an operational
+    deadline means "this stops being a normal-schedule decision," not "a
+    specific different strategy becomes preferred."
+
+    basis="not_computable": neither axis has anything -- stated in the
+    explanation, never a silent gap."""
+    if robustness["status"] == "not_robust":
+        first = min(robustness["disagreements"], key=lambda d: d["day_offset"])
+        checked = sorted({sc["day_offset"] for m in matrix for sc in m["scenarios"]
+                          if sc["scenario_kind"] == "episode_analogue"})
+        lower = max((d for d in checked if d < first["day_offset"]), default=None)
+        deadline_day = lower if lower is not None else first["day_offset"]
+        basis_note = (
+            f"no earlier checked day disagreed — day {first['day_offset']} is the earliest "
+            f"offset checked against the register at this decision's delay estimate, so the "
+            f"true crossover could fall earlier but is not checked below it."
+            if lower is None else
+            f"{recommended} still wins at day {lower}, the last checked day before the flip.")
+        return {
+            "estimated_deadline_day": deadline_day,
+            "basis": "economic_crossover",
+            "preferred_action_before_deadline": recommended,
+            "preferred_action_after_deadline": first["winner"],
+            "uncertainty_range": {"lower_bound_day": lower, "upper_bound_day": first["day_offset"]},
+            "explanation": (
+                f"At the {first['scenario']} episode analogue (day {first['day_offset']}), "
+                f"{first['winner']} has a lower expected total cost than {recommended} — driven "
+                f"by the war-risk insurance component of conditional loss, the only cost element "
+                f"that moves with elapsed time in this model; direct/action costs do not. "
+                f"{basis_note}"),
+        }
+
+    economic_note = ("no economic strategy crossover was found in the available real "
+                     "episode-analogue scenarios for this decision"
+                     if robustness["status"] == "robust" else
+                     "no real episode-analogue scenario is available yet to check for an "
+                     "economic strategy crossover")
+
+    if proc_window.procurement_window_days is not None:
+        day = proc_window.procurement_window_days
+        schedule_note = (
+            f"a normal-schedule purchase must be placed within {day} day(s) "
+            f"({proc_window.supply_window_days} day(s) until the material is required, minus "
+            f"the contract transit time) to still meet the required ship date by normal lead time."
+            if day >= 0 else
+            f"already {-day} day(s) past the point a normal-schedule purchase would need to "
+            f"have been made — any action now is expedited, not routine.")
+        return {
+            "estimated_deadline_day": day,
+            "basis": "operational_schedule",
+            "preferred_action_before_deadline": recommended,
+            "preferred_action_after_deadline": None,
+            "uncertainty_range": None,
+            "explanation": (
+                f"{economic_note.capitalize()}, so this deadline is the operational constraint "
+                f"instead: {schedule_note} No uncertainty range is given — ship_date and "
+                f"contract_transit_time_days are treated as fixed facts elsewhere in this engine, "
+                f"not estimates this module has a basis to bound. This does not claim a specific "
+                f"action becomes preferable afterward, only that the decision stops being a "
+                f"normal-schedule one."),
+        }
+
+    return {
+        "estimated_deadline_day": None,
+        "basis": "not_computable",
+        "preferred_action_before_deadline": recommended,
+        "preferred_action_after_deadline": None,
+        "uncertainty_range": None,
+        "explanation": (
+            f"{economic_note.capitalize()}, and no operational procurement window is computable "
+            f"(ship_date not supplied) — nothing to anchor an estimated decision deadline to."),
+    }
+
+
+# --------------------------------------------------------------------------
 # Ledger and grades (section 9)
 # --------------------------------------------------------------------------
 
@@ -1114,6 +1219,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
     robustness = scenario_robustness(counterfactual, recommended)
     strategy_ranking = [r["name"] for r in sorted(strategy_rows, key=lambda r: r["expected_cost"])
                         if r["name"]]
+    deadline = decision_deadline(counterfactual, robustness, recommended, proc_window)
 
     flips = solve_flips(intake_data, strategies, premium_analogue, ranking_probability)
     regret = regret_at_range(strategies, intake_data, premium_analogue,
@@ -1233,6 +1339,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         "counterfactual_matrix": counterfactual,
         "scenario_robustness": robustness,
         "strategy_ranking": strategy_ranking,
+        "decision_deadline": deadline,
         "flip_points": [asdict(fp) for fp in flips],
         "regret": regret,
         "value_of_information": voi,
@@ -1823,6 +1930,19 @@ def selftest() -> int:
         assert matching_scenario["expected_total_cost_delta"] == delta0
         assert matching_scenario["grade"] == "EPISODE_ANALOGUE"
 
+        # decision_deadline()'s economic_crossover basis -- the ONLY place
+        # this is reachable, since the real committed register is provably
+        # flat past day 139 (see below). Continue has no war-risk
+        # mitigation multiplier, so it takes the fixture's full day-24
+        # escalation; Partial reroute's 0.25 multiplier dampens it and
+        # becomes cheaper.
+        dd_crossover = result_cow["decision_deadline"]
+        assert dd_crossover["basis"] == "economic_crossover"
+        assert dd_crossover["estimated_deadline_day"] == 17, dd_crossover
+        assert dd_crossover["preferred_action_before_deadline"] == "Continue"
+        assert dd_crossover["preferred_action_after_deadline"] == "Partial reroute"
+        assert dd_crossover["uncertainty_range"] == {"lower_bound_day": 17, "upper_bound_day": 24}, dd_crossover
+
     # --- against the REAL, committed src/warrisk.csv: cost-of-waiting is
     # genuinely unavailable at this scenario's realistic delay (Hormuz's
     # only real post-onset observation is ~day 139), and the reason names
@@ -1928,6 +2048,35 @@ def selftest() -> int:
     assert result_pw["procurement_window"]["supply_window_days"] is not None
     pw_ledger_rows = [e for e in result_pw["ledger"] if e["field"] == "procurement_window_days"]
     assert pw_ledger_rows and pw_ledger_rows[0]["grade"] == "DERIVED"
+
+    # --- decision_deadline(): operational_schedule when the economic axis
+    # has nothing to say and a real procurement window exists -- reuses the
+    # pw object already hand-verified above (today pinned 2026-08-13) so
+    # the -6 figure is deterministic, not wall-clock-dependent.
+    _no_crossover = {"status": "not_computable", "recommended": "Continue"}
+    dd_op = decision_deadline([], _no_crossover, "Continue", pw)
+    assert dd_op["basis"] == "operational_schedule"
+    assert dd_op["estimated_deadline_day"] == -6, dd_op
+    assert dd_op["preferred_action_before_deadline"] == "Continue"
+    assert dd_op["preferred_action_after_deadline"] is None
+    assert dd_op["uncertainty_range"] is None
+
+    dd_absent = decision_deadline([], _no_crossover, "Continue",
+                                  ProcurementWindow(None, None, "ABSENT"))
+    assert dd_absent["basis"] == "not_computable"
+    assert dd_absent["estimated_deadline_day"] is None
+
+    # end to end: build_decision() wires it through using its own real
+    # wall-clock proc_window -- cross-checked against that same run's own
+    # procurement_window, never a hardcoded day count (procurement_window_
+    # days is wall-clock-dependent by design, same reason result_pw's own
+    # assertions above only check "is not None").
+    result_no_ship_date = build_decision(no_ship_date)
+    assert result_no_ship_date["decision_deadline"]["basis"] == "not_computable"
+    assert result_no_ship_date["decision_deadline"]["estimated_deadline_day"] is None
+    assert result_pw["decision_deadline"]["basis"] == "operational_schedule"
+    assert result_pw["decision_deadline"]["estimated_deadline_day"] == \
+        result_pw["procurement_window"]["procurement_window_days"]
 
     # --- reassess triggers: named plainly from state already computed,
     # never a new prediction of when they'll fire. The sample scenario has
