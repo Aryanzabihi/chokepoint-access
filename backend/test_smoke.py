@@ -1473,6 +1473,128 @@ def test_cost_of_waiting_by_strategy_honest_absence(client):
     assert "Cost of waiting not shown" in r.text
 
 
+def test_counterfactual_matrix_honest_absence(client):
+    """Same real-register-depth fact as cost_of_waiting_by_strategy's own
+    absence (delay_days_estimate=11 is below every corridor's earliest
+    comparable post-onset observation, ~day 139) -- counterfactual_matrix()
+    reshapes cost_of_waiting_by_strategy rather than recomputing it, so it
+    inherits the same honest absence: every strategy gets baseline only,
+    never a padded scenario column, and scenario_robustness is reported as
+    not_computable rather than a forced verdict."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "cf-matrix-absence@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    result = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()["result"]
+    # /analyze always uses default_strategies_for_stage(None) (Continue /
+    # Partial reroute / a blank third slot), never _sample_intake()'s own
+    # strategies list -- same real behavior test_gather_verdict's docstring
+    # already documents, not asserting the exact strategy set here.
+    matrix_by_name = {m["strategy"]: m for m in result["counterfactual_matrix"]}
+    assert "Continue" in matrix_by_name and "Partial reroute" in matrix_by_name
+    for name in ("Continue", "Partial reroute"):
+        scenarios = matrix_by_name[name]["scenarios"]
+        assert len(scenarios) == 1, scenarios   # honest absence, never padded
+        assert scenarios[0]["scenario_kind"] == "baseline"
+    assert result["scenario_robustness"]["status"] == "not_computable"
+    assert result["strategy_ranking"][0] == result["recommended"]
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200
+    assert "Only the baseline scenario is available" in r.text
+    assert "Scenario robustness not computable" in r.text
+
+
+def test_counterfactual_matrix_with_episode_scenarios(client):
+    """At delay_days_estimate=140 -- past day 139, the real committed
+    src/warrisk.csv's own earliest pooled post-onset observation -- the
+    real register (no synthetic fixture needed) produces genuine
+    episode-analogue scenario columns for every strategy, through the
+    actual live app. Confirms the matrix table renders real, named, dated
+    episodes, not a placeholder."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "cf-matrix-scenarios@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    sample["fields"]["delay_days_estimate"] = 140
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+
+    result = client.get(f"/api/v1/strategy-decisions/{decision_id}").json()["result"]
+    matrix_by_name = {m["strategy"]: m for m in result["counterfactual_matrix"]}
+    for name in ("Continue", "Partial reroute"):
+        scenarios = matrix_by_name[name]["scenarios"]
+        assert len(scenarios) > 1, scenarios
+        episode_scenarios = [s for s in scenarios if s["scenario_kind"] == "episode_analogue"]
+        assert episode_scenarios
+        assert all(s["grade"] == "EPISODE_ANALOGUE" for s in episode_scenarios)
+        labels = {s["scenario"] for s in episode_scenarios}
+        assert any("Hormuz" in label or "Bab-el-Mandeb" in label for label in labels), labels
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200
+    assert "scenario outcome matrix" in r.text
+
+
+def test_decision_detail_tolerates_missing_counterfactual_matrix(client):
+    """Same regression pattern as
+    test_decision_detail_tolerates_missing_procurement_window: a
+    StrategyDecision saved before this module's three new keys existed has
+    a result_json missing them entirely. Both new template blocks must use
+    result.get(...), never dot access, or an old row 500s the moment
+    someone opens it."""
+    import sys
+    from pathlib import Path
+
+    from sqlmodel import select
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    from app import strategy_decision as sd
+    from app.models import StrategyDecision, User
+
+    client.post("/signup", data={"email": "old-cf-matrix-shape@example.com",
+                                  "password": "correct horse battery staple"})
+
+    sample = _sample_intake()
+    result = sd.compute_decision(sample)
+    for key in ("counterfactual_matrix", "scenario_robustness", "strategy_ranking"):
+        assert key in result   # current engine always sets it
+        del result[key]        # simulate a pre-existing-field row
+
+    with Session(TEST_ENGINE) as session:
+        user = session.exec(
+            select(User).where(User.email == "old-cf-matrix-shape@example.com")).first()
+        decision = StrategyDecision(
+            owner_user_id=user.id, scenario_id=sample["scenario_id"],
+            corridor=sample["corridor"],
+            input_json=json.dumps(sample), result_json=json.dumps(result))
+        session.add(decision)
+        session.commit()
+        session.refresh(decision)
+        decision_id = decision.id
+
+    r = client.get(f"/strategy-decisions/{decision_id}")
+    assert r.status_code == 200, r.text
+    assert "Decision record" in r.text
+
+
 def test_alerts_job_runs_without_error(client):
     """alerts.run() opens its own session against app.db.engine, which in
     this process points at DATABASE_URL (the sqlite file), not the

@@ -166,6 +166,10 @@ class ConditionalLoss:
                                                     # strategy" (section 10-style transparency:
                                                     # already computed to derive delay/stockout
                                                     # above, surfaced here rather than discarded)
+    effective_delay_days: float | None = None       # delay_days_estimate + this strategy's
+                                                    # delay_days_delta -- same "already computed,
+                                                    # previously discarded" transparency, now also
+                                                    # surfaced for module_1's service_risk_stockout
 
 
 def conditional_loss(intake_data: dict, strategy: Strategy,
@@ -239,10 +243,12 @@ def conditional_loss(intake_data: dict, strategy: Strategy,
         return ConditionalLoss(strategy=strategy.name, components=components,
                                total=strategy.quoted_residual_loss, grade="CLIENT_QUOTED",
                                absent_components=absent,
-                               effective_days_of_cover=effective_days_of_cover)
+                               effective_days_of_cover=effective_days_of_cover,
+                               effective_delay_days=effective_delay_days)
     return ConditionalLoss(strategy=strategy.name, components=components, total=computed_total,
                            grade="DERIVED", absent_components=absent,
-                           effective_days_of_cover=effective_days_of_cover)
+                           effective_days_of_cover=effective_days_of_cover,
+                           effective_delay_days=effective_delay_days)
 
 
 # --------------------------------------------------------------------------
@@ -717,6 +723,105 @@ def cost_of_waiting_unavailable_reason(intake_data: dict, corridor: str, day_off
 
 
 # --------------------------------------------------------------------------
+# Procurement Counterfactual Engine (module 1) — a strategy x scenario
+# outcome matrix, assembled entirely from numbers build_decision() already
+# computes elsewhere. No new probability, severity, or disruption-magnitude
+# figure is invented anywhere below: "scenario" means a real, named, dated
+# episode analogue already gated by episodes.analogue()'s own n>=2 rule
+# (section 6.3: always plural, never averaged), never an invented severity
+# bucket.
+# --------------------------------------------------------------------------
+
+def counterfactual_matrix(strategy_rows: list[dict],
+                          cow_by_strategy: "dict[str, CostOfWaiting | None] | None") -> list[dict]:
+    """For each strategy, "baseline" relabels this decision's own
+    strategy_rows entry for that strategy (today, this strategy's real
+    quoted/derived expected cost, no analogue applied). Each further
+    scenario column relabels one (episode_label, day_offset) point
+    cost_of_waiting_by_strategy already produced for that strategy -- a
+    real, dated, EPISODE_ANALOGUE-graded case, applied as a delta on top of
+    THIS strategy's own baseline expected cost. A strategy with no
+    register-eligible episode at these offsets gets baseline only, never a
+    padded/filled placeholder scenario -- matches cost_of_waiting_by_
+    strategy's own all-or-nothing-per-decision honesty. Strategies with no
+    name (an unused hand-typed slot -- see _strategies_from_form()'s own
+    "blank name = unused slot, silently skipped" rule) are skipped here
+    too, for the same reason: an empty slot is not a real alternative to
+    compare, and would otherwise surface as an unlabeled row/column."""
+    out = []
+    for row in strategy_rows:
+        if not row["name"]:
+            continue
+        scenarios = [{
+            "scenario": "baseline", "scenario_kind": "baseline", "day_offset": None,
+            "expected_total_cost": row["expected_cost"],
+            "expected_total_cost_delta": 0.0,
+            "grade": row["grade"],
+        }]
+        cow = (cow_by_strategy or {}).get(row["name"])
+        if cow is not None:
+            for path in cow.paths:
+                for day, delta in path.points:
+                    scenarios.append({
+                        "scenario": path.episode_label, "scenario_kind": "episode_analogue",
+                        "day_offset": day,
+                        "expected_total_cost": round(row["expected_cost"] + delta, 2),
+                        "expected_total_cost_delta": delta,
+                        "grade": "EPISODE_ANALOGUE",
+                    })
+        out.append({
+            "strategy": row["name"], "is_baseline": row["is_baseline"],
+            "expected_disruption_loss": row["conditional_loss"],
+            "expected_delay_cost": row["components"]["delay"],
+            "expected_logistics_cost": row["components"]["transport"],
+            "inventory_impact": row["components"]["inventory"],
+            "coverage_after_strategy": row["coverage_after_strategy"],
+            "cash_impact": row.get("cash_impact"), "cash_impact_grade": row.get("cash_impact_grade"),
+            "service_risk_stockout": row.get("service_risk_stockout"),
+            "scenarios": scenarios,
+        })
+    return out
+
+
+def scenario_robustness(matrix: list[dict], recommended: str) -> dict:
+    """Does the strategy recommended at baseline also win in every real
+    episode-analogue scenario column? A pure argmin comparison over numbers
+    counterfactual_matrix() already assembled -- the same shape of thing
+    regret_at_range() already does, just over the episode axis instead of
+    the probability axis. `recommended` is passed in rather than re-derived,
+    so this can never disagree with result["recommended"] by construction.
+
+    Deliberately NOT an alias of decision_confidence: that measures
+    robustness across the PROBABILITY range: does the same strategy win at
+    both ends of the published hit-rate CI. This measures robustness across
+    the EPISODE/SEVERITY axis instead -- a different uncertainty dimension.
+    Conflating the two would mislabel one axis as the other.
+
+    status="not_computable" (never a forced robust/weak call) when no
+    strategy in this decision has a scenario column beyond baseline -- the
+    common case against the real, committed register at realistic delay
+    assumptions today (see cost_of_waiting_unavailable_reason)."""
+    by_column: dict[tuple, dict[str, float]] = {}
+    for m in matrix:
+        for sc in m["scenarios"]:
+            if sc["scenario_kind"] != "episode_analogue":
+                continue
+            key = (sc["scenario"], sc["day_offset"])
+            by_column.setdefault(key, {})[m["strategy"]] = sc["expected_total_cost"]
+    if not by_column:
+        return {"status": "not_computable", "recommended": recommended,
+               "reason": "no episode-analogue scenario column available for this decision "
+                         "(see cost_of_waiting_unavailable_reason)"}
+    disagreements = []
+    for (label, day), costs in sorted(by_column.items()):
+        winner = min(costs, key=costs.get)
+        if winner != recommended:
+            disagreements.append({"scenario": label, "day_offset": day, "winner": winner})
+    return {"status": "robust" if not disagreements else "not_robust",
+           "recommended": recommended, "disagreements": disagreements}
+
+
+# --------------------------------------------------------------------------
 # Ledger and grades (section 9)
 # --------------------------------------------------------------------------
 
@@ -844,9 +949,11 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
     # -- so conditional_loss(), expected_cost(), break_even_probability()
     # and everything downstream see one consistent, already-graded number
     # rather than each having to know about forward-buy separately.
+    forward_buy_by_strategy: dict[str, ForwardBuyCost] = {}
     for s in strategies:
         if s.effects.forward_buy_fraction > 0:
             fb = forward_buy_cost(intake_data, s.effects)
+            forward_buy_by_strategy[s.name] = fb
             s.direct_cost += fb.value
             ledger.record(f"forward_buy_cost[{s.name}]", round(fb.value, 2), unit="currency",
                          grade=fb.grade,
@@ -952,6 +1059,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         for absent_component in cl.absent_components:
             ledger.record(f"conditional_loss[{s.name}].{absent_component}", None,
                          unit="currency", grade="ABSENT")
+        fb = forward_buy_by_strategy.get(s.name)
         strategy_rows.append({
             "name": s.name, "direct_cost": s.direct_cost, "conditional_loss": round(cl.total, 2),
             "expected_cost": round(expected_cost(s.direct_cost, ranking_probability, cl.total), 2),
@@ -959,6 +1067,10 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
             "grade": cl.grade, "is_baseline": s.is_baseline,
             "coverage_after_strategy": (round(cl.effective_days_of_cover, 2)
                                         if cl.effective_days_of_cover is not None else None),
+            "service_risk_stockout": intake.stockout_probability(cl.effective_days_of_cover,
+                                                                  cl.effective_delay_days),
+            "cash_impact": round(fb.value, 2) if fb else None,
+            "cash_impact_grade": fb.grade if fb else "ABSENT",
         })
 
     recommended = min(strategy_rows, key=lambda r: r["expected_cost"])["name"]
@@ -997,6 +1109,11 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
     cow = cow_by_strategy.get(recommended) if cow_by_strategy else None
     cow_unavailable_reason = cost_of_waiting_unavailable_reason(intake_data, corridor,
                                                                  day_offset_anchor, premium_analogue)
+
+    counterfactual = counterfactual_matrix(strategy_rows, cow_by_strategy)
+    robustness = scenario_robustness(counterfactual, recommended)
+    strategy_ranking = [r["name"] for r in sorted(strategy_rows, key=lambda r: r["expected_cost"])
+                        if r["name"]]
 
     flips = solve_flips(intake_data, strategies, premium_analogue, ranking_probability)
     regret = regret_at_range(strategies, intake_data, premium_analogue,
@@ -1113,6 +1230,9 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
                                         for name, c in cow_by_strategy.items()}
                                        if cow_by_strategy else None),
         "cost_of_waiting_unavailable_reason": cow_unavailable_reason,
+        "counterfactual_matrix": counterfactual,
+        "scenario_robustness": robustness,
+        "strategy_ranking": strategy_ranking,
         "flip_points": [asdict(fp) for fp in flips],
         "regret": regret,
         "value_of_information": voi,
@@ -1509,6 +1629,34 @@ def selftest() -> int:
     assert result_no_register["cost_of_waiting"] is None
     assert "cost_of_waiting" in result_no_register   # present as a key, value None — see below
 
+    # --- module 1 (Procurement Counterfactual Engine): matrix / scenario
+    # robustness / ranking / service risk / cash impact, all assembled from
+    # numbers already computed above -- no new probability or severity
+    # figure. Against this scenario with no register supplied, only the
+    # baseline column exists for either strategy — honest absence, not a
+    # gap to fill.
+    strategies_by_name = {r["name"]: r for r in result_no_register["strategies"]}
+    assert strategies_by_name["Continue"]["service_risk_stockout"] == 1.0   # cover 10 <= delay 11
+    assert strategies_by_name["Partial reroute"]["service_risk_stockout"] == 0.0   # cover 10 > delay 5
+    assert strategies_by_name["Continue"]["cash_impact"] is None
+    assert strategies_by_name["Continue"]["cash_impact_grade"] == "ABSENT"
+
+    cf_matrix = result_no_register["counterfactual_matrix"]
+    assert {m["strategy"] for m in cf_matrix} == {"Continue", "Partial reroute"}
+    for m in cf_matrix:
+        assert len(m["scenarios"]) == 1, m["scenarios"]   # honest absence, never padded
+        assert m["scenarios"][0]["scenario_kind"] == "baseline"
+        own_row = strategies_by_name[m["strategy"]]
+        assert m["scenarios"][0]["expected_total_cost"] == own_row["expected_cost"]
+        assert m["expected_disruption_loss"] == own_row["conditional_loss"]
+
+    assert result_no_register["scenario_robustness"]["status"] == "not_computable"
+    assert result_no_register["scenario_robustness"]["recommended"] == result_no_register["recommended"]
+
+    assert result_no_register["strategy_ranking"][0] == result_no_register["recommended"]
+    assert result_no_register["strategy_ranking"] == [
+        r["name"] for r in sorted(result_no_register["strategies"], key=lambda r: r["expected_cost"])]
+
     # --- reading= bypasses point_in_time()/gpr_source entirely (the path a
     # deployed backend uses, since it has no access to the gitignored GPR
     # vintage — see economic_engine.compute()'s identical historical_reading=
@@ -1657,6 +1805,23 @@ def selftest() -> int:
         # crosses its fixture peak at offset 24.
         assert cbs["Continue"]["paths"] != cbs["Partial reroute"]["paths"], \
             "different war_risk_premium_multiplier must produce different trajectories, not a copy"
+
+        # counterfactual_matrix() reshapes these same paths, never
+        # recomputing them independently -- cross-check one real cell
+        # against cost_of_waiting_by_strategy's own already-verified number.
+        cf_by_name = {m["strategy"]: m for m in result_cow["counterfactual_matrix"]}
+        assert len(cf_by_name["Continue"]["scenarios"]) > 1
+        assert len(cf_by_name["Partial reroute"]["scenarios"]) > 1
+        continue_expected = next(r["expected_cost"] for r in result_cow["strategies"]
+                                 if r["name"] == "Continue")
+        day0, delta0 = cbs["Continue"]["paths"][0]["points"][0]
+        label0 = cbs["Continue"]["paths"][0]["episode_label"]
+        matching_scenario = next(sc for sc in cf_by_name["Continue"]["scenarios"]
+                                 if sc["scenario_kind"] == "episode_analogue"
+                                 and sc["scenario"] == label0 and sc["day_offset"] == day0)
+        assert matching_scenario["expected_total_cost"] == round(continue_expected + delta0, 2)
+        assert matching_scenario["expected_total_cost_delta"] == delta0
+        assert matching_scenario["grade"] == "EPISODE_ANALOGUE"
 
     # --- against the REAL, committed src/warrisk.csv: cost-of-waiting is
     # genuinely unavailable at this scenario's realistic delay (Hormuz's
@@ -1886,6 +2051,13 @@ def selftest() -> int:
     # confirming forward-buy composes with them rather than being ignored
     continue_row = next(r for r in result_fb["strategies"] if r["name"] == "Continue")
     assert fb_row["conditional_loss"] < continue_row["conditional_loss"], fb_row
+
+    # cash_impact: real for a forward-buy strategy (the same financing +
+    # carrying figure just hand-verified above), explicit ABSENT for every
+    # other strategy -- no invented general-case formula.
+    assert fb_row["cash_impact_grade"] == "DERIVED"
+    assert abs(fb_row["cash_impact"] - (expected_financing + expected_carrying)) < 0.01, fb_row
+    assert continue_row["cash_impact"] is None and continue_row["cash_impact_grade"] == "ABSENT"
 
     print("all checks passed")
     print(f"  conditional loss (Continue)        {cl_continue.total:,.0f}")

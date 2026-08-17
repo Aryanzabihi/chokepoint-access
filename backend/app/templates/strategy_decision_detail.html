@@ -196,6 +196,19 @@ with updated quotes &mdash;
   </table>
   </div>
 
+  {% set sr = result.get('scenario_robustness') %}
+  {% if sr %}
+  <p class="hint" style="margin-top:var(--s3)">
+  {% if sr.status == "robust" %}Scenario robustness: {{ sr.recommended }} wins at baseline and in
+  every available episode-analogue scenario for this decision.
+  {% elif sr.status == "not_robust" %}Scenario robustness: {{ sr.recommended }} wins at baseline,
+  but not in every scenario &mdash; see the per-strategy scenario tables below.
+  {% else %}Scenario robustness not computable &mdash; {{ sr.reason }}.{% endif %}</p>
+  {% endif %}
+  {% if result.get('strategy_ranking') %}
+  <p class="hint">Ranking by expected cost: {{ result.strategy_ranking | join(" &rarr; ") | safe }}</p>
+  {% endif %}
+
   <div class="row" style="margin-top:var(--s4);flex-direction:column;align-items:stretch">
   {% set cbs = result.get('cost_of_waiting_by_strategy') %}
   {% for r in result.strategies %}
@@ -227,6 +240,34 @@ with updated quotes &mdash;
         {% elif result.cost_of_waiting_unavailable_reason %}
         <p class="empty" style="margin-top:var(--s3)">Cost of waiting not shown &mdash;
         {{ result.cost_of_waiting_unavailable_reason }}</p>
+        {% endif %}
+        {% set cf_row = (result.get('counterfactual_matrix') or []) | selectattr("strategy", "equalto", r.name) | first %}
+        {% if cf_row and cf_row.scenarios | length > 1 %}
+        <div class="scroll" style="margin-top:var(--s3)">
+        <table>
+          <thead><tr><th>Scenario</th><th class="m">Day</th><th class="m">Expected total cost</th>
+          <th class="m">vs baseline</th><th>Grade</th></tr></thead>
+          <tbody>
+          {% for sc in cf_row.scenarios %}
+            <tr{{ ' style="font-weight:600"' | safe if sc.scenario_kind == "baseline" else "" }}>
+              <td>{{ sc.scenario }}</td>
+              <td class="m">{{ sc.day_offset if sc.day_offset is not none else "—" }}</td>
+              <td class="m">{{ "{:,.0f}".format(sc.expected_total_cost) }}</td>
+              <td class="m">{{ "{:+,.0f}".format(sc.expected_total_cost_delta) if sc.scenario_kind != "baseline" else "—" }}</td>
+              <td>{{ sc.grade }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        <p class="hint">Strategy &times; scenario outcome matrix &mdash; baseline is today, no
+        additional wait; further rows are this strategy's expected total cost if the disruption
+        instead behaves like the named, dated episode, that many days from now. Real dated cases,
+        never averaged, never an invented severity label.</p>
+        {% elif cf_row %}
+        <p class="empty" style="margin-top:var(--s3)">Only the baseline scenario is available for
+        this strategy &mdash; {{ result.cost_of_waiting_unavailable_reason or
+        "insufficient episode register coverage for further scenario columns." }}</p>
         {% endif %}
       </div>
     </details>

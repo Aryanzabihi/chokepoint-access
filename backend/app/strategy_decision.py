@@ -247,7 +247,13 @@ def act_or_wait(result: dict) -> dict:
     if baseline is None:
         return {"timing": None, "recommended_strategy": recommended_name,
                 "baseline_strategy": None, "net_benefit": None,
-                "cheapest_mitigation": None, "strategies_with_net_benefit": strategies,
+                "cheapest_mitigation": None,
+                # Every row needs a real net_benefit key, even if None -- a
+                # MISSING key renders fine against Python's own None, but
+                # Jinja's Undefined passes `is not none` too, so the
+                # template's "{:+,.0f}".format(...) then raises TypeError.
+                # Same bug class already fixed once at the source (fc97c78).
+                "strategies_with_net_benefit": [dict(s, net_benefit=None) for s in strategies],
                 "reason": None, "gather_reason": None,
                 "value_of_information": result.get("value_of_information")}
 
