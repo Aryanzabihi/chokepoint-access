@@ -399,7 +399,8 @@ with updated quotes &mdash;
   {% set dd = result.get('decision_deadline') %}
   {% set ponr = result.get('point_of_no_return') %}
   {% set shadow = result.get('shadow_price') %}
-  {% if dd or ponr or shadow %}
+  {% set mrp = result.get('maximum_rational_premium') %}
+  {% if dd or ponr or shadow or mrp %}
   <div class="stats" style="margin-top:var(--s4)">
     {% if dd %}
     <div class="stat">
@@ -422,6 +423,12 @@ with updated quotes &mdash;
     <div class="stat">
       <b>{{ "{:,.0f}".format(shadow.shadow_price) }}</b>
       <span>shadow price of geopolitical risk &mdash; risk-adjusted cost minus baseline</span>
+    </div>
+    {% endif %}
+    {% if mrp and mrp.headline %}
+    <div class="stat">
+      <b>{{ "{:,.0f}".format(mrp.headline.maximum_rational_premium) }}</b>
+      <span>maximum rational premium &mdash; {{ mrp.headline.strategy }}</span>
     </div>
     {% endif %}
   </div>
@@ -629,10 +636,11 @@ with updated quotes &mdash;
   </details>
   {% endif %}
 
-  {% if shadow %}
+  {% if shadow or mrp %}
   <details style="margin-top:var(--s4)">
     <summary>Valuation</summary>
     <div class="inner">
+      {% if shadow %}
       <div class="stats">
         <div class="stat">
           <b>{{ "{:,.0f}".format(shadow.baseline_cost) }}</b>
@@ -683,6 +691,28 @@ with updated quotes &mdash;
       <ul>
         {% for c in shadow.cost_components_not_computed %}<li>{{ c.component }} &mdash; {{ c.reason }}</li>{% endfor %}
       </ul>
+      {% endif %}
+      {% endif %}
+
+      {% if mrp and mrp.strategies %}
+      <p class="hint" style="margin-top:{{ 'var(--s4)' if shadow else '0' }}">Maximum rational premium per strategy &mdash; the most this decision should pay over {{ row.corridor }}'s baseline, under the modeled assumptions:</p>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Strategy</th><th class="m">Max. rational premium</th><th class="m">Actual direct cost</th><th>Verdict</th><th class="m">Range (low&ndash;high)</th></tr></thead>
+        <tbody>
+        {% for e in mrp.strategies %}
+          <tr>
+            <td>{{ e.strategy }}</td>
+            <td class="m">{{ "{:,.0f}".format(e.maximum_rational_premium) }}</td>
+            <td class="m">{{ "{:,.0f}".format(e.actual_direct_cost) }}</td>
+            <td><span class="badge {{ 'ok' if e.verdict == 'economically_rational' else 'warn' }}">{{ e.verdict.replace('_', ' ') }}</span></td>
+            <td class="m">{{ "{:,.0f}".format(e.uncertainty_range.low.value) }}&ndash;{{ "{:,.0f}".format(e.uncertainty_range.high.value) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      <p class="hint" style="margin-top:var(--s3)">A maximum economically rational premium under the modeled assumptions &mdash; not a guaranteed negotiation price. Range is the same premium re-evaluated at the published probability range's own low/high ends, never blended into one figure.</p>
       {% endif %}
     </div>
   </details>

@@ -1174,6 +1174,88 @@ def shadow_price_of_geopolitical_risk(baseline_cb: CostBreakdown, disrupted_cb: 
 
 
 # --------------------------------------------------------------------------
+# Maximum Rational Premium Engine (module 5) -- "how much should I be
+# willing to pay to reduce or avoid the modeled geopolitical exposure"
+# (newmodules.txt module_5_maximum_rational_premium_engine). This is
+# break_even_probability()'s own defining equation --
+# strategy.direct_cost = baseline.direct_cost + p* x (l_cond_s0 - l_cond_s)
+# -- solved for direct_cost instead of p*, at the probability actually
+# being used (`probability`) instead of solved backward for it. Unlike
+# break_even_probability(), this is pure multiplication, never division, so
+# it has no degenerate/undefined case: when a strategy doesn't reduce
+# conditional loss versus baseline (denom <= 0), the result is simply <=
+# baseline.direct_cost (often 0) -- no premium, not even zero, is
+# rationally justified -- reported plainly via the same
+# actual-cost-vs-ceiling comparison, not a special-cased branch.
+#
+# Reuses regret_at_range()'s own already-resolved low/high probabilities
+# (passed in via `regret`) for the uncertainty range, rather than a second,
+# independent resolution of prob_range/EPISODE_HIT_RATE_CI -- the same
+# relabel-don't-recompute discipline value_of_information() already
+# established. Not ledgered: break_even's own entries, the closest existing
+# precedent, aren't ledgered either.
+# --------------------------------------------------------------------------
+
+def maximum_rational_premium(strategies: list[Strategy], baseline: Strategy,
+                             losses: dict[str, float], probability: float,
+                             regret: dict, strategy_ranking: list[str]) -> dict:
+    """{"strategies": [...], "headline": {...} | None}. One entry per
+    non-baseline, non-blank strategy (matching break_even's own list shape
+    and module 1's blank-name filter) -- never a single figure, since this
+    app already compares multiple hand-typed strategies per decision.
+
+    Each entry: maximum_rational_premium (the ceiling), actual_direct_cost
+    (the strategy's own real quoted/typed cost, for direct comparison),
+    verdict ("economically_rational" if actual_direct_cost <= the ceiling,
+    else "not_economically_justified" -- newmodules.txt's own decision_rule),
+    uncertainty_range (shaped like value_of_information()'s own
+    {"low": {"probability", "value"}, "high": {...}}), and an explanation
+    using the spec's own required hedge -- never a guaranteed negotiation
+    price.
+
+    "headline": the first non-baseline strategy in strategy_ranking's own
+    already-expected-cost-sorted order (the cheapest real mitigation being
+    compared) -- gives the summary strip one clear number without a second
+    sort."""
+    entries = []
+    for s in strategies:
+        if s.name == baseline.name or not s.name:
+            continue
+        denom = losses[baseline.name] - losses[s.name]
+        premium_at = baseline.direct_cost + probability * denom
+        premium_low = baseline.direct_cost + regret["low"]["probability"] * denom
+        premium_high = baseline.direct_cost + regret["high"]["probability"] * denom
+        rational = s.direct_cost <= premium_at
+        if denom <= 0:
+            explanation = (
+                f"{s.name} does not reduce conditional loss versus {baseline.name} -- no "
+                f"premium, not even zero, is rationally justified on this axis alone.")
+        else:
+            explanation = (
+                f"At the {probability:.0%} probability used, paying more than "
+                f"{premium_at:,.0f} for {s.name} over {baseline.name} is not economically "
+                f"justified under the modeled assumptions -- a maximum economically rational "
+                f"premium, not a guaranteed negotiation price. {s.name}'s own actual direct "
+                f"cost is {s.direct_cost:,.0f}, which is "
+                f"{'within' if rational else 'above'} that ceiling.")
+        entries.append({
+            "strategy": s.name,
+            "maximum_rational_premium": round(premium_at, 2),
+            "actual_direct_cost": s.direct_cost,
+            "verdict": "economically_rational" if rational else "not_economically_justified",
+            "uncertainty_range": {
+                "low": {"probability": regret["low"]["probability"], "value": round(premium_low, 2)},
+                "high": {"probability": regret["high"]["probability"], "value": round(premium_high, 2)},
+            },
+            "explanation": explanation,
+        })
+
+    headline_name = next((n for n in strategy_ranking if n != baseline.name), None)
+    headline = next((e for e in entries if e["strategy"] == headline_name), None)
+    return {"strategies": entries, "headline": headline}
+
+
+# --------------------------------------------------------------------------
 # Ledger and grades (section 9)
 # --------------------------------------------------------------------------
 
@@ -1474,6 +1556,8 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
                              tuple(intake_data["probability_range"])
                              if intake_data.get("probability_range") else None)
     voi = value_of_information(regret, recommended)
+    mrp = maximum_rational_premium(strategies, baseline, losses, ranking_probability, regret,
+                                   strategy_ranking)
     _voi_contributors = {recommended, regret["low"]["best"], regret["high"]["best"]}
     _voi_grade = max((row["grade"] for row in strategy_rows if row["name"] in _voi_contributors),
                      key=lambda g: GRADE_STRENGTH[g])
@@ -1593,6 +1677,7 @@ def build_decision(intake_data: dict, *, as_of: str | None = None,
         "flip_points": [asdict(fp) for fp in flips],
         "regret": regret,
         "value_of_information": voi,
+        "maximum_rational_premium": mrp,
         "exposure": {"baseline": round(baseline_cb.total, 2), "disrupted": round(disrupted_cb.total, 2),
                     "avoidable": round(gap["private"], 2)},
         "shadow_price": shadow_price,
@@ -1953,6 +2038,25 @@ def selftest() -> int:
     assert missing_names == {"commodity", "expediting", "rerouting",
                              "service-related economic loss", "working-capital impact"}
     assert "freight" not in missing_names and "disruption loss" not in missing_names
+
+    # --- module 5 (Maximum Rational Premium Engine): break_even_
+    # probability()'s own equation, solved for cost instead of probability,
+    # at the real probability in use -- hand-verified against real executed
+    # numbers, not estimated (run directly against this same sample before
+    # writing these assertions).
+    regret_direct = regret_at_range(strategies, data, None)
+    losses_direct = {"Continue": cl_continue.total, "Partial reroute": cl_reroute.total}
+    mrp_check = maximum_rational_premium(strategies, continue_s, losses_direct, 0.273,
+                                         regret_direct, ["Continue", "Partial reroute"])
+    reroute_entry = next(e for e in mrp_check["strategies"] if e["strategy"] == "Partial reroute")
+    assert abs(reroute_entry["maximum_rational_premium"] - 291_118.97) < 1.0, reroute_entry
+    assert reroute_entry["actual_direct_cost"] == 700_000
+    assert reroute_entry["verdict"] == "not_economically_justified"   # 700,000 > 291,118.97
+    assert abs(reroute_entry["uncertainty_range"]["low"]["value"] - 106_636.99) < 1.0, reroute_entry
+    assert abs(reroute_entry["uncertainty_range"]["high"]["value"] - 607_830.82) < 1.0, reroute_entry
+    assert reroute_entry["uncertainty_range"]["low"]["probability"] == 0.10
+    assert reroute_entry["uncertainty_range"]["high"]["probability"] == 0.57
+    assert mrp_check["headline"]["strategy"] == "Partial reroute"
 
     # E[C_s] with an explicit probability — assertion #1.
     p = 0.22
