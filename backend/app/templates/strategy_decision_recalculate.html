@@ -12,6 +12,19 @@
 
 {% if error %}<p class="note hot"><strong>Could not recalculate.</strong> {{ error }}</p>{% endif %}
 
+{% if current_contract_freight_rate is none %}
+<p class="note hot">No contract freight rate is on file for this decision &mdash; a disrupted
+freight quote below (existing or new) won't move the transport cost until you also supply one
+here. This is the one field on this screen that isn't itself a Tier-3 market quote.</p>
+{% endif %}
+
+{% if unwired %}
+<p class="note hot">{{ unwired | join(", ") }} {{ "has" if unwired | length == 1 else "have" }} no
+effects set yet &mdash; economically identical to the baseline regardless of what these quotes
+say. <a href="/strategy-decisions/{{ row.id }}#edit-strategies">Edit strategies</a> first if you
+want a quote here to be able to change the recommendation.</p>
+{% endif %}
+
 <form class="panel" method="post" action="/strategy-decisions/{{ row.id }}/recalculate" style="margin-top:0">
   <div class="row">
     <div class="field" style="width:180px">
@@ -34,6 +47,13 @@
       <label for="field_emergency_replacement_quote">Emergency replacement</label>
       <input type="number" id="field_emergency_replacement_quote" name="field_emergency_replacement_quote"
              step="any" value="{{ current_quotes.emergency_replacement_quote if current_quotes.emergency_replacement_quote is not none else '' }}">
+    </div>
+    <div class="field" style="width:180px">
+      <label for="field_contract_freight_rate">Contract freight rate</label>
+      <input type="number" id="field_contract_freight_rate" name="field_contract_freight_rate"
+             step="any" value="{{ current_contract_freight_rate if current_contract_freight_rate is not none else '' }}">
+      <p class="hint">not a market quote &mdash; what you're already contracted to pay, needed to
+      price a disrupted freight quote at all</p>
     </div>
   </div>
   <button class="btn" type="submit">Reassess with TAR</button>

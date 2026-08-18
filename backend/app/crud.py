@@ -311,6 +311,17 @@ def list_strategy_decisions_for_order(session: Session, order_id: int) -> list[S
         .order_by(StrategyDecision.created_at.desc())))
 
 
+def count_recalc_siblings(session: Session, user: User, root_scenario_id: str) -> int:
+    """How many of this user's decisions already carry a "{root}-RECALC..."
+    scenario_id — used to number a fresh reassessment "-RECALC-{n+1}"
+    instead of colliding with an existing "-RECALC" name."""
+    prefix = f"{root_scenario_id}-RECALC"
+    return len([
+        d for d in session.exec(
+            select(StrategyDecision).where(StrategyDecision.owner_user_id == user.id))
+        if d.scenario_id.startswith(prefix)])
+
+
 def is_subscribed_strategy_decision(session: Session, user: User, strategy_decision_id: int) -> bool:
     return session.exec(
         select(StrategyDecisionSubscription).where(

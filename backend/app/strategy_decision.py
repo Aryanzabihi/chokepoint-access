@@ -119,10 +119,11 @@ _STAGE_STRATEGY_DEFAULTS: dict[str | None, list[dict]] = {
     ],
     # No capacity_restored/war_risk_premium_multiplier here, on purpose:
     # decision_engine.conditional_loss() only lets capacity_restored scale
-    # anything when a disrupted_freight_quote is already on file, which a
-    # pre-order realistically never has yet — baking in an effect that
-    # would silently compute to zero is exactly the kind of not-really-
-    # wired-up mechanism this project holds the line against elsewhere.
+    # anything when a disrupted_freight_quote or a reroute_quote is already
+    # on file, which a pre-order realistically never has yet — baking in an
+    # effect that would silently compute to zero is exactly the kind of
+    # not-really-wired-up mechanism this project holds the line against
+    # elsewhere.
     # "Buy now" is a plain cost suggestion, same as how "Partial reroute"
     # itself works as a suggestion above.
     "pre_order": [
@@ -153,15 +154,16 @@ _STAGE_STRATEGY_DEFAULTS: dict[str | None, list[dict]] = {
 
 _ZERO_EFFECTS = {"delay_days_delta": 0.0, "capacity_restored": 0.0,
                  "war_risk_premium_multiplier": None, "days_of_cover_delta": 0.0,
-                 "forward_buy_fraction": 0.0, "forward_buy_early_days": 0.0}
+                 "forward_buy_fraction": 0.0, "forward_buy_early_days": 0.0,
+                 "sourced_from_emergency_replacement_quote": False}
 
 
 def default_strategies_for_stage(stage: str | None) -> list[dict]:
     """Returns fresh dicts each call (no shared mutable state), each with a
-    complete 6-key effects dict — every entry in _STAGE_STRATEGY_DEFAULTS
-    above only specifies the effects it overrides, merged onto
-    _ZERO_EFFECTS here, so the strategy-table template (which reads all 6
-    keys unconditionally) never hits a missing one. `"delivered"` is not a
+    complete effects dict (every key in _ZERO_EFFECTS) — every entry in
+    _STAGE_STRATEGY_DEFAULTS above only specifies the effects it overrides,
+    merged onto _ZERO_EFFECTS here, so the strategy-table template (which
+    reads every key unconditionally) never hits a missing one. `"delivered"` is not a
     key in the table — by that stage a StrategyDecision isn't offered at
     all (see order_detail.html) — falls back to the no-order defaults like
     any other unrecognised stage would."""
@@ -173,6 +175,29 @@ def default_strategies_for_stage(stage: str | None) -> list[dict]:
         out.append({"name": s["name"], "direct_cost": s["direct_cost"],
                     "is_baseline": s["is_baseline"], "notes": "", "effects": effects})
     return out
+
+
+def unwired_strategies(strategies: list[dict]) -> list[str]:
+    """Names of non-baseline, non-blank strategies whose effects are all at
+    their neutral/default value (_ZERO_EFFECTS) — these are, by
+    construction, economically identical to the baseline (same
+    conditional_loss, differing only in direct_cost, if at all) regardless
+    of any quote's value, since nothing in their effects consumes one. Used
+    to tell a user, before or after reassessing, why a market quote didn't
+    move the recommendation: not because the number doesn't matter, but
+    because no strategy here is wired to respond to it yet -- never an
+    auto-populated effect (see the project's own stance on that in
+    _STAGE_STRATEGY_DEFAULTS's pre_order comment above), just an honest
+    surface of the gap with a pointer to Edit Strategies.
+
+    Merges each strategy's own effects onto a fresh _ZERO_EFFECTS copy
+    before comparing (rather than comparing the raw stored dict directly)
+    so an older decision's effects dict, saved before a newer effect field
+    like sourced_from_emergency_replacement_quote existed, is still read as
+    neutral on that field rather than mismatching on a missing key."""
+    return [s["name"] for s in strategies
+            if s.get("name") and not s.get("is_baseline")
+            and {**_ZERO_EFFECTS, **(s.get("effects") or {})} == _ZERO_EFFECTS]
 
 
 _STAGE_FRAMING = {

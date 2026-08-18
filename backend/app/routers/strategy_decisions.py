@@ -21,6 +21,7 @@ rather than dynamic add/remove-row JS). A blank name means an unused slot.
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -37,7 +38,7 @@ from ..models import User
 from ..strategy_decision import (
     CORRIDORS, FIELDS, INCOTERM_GROUPS, act_or_wait, act_wait_dial_svg, compute_decision,
     decision_brief_html, decision_framing_for_stage, default_strategies_for_stage, display_label,
-    fields_by_group, intake, recovery_snapshot, template,
+    fields_by_group, intake, recovery_snapshot, template, unwired_strategies,
 )
 
 router = APIRouter()
@@ -60,6 +61,21 @@ _STRATEGY_SLOT_COUNT = 5   # fixed slots (mirrors economic's fixed _STRATEGY_DEF
 # every other field) stays exactly as originally entered.
 _QUOTE_FIELDS = ("disrupted_freight_quote", "reroute_quote", "war_risk_premium_quote",
                  "emergency_replacement_quote")
+
+_RECALC_SUFFIX_RE = re.compile(r"-RECALC(-\d+)?$")
+
+
+def _recalc_scenario_id(session: Session, user: User, source_scenario_id: str) -> str:
+    """Numbers repeated reassessments instead of colliding on a bare
+    "-RECALC" name every time: reassessing the same decision (or one of its
+    own reassessments) twice used to produce two siblings both literally
+    named "X-RECALC" -- distinguishable only by timestamp -- or, if
+    reassessing an already-"X-RECALC" row, "X-RECALC-RECALC". Stripping any
+    existing suffix first finds the root name regardless of which row in
+    the chain "reassess" was clicked from."""
+    root = _RECALC_SUFFIX_RE.sub("", source_scenario_id)
+    n = crud.count_recalc_siblings(session, user, root)
+    return f"{root}-RECALC-{n + 1}"
 
 
 def _num(form: FormData, key: str, default: float | None = None) -> float | None:
@@ -114,6 +130,8 @@ def _strategies_from_form(form: FormData) -> list[dict]:
                 "days_of_cover_delta": _num(form, f"strategy_{i}_days_of_cover_delta", 0.0),
                 "forward_buy_fraction": _pct(form, f"strategy_{i}_forward_buy_fraction", 0.0),
                 "forward_buy_early_days": _num(form, f"strategy_{i}_forward_buy_early_days", 0.0),
+                "sourced_from_emergency_replacement_quote":
+                    form.get(f"strategy_{i}_sourced_from_emergency_replacement_quote") is not None,
             },
             "is_baseline": i == baseline_idx,
             "notes": form.get(f"strategy_{i}_notes") or "",
@@ -293,11 +311,19 @@ def list_page(request: Request, user: User = Depends(current_user),
     if view != "all" and view not in _VIEW_STATUSES:
         raise HTTPException(422, "view must be one of: all, active, monitoring, history")
     decisions = crud.list_strategy_decisions(session, user)
+    # A decision that some later decision points back to via
+    # previous_decision_id has been reassessed since -- superseded, worth
+    # flagging in the list so an old, no-longer-current draft (e.g. a prior
+    # "-RECALC") doesn't look identical to the one that actually reflects
+    # the latest quotes. Computed from the rows already loaded above, no
+    # extra query.
+    superseded_ids = {d.previous_decision_id for d in decisions if d.previous_decision_id}
     if view != "all":
         decisions = [d for d in decisions if d.status in _VIEW_STATUSES[view]]
     rows = [{"id": d.id, "scenario_id": d.scenario_id, "corridor": d.corridor,
              "created_at": d.created_at, "status": d.status,
-             "recommended": json.loads(d.result_json).get("recommended")}
+             "recommended": json.loads(d.result_json).get("recommended"),
+             "superseded": d.id in superseded_ids}
             for d in decisions]
     return templates.TemplateResponse(request, "strategy_decision_list.html",
         {"user": user, "decisions": rows, "view": view})
@@ -496,7 +522,8 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
     if row.status == "draft":
         blank_effects = {"delay_days_delta": 0.0, "capacity_restored": 0.0,
                          "war_risk_premium_multiplier": None, "days_of_cover_delta": 0.0,
-                         "forward_buy_fraction": 0.0, "forward_buy_early_days": 0.0}
+                         "forward_buy_fraction": 0.0, "forward_buy_early_days": 0.0,
+                         "sourced_from_emergency_replacement_quote": False}
         # Every EXISTING strategy's effects is merged onto blank_effects too,
         # not just the padded slots below -- a strategy saved via the raw
         # JSON API (api_create() passes data straight to compute_decision(),
@@ -521,6 +548,7 @@ def detail_page(decision_id: int, request: Request, user: User = Depends(current
          "decision_framing": decision_framing_for_stage(linked_order.stage if linked_order else None),
          "previous_decision": previous_decision, "previous_recommended": previous_recommended,
          "recommendation_changed": recommendation_changed, "edit_strategies": edit_strategies,
+         "unwired": unwired_strategies(input_data.get("strategies", [])),
          "act": act, "dial": act_wait_dial_svg(result, act),
          "recovery": recovery_snapshot(result)})
 
@@ -571,10 +599,13 @@ def recalculate_page(decision_id: int, request: Request, user: User = Depends(cu
     row = crud.get_strategy_decision_owned(session, user, decision_id)
     if row is None:
         raise HTTPException(404, "decision not found")
-    current_fields = json.loads(row.input_json).get("fields", {})
+    current_input = json.loads(row.input_json)
+    current_fields = current_input.get("fields", {})
     current_quotes = {name: current_fields.get(name) for name in _QUOTE_FIELDS}
     return templates.TemplateResponse(request, "strategy_decision_recalculate.html",
-        {"user": user, "row": row, "current_quotes": current_quotes, "error": None})
+        {"user": user, "row": row, "current_quotes": current_quotes,
+         "current_contract_freight_rate": current_fields.get("contract_freight_rate"),
+         "unwired": unwired_strategies(current_input.get("strategies", [])), "error": None})
 
 
 @router.post("/strategy-decisions/{decision_id}/recalculate")
@@ -583,8 +614,10 @@ async def recalculate_submit(decision_id: int, request: Request, user: User = De
     """workflow.md's "go to market -> reassess with TAR" loop: plug in real
     quotes, recompute the SAME decision (same corridor, same strategies,
     same everything else), see whether the recommendation survives contact
-    with the market. Never touches anything but the 4 Tier-3 quote fields —
-    the new decision is a genuine recalculation, not a fresh one."""
+    with the market. Touches only the 4 Tier-3 quote fields plus, since it
+    gates whether disrupted_freight_quote can price in at all,
+    contract_freight_rate (Tier 1) — the new decision is a genuine
+    recalculation, not a fresh one."""
     row = crud.get_strategy_decision_owned(session, user, decision_id)
     if row is None:
         raise HTTPException(404, "decision not found")
@@ -594,15 +627,21 @@ async def recalculate_submit(decision_id: int, request: Request, user: User = De
         v = _num(form, f"field_{name}")
         if v is not None:
             new_input["fields"][name] = v
+    contract_rate = _num(form, "field_contract_freight_rate")
+    if contract_rate is not None:
+        new_input["fields"]["contract_freight_rate"] = contract_rate
     try:
         result = compute_decision(new_input)
     except (KeyError, ValueError, TypeError) as exc:
         current_quotes = {name: new_input.get("fields", {}).get(name) for name in _QUOTE_FIELDS}
         return templates.TemplateResponse(request, "strategy_decision_recalculate.html",
             {"user": user, "row": row, "current_quotes": current_quotes,
+             "current_contract_freight_rate": new_input.get("fields", {}).get("contract_freight_rate"),
+             "unwired": unwired_strategies(new_input.get("strategies", [])),
              "error": f"{type(exc).__name__}: {exc}"}, status_code=422)
     new_row = crud.create_strategy_decision(
-        session, user, scenario_id=f"{row.scenario_id}-RECALC", corridor=result["corridor"],
+        session, user, scenario_id=_recalc_scenario_id(session, user, row.scenario_id),
+        corridor=result["corridor"],
         input_data=new_input, result=result, client_id=row.client_id,
         exposure_id=row.exposure_id, order_id=row.order_id, previous_decision_id=row.id)
     return RedirectResponse(f"/strategy-decisions/{new_row.id}", status_code=303)

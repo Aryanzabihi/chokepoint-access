@@ -1137,18 +1137,31 @@ def test_decision_lifecycle(client):
     assert "Recalculated from" in r.text and "<strong>changed</strong>" in r.text
     assert "Reject" in r.text   # decision4 recommends ACT (Partial reroute, not the
                                # baseline) -- Reject is shown again for ACT verdicts
+    # numbered suffix, not a bare "-RECALC" (which would collide with a
+    # second reassessment) or a doubled "-RECALC-RECALC"
+    assert "HORMUZ-2026-001-RECALC-1" in r.text
+    assert "RECALC-RECALC" not in r.text
 
-    # recalculating again with the SAME quote is correctly reported as unchanged
+    # recalculating again with the SAME quote is correctly reported as
+    # unchanged, and gets its own numbered suffix rather than colliding
+    # with decision4's "-RECALC-1" or doubling it to "-RECALC-RECALC"
     r = client.post(f"/strategy-decisions/{decision4_id}/recalculate",
                      data={"field_war_risk_premium_quote": "3500000"}, follow_redirects=False)
+    decision5_id = int(r.headers["location"].rsplit("/", 1)[-1])
     r = client.get(r.headers["location"])
     assert "recommendation is unchanged" in r.text
+    assert "HORMUZ-2026-001-RECALC-2" in r.text
+    assert "RECALC-RECALC" not in r.text
 
-    # the decisions list surfaces each row's status as a badge
+    # the decisions list surfaces each row's status as a badge, and marks
+    # decision3/decision4 (each superseded by a later reassessment)
+    # "superseded" -- decision5, the current leaf, is not
     r = client.get("/strategy-decisions")
     assert r.status_code == 200
     assert f'href="/strategy-decisions/{decision1_id}"' in r.text and ">rejected<" in r.text
     assert f'href="/strategy-decisions/{decision2_id}"' in r.text and ">executed<" in r.text
+    assert f'href="/strategy-decisions/{decision5_id}"' in r.text
+    assert r.text.count("superseded") == 2
 
     # Active/Monitoring/History tabs filter by status (decision1=rejected,
     # decision2=executed, decision3/decision4 are still draft)
@@ -1386,6 +1399,84 @@ def test_forward_buy_exposed_on_recompute(client):
     reroute = next(s for s in result["strategies"] if s["name"] == "Partial reroute")
     assert reroute["direct_cost"] > 700_000, \
         "forward-buy financing cost must be added into the strategy's own direct_cost"
+
+
+def test_reassess_reroute_and_emergency_replacement_quotes(client):
+    """End-to-end coverage for the two "Reassess with real quotes" fields
+    that used to be collected and silently discarded (reroute_quote,
+    emergency_replacement_quote -- found live against a real deployed
+    decision, then confirmed in decision_engine.py's own
+    COST_COMPONENTS_NOT_COMPUTED admission before this fix), plus the
+    contract_freight_rate field the reassess screen now also exposes."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    from decision_engine import _sample_intake
+
+    client.post("/signup", data={"email": "reassess-quotes@example.com",
+                                  "password": "correct horse battery staple"})
+    sample = _sample_intake()
+    r = _create_decision(client, sample)
+    assert r.status_code == 303, r.text
+    decision_url = r.headers["location"]
+    decision_id = int(decision_url.rsplit("/", 1)[-1])
+
+    # The reassess screen now exposes contract_freight_rate, pre-filled
+    # from what's already on file (the sample's own 400,000).
+    r = client.get(f"/strategy-decisions/{decision_id}/recalculate")
+    assert r.status_code == 200
+    assert 'name="field_contract_freight_rate"' in r.text
+    assert 'value="400000.0"' in r.text
+
+    # reroute_quote: the sample's "Partial reroute" strategy already has
+    # capacity_restored=0.4 -- submitting a reroute_quote must move its
+    # transport component by exactly reroute_quote * capacity_restored,
+    # additively on top of the existing freight-delta component (the
+    # sample's disrupted_freight_quote=650,000 / contract_freight_rate=
+    # 400,000 pair is untouched by this submission).
+    r = client.post(f"/strategy-decisions/{decision_id}/recalculate",
+                     data={"field_reroute_quote": "500000"}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    reroute_decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    result = client.get(f"/api/v1/strategy-decisions/{reroute_decision_id}").json()["result"]
+    reroute_row = next(s for s in result["strategies"] if s["name"] == "Partial reroute")
+    expected_transport = (650_000 - 400_000) * (1 - 0.4) + 500_000 * 0.4
+    assert abs(reroute_row["components"]["transport"] - expected_transport) < 1e-6, reroute_row
+    transport_ledger = [e for e in result["ledger"]
+                        if e["field"] == "conditional_loss[Partial reroute].transport"]
+    assert not transport_ledger, \
+        "transport must not be graded ABSENT once a reroute_quote is on file"
+
+    # emergency_replacement_quote: flag "Partial reroute" (via /recompute)
+    # as sourced from that quote, then reassess with a real number -- its
+    # whole conditional loss must become exactly that quote, CLIENT_QUOTED.
+    r = client.post(f"/strategy-decisions/{decision_id}/recompute", data={
+        "baseline_strategy": "0",
+        "strategy_0_name": "Continue", "strategy_0_direct_cost": "0",
+        "strategy_1_name": "Partial reroute", "strategy_1_direct_cost": "700000",
+        "strategy_1_capacity_restored": "40", "strategy_1_war_risk_premium_multiplier": "25",
+        "strategy_1_sourced_from_emergency_replacement_quote": "on",
+        "strategy_2_name": "",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+
+    # a pre-existing draft (this new checkbox unset on any strategy) still
+    # renders clean -- same missing-key UndefinedError class fixed at
+    # fc97c78 must not come back for this 7th effects key.
+    r = client.get(decision_url)
+    assert r.status_code == 200
+    checkbox_idx = r.text.index('name="strategy_1_sourced_from_emergency_replacement_quote"')
+    assert "checked" in r.text[checkbox_idx:checkbox_idx + 200]
+
+    r = client.post(f"/strategy-decisions/{decision_id}/recalculate",
+                     data={"field_emergency_replacement_quote": "925000"}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    emergency_decision_id = int(r.headers["location"].rsplit("/", 1)[-1])
+    result = client.get(f"/api/v1/strategy-decisions/{emergency_decision_id}").json()["result"]
+    emergency_row = next(s for s in result["strategies"] if s["name"] == "Partial reroute")
+    assert emergency_row["conditional_loss"] == 925_000.0
+    assert emergency_row["grade"] == "CLIENT_QUOTED"
 
 
 def test_strategy_decision_extra_slots_roundtrip(client):

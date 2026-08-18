@@ -34,7 +34,8 @@
           <td><a href="/strategy-decisions/{{ d.id }}">{{ d.scenario_id }}</a></td>
           <td>{{ d.corridor }}</td>
           <td>{{ d.recommended or "—" }}</td>
-          <td><span class="badge {{ 'ok' if d.status in ('approved', 'executed') else ('hot' if d.status == 'rejected' else '') }}">{{ d.status }}</span></td>
+          <td><span class="badge {{ 'ok' if d.status in ('approved', 'executed') else ('hot' if d.status == 'rejected' else '') }}">{{ d.status }}</span>
+          {% if d.superseded %}<span class="badge" title="A later reassessment of this decision exists">superseded</span>{% endif %}</td>
           <td class="m">{{ d.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
         </tr>
       {% endfor %}

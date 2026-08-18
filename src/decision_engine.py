@@ -75,7 +75,17 @@ class StrategyEffects:
     war_risk_premium_multiplier alongside them, same as any other
     risk-reducing strategy; the two pairs of fields are independent knobs on
     purpose, so forward-buy composes with (rather than silently overrides) a
-    strategy that also reroutes or insures."""
+    strategy that also reroutes or insures.
+
+    sourced_from_emergency_replacement_quote marks a strategy whose total
+    conditional loss IS the client's emergency_replacement_quote (sourcing
+    replacement cargo from an alternate supplier entirely, rather than
+    mitigating freight/insurance on the same shipment) -- read live from
+    intake_data in conditional_loss() rather than copied onto
+    quoted_residual_loss by hand, so a later reassessment with an updated
+    quote re-prices this strategy with no extra plumbing. Checked before
+    the older quoted_residual_loss override below, which still works
+    unchanged for a manually-typed figure when this flag isn't set."""
     delay_days_delta: float = 0.0
     capacity_restored: float = 0.0                      # fraction 0-1
     war_risk_premium_multiplier: float | None = None    # None = leave the quote as-is
@@ -83,6 +93,7 @@ class StrategyEffects:
     forward_buy_fraction: float = 0.0                    # fraction 0-1, secured before the
                                                           # contract timeline would have required
     forward_buy_early_days: float = 0.0                  # how many days sooner that fraction is committed
+    sourced_from_emergency_replacement_quote: bool = False
 
 
 @dataclass
@@ -179,13 +190,20 @@ def conditional_loss(intake_data: dict, strategy: Strategy,
     delay_cost_per_day is re-derived — this is where the step-function
     interaction section 8.6 is about actually lives. war_risk_premium_
     multiplier scales a Tier-3 war-risk quote (None = leave it unmitigated);
-    capacity_restored scales the Tier-3 disrupted-freight delta. commodity
+    capacity_restored scales both the Tier-3 disrupted-freight delta and,
+    independently, how much of a reroute_quote this strategy picks up as a
+    rerouting premium -- the same fraction serves as each strategy's "how
+    much of the rerouting problem does this address" signal for both
+    quotes, reusing economic_engine.py's already-tested (in v1)
+    TransportInputs.rerouting_premium field. commodity
     is excluded by default, per section 5. `premium_analogue` is accepted
     for interface symmetry with cost_of_waiting() but is not used to
     manufacture a currency figure here: without a baseline premium field in
     intake.py's schema, a multiplier alone has no monetary anchor — see the
-    module docstring. If strategy.quoted_residual_loss is set, it overrides
-    the total (grade CLIENT_QUOTED), but the assembled components stay in
+    module docstring. If strategy.effects.sourced_from_emergency_replacement_quote
+    is set and an emergency_replacement_quote is on file, or (failing that)
+    if strategy.quoted_residual_loss is set directly, the total is
+    overridden (grade CLIENT_QUOTED) — but the assembled components stay in
     the return value alongside it — the override is auditable, never a
     silent substitution."""
     f = intake_data.get("fields", {})
@@ -213,10 +231,19 @@ def conditional_loss(intake_data: dict, strategy: Strategy,
 
     disrupted_quote = f.get("disrupted_freight_quote")
     contract_rate = f.get("contract_freight_rate")
-    if disrupted_quote is not None and contract_rate is not None:
-        delta = max(0.0, disrupted_quote - contract_rate)
+    reroute_quote = f.get("reroute_quote")
+    freight_pair_present = disrupted_quote is not None and contract_rate is not None
+    # One combined branch, not two independent ones: "transport" must be
+    # graded ABSENT only when neither source of data exists at all, and a
+    # second independent `absent.append("transport")` for the reroute case
+    # would double-record the same ledger line (`absent` has no dedup).
+    if freight_pair_present or reroute_quote is not None:
+        freight_delta = max(0.0, disrupted_quote - contract_rate) if freight_pair_present else 0.0
+        rerouting_premium = (reroute_quote * strategy.effects.capacity_restored
+                             if reroute_quote is not None else 0.0)
         transport_component = transport_cost(TransportInputs(
-            disrupted_freight=delta * (1.0 - strategy.effects.capacity_restored)))
+            disrupted_freight=freight_delta * (1.0 - strategy.effects.capacity_restored),
+            rerouting_premium=rerouting_premium))
     else:
         transport_component = 0.0
         absent.append("transport")
@@ -239,9 +266,16 @@ def conditional_loss(intake_data: dict, strategy: Strategy,
     }
     computed_total = CostBreakdown(components).total
 
-    if strategy.quoted_residual_loss is not None:
+    emergency_quote = f.get("emergency_replacement_quote")
+    residual_override = None
+    if strategy.effects.sourced_from_emergency_replacement_quote and emergency_quote is not None:
+        residual_override = emergency_quote
+    elif strategy.quoted_residual_loss is not None:
+        residual_override = strategy.quoted_residual_loss
+
+    if residual_override is not None:
         return ConditionalLoss(strategy=strategy.name, components=components,
-                               total=strategy.quoted_residual_loss, grade="CLIENT_QUOTED",
+                               total=residual_override, grade="CLIENT_QUOTED",
                                absent_components=absent,
                                effective_days_of_cover=effective_days_of_cover,
                                effective_delay_days=effective_delay_days)
@@ -1120,9 +1154,13 @@ COST_COMPONENTS_NOT_COMPUTED = (
     ("expediting",
      "no expedited-freight cost field or computation exists anywhere in this codebase."),
     ("rerouting",
-     "reroute_quote is a real Tier-3 intake field but is not read by any cost "
-     "computation (conditional_loss/baseline_costbreakdown/disrupted_costbreakdown) -- "
-     "collected, if supplied, but not priced into a component."),
+     "reroute_quote now prices into each strategy's own conditional_loss() transport "
+     "component, scaled by that strategy's capacity_restored -- but rerouting is "
+     "inherently a per-strategy mitigation choice, not a state of the world, so it "
+     "still never reaches baseline_costbreakdown/disrupted_costbreakdown (the "
+     "strategy-independent EXPOSURE/shadow-price figures). Same carve-out logic as "
+     "the working-capital entry below: a real, per-strategy number that cannot be "
+     "pulled into a strategy-independent one."),
     ("service-related economic loss",
      "no standalone figure is computed; the overlapping pieces this codebase does track "
      "(contractual late-delivery penalty, stockout-triggered gross-margin loss) are "
@@ -2072,6 +2110,53 @@ def selftest() -> int:
     assert cl_quoted.total == 250_000 and cl_quoted.grade == "CLIENT_QUOTED"
     assert abs(cl_quoted.components["transport"] - expected_transport_r) < 1e-6
 
+    # --- reroute_quote wiring: prices into "transport" via the same
+    # capacity_restored gate as disrupted_freight_quote, even with no
+    # contract_freight_rate/disrupted_freight_quote pair on file at all
+    # (the exact gap this was fixed for -- "Live verify SKU #5" had no
+    # contract_freight_rate on file).
+    data_reroute_only = _with_field(_with_field(data, "contract_freight_rate", None),
+                                    "reroute_quote", 500_000)
+    cl_reroute_only = conditional_loss(data_reroute_only, reroute_s)   # capacity_restored=0.4
+    assert abs(cl_reroute_only.components["transport"] - 500_000 * 0.4) < 1e-6
+    assert "transport" not in cl_reroute_only.absent_components
+    cl_reroute_only_baseline = conditional_loss(data_reroute_only, continue_s)   # capacity_restored=0
+    assert cl_reroute_only_baseline.components["transport"] == 0.0
+    assert "transport" not in cl_reroute_only_baseline.absent_components   # data present, effect
+                                                                           # zero -- not the same
+                                                                           # as no data at all
+    # No freight data of either kind at all -> genuinely ABSENT, unchanged.
+    data_no_freight = _with_field(_with_field(data, "contract_freight_rate", None),
+                                  "disrupted_freight_quote", None)
+    cl_no_freight = conditional_loss(data_no_freight, reroute_s)
+    assert "transport" in cl_no_freight.absent_components
+
+    # --- emergency_replacement_quote wiring: a strategy whose effects flag
+    # sourced_from_emergency_replacement_quote is priced directly from the
+    # live quote (CLIENT_QUOTED), reading it from intake_data each call
+    # rather than needing it copied onto quoted_residual_loss by hand -- so
+    # a later reassessment with an updated quote re-prices it automatically.
+    data_emergency = _with_field(data, "emergency_replacement_quote", 900_000)
+    emergency_effects = dataclasses.replace(reroute_s.effects,
+                                            sourced_from_emergency_replacement_quote=True)
+    emergency_strategy = dataclasses.replace(reroute_s, effects=emergency_effects)
+    cl_emergency = conditional_loss(data_emergency, emergency_strategy)
+    assert cl_emergency.total == 900_000 and cl_emergency.grade == "CLIENT_QUOTED"
+    assert abs(cl_emergency.components["transport"] - expected_transport_r) < 1e-6   # components
+                                                                                     # still assembled,
+                                                                                     # not discarded
+    # The live quote takes priority over a stale manual quoted_residual_loss
+    # when both are set on the same strategy...
+    emergency_and_manual = dataclasses.replace(emergency_strategy, quoted_residual_loss=123.0)
+    assert conditional_loss(data_emergency, emergency_and_manual).total == 900_000
+    # ...but falls back to the manual override when the flag is set and no
+    # live quote is on file (never silently drops to DERIVED instead).
+    cl_fallback = conditional_loss(data, emergency_and_manual)   # data has no emergency quote
+    assert cl_fallback.total == 123.0 and cl_fallback.grade == "CLIENT_QUOTED"
+    # A strategy with the flag unset is completely unaffected by the quote
+    # existing -- still plain DERIVED.
+    assert conditional_loss(data_emergency, reroute_s).grade == "DERIVED"
+
     # --- #2: p* reduces exactly to v1's published C/L special case.
     zero_loss_s = Strategy("s", 700_000, quoted_residual_loss=0.0)
     zero_cost_s0 = Strategy("s0", 0.0, quoted_residual_loss=0.0)
@@ -2662,6 +2747,8 @@ def selftest() -> int:
          f"{be.p_star:.0%} (doc: 16%)")
     print("  degenerate break-even (denominator <= 0) returns None with a reason, never raises")
     print("  quoted-override conditional loss keeps its assembled components auditable")
+    print("  reroute_quote prices into transport via capacity_restored, even with no freight-rate pair")
+    print("  emergency_replacement_quote prices a flagged strategy's total via a live intake read")
     print("  ledger grades every recorded number; missing fields degrade to ABSENT, never silently")
     print("  same input reproduces the same result, modulo timestamp")
     return 0

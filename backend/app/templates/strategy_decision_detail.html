@@ -53,6 +53,14 @@ with updated quotes &mdash;
 <p class="note hot" style="margin-top:var(--s4)">{{ result.decision_confidence_note }}</p>
 {% endif %}
 
+{% if unwired %}
+<p class="note hot">{{ unwired | join(", ") }} {{ "has" if unwired | length == 1 else "have" }} no
+effects set &mdash; economically identical to the baseline no matter what any quote on this
+decision says.
+{% if row.status == "draft" %}<a href="#edit-strategies">Edit strategies</a> below to change that.
+{% endif %}</p>
+{% endif %}
+
 <section class="panel" style="margin-top:var(--s5)">
   <h2>1 &middot; Exposure basics</h2>
   <div class="stats">
@@ -275,7 +283,7 @@ with updated quotes &mdash;
   </div>
 
   {% if row.status == "draft" %}
-  <details open style="margin-top:var(--s4)">
+  <details id="edit-strategies" open style="margin-top:var(--s4)">
     <summary>Edit strategies</summary>
     <div class="inner">
       <p class="hint" style="margin-top:0">What each option costs directly, and how it changes
@@ -289,6 +297,7 @@ with updated quotes &mdash;
             <th class="m">Delay days, change</th><th class="m">Capacity restored</th>
             <th class="m">War-risk premium &times;</th><th class="m">Days of cover, change</th>
             <th class="m">Forward-buy</th><th class="m">Forward-buy, days early</th>
+            <th class="m">Priced from emergency replacement quote</th>
             <th>Notes</th></tr></thead>
             <tbody>
             {% for s in edit_strategies %}
@@ -314,6 +323,9 @@ with updated quotes &mdash;
                     value="{{ (s.effects.forward_buy_fraction * 100)|round(0) if s.effects.forward_buy_fraction else 0 }}"> %</td>
                 <td class="m"><input type="number" name="strategy_{{ loop.index0 }}_forward_buy_early_days"
                     step="1" style="width:90px" value="{{ s.effects.forward_buy_early_days }}"></td>
+                <td class="m"><input type="checkbox"
+                    name="strategy_{{ loop.index0 }}_sourced_from_emergency_replacement_quote"
+                    {{ "checked" if s.effects.sourced_from_emergency_replacement_quote else "" }}></td>
                 <td><input type="text" name="strategy_{{ loop.index0 }}_notes" style="width:140px"
                     value="{{ s.notes }}"></td>
               </tr>
@@ -328,7 +340,11 @@ with updated quotes &mdash;
         supplied it, derived otherwise. Forward-buy secures that fraction of the position this
         many days sooner than the contract timeline would have required &mdash; it only adds the
         financing/carrying cost of committing early, so pair it with capacity restored/war-risk
-        premium &times; if the point is to also reduce risk on the secured fraction.</p>
+        premium &times; if the point is to also reduce risk on the secured fraction. Checking
+        "priced from emergency replacement quote" replaces this strategy's whole conditional
+        loss with the emergency replacement quote on file (section 4) &mdash; use it for a
+        strategy whose real economics are "source replacement cargo from another supplier
+        entirely," not a freight/insurance mitigation on the same shipment.</p>
         <div class="row" style="margin-top:var(--s4)">
           <button class="btn" type="submit">Recompute</button>
         </div>
