@@ -1,0 +1,41 @@
+                         ┌─────────────────────────┐
+                         │       TAR SIGNAL        │
+                         │                         │
+                         │ Threat → Acts           │
+                         │ Chokepoint              │
+                         │ Historical evidence     │
+                         │ Current disruption      │
+                         └────────────┬────────────┘
+                                      │
+                                      ▼
+                         ┌─────────────────────────┐
+                         │   SCENARIO ENGINE        │
+                         │                         │
+                         │ Baseline                │
+                         │ 7 / 14 / 30 / 45 / 60d │
+                         │ Scenario assumptions    │
+                         │ Probabilities/weights   │
+                         └────────────┬────────────┘
+                                      │
+                                      ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                  PROCUREMENT DECISION ENGINE                      │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │              1. COUNTERFACTUAL ENGINE                      │  │
+│  │                                                            │  │
+│  │  BUY NOW ───────┐                                          │  │
+│  │  WAIT ──────────┤                                          │  │
+│  │  REROUTE ───────┤──► Simulate each strategy × scenario    │  │
+│  │  ALT SUPPLIER ──┤                                          │  │
+│  │  EXPEDITE ──────┤                                          │  │
+│  │  DUAL SOURCE ───┘                                          │  │
+│  └──────────────────────────┬─────────────────────────────────┘  │
+│                             │                                    │
+│                             ▼                                    │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │              ECONOMIC VALUATION LAYER                      │  │
+│  │                                                            │  │
+│  │ Transport │ Freight │ Delay │ Inventory │ Commodity        │  │
+│  │ Insurance │ Expediting │ Disruption │ Cash impact          │  │
+│  └──────────────────────────┬─────────────────────────────────┘  │

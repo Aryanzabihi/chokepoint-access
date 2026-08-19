@@ -1,0 +1,934 @@
+{
+  "project": "TAR - Procurement Counterfactual Decision Engine",
+  "task_type": "major_architectural_refactor_and_engine_development",
+
+  "objective": {
+    "primary": "Transform the existing TAR economic decision engine into an integrated Procurement Counterfactual Decision Engine with five analytical capabilities: Procurement Counterfactual Engine, Decision Deadline Engine, Point-of-No-Return Detector, Shadow Price of Geopolitical Risk Engine, and Maximum Rational Premium Engine.",
+    "secondary": "Preserve validated TAR methodology and existing economic calculations wherever they are methodologically sound. Do not rebuild working components unnecessarily.",
+    "product_goal": "TAR should move from primarily reporting geopolitical risk and comparing economic costs to answering the procurement decision problem: What should I do, what happens if I choose each alternative, how long can I wait, when does waiting become irreversible, what is the monetary value of the geopolitical exposure, and how much should I rationally pay to mitigate it?"
+  },
+
+  "critical_instruction": {
+    "before_coding": [
+      "Inspect the entire existing repository.",
+      "Understand the current backend architecture, frontend architecture, database models, API routes, services, schemas, decision engine, TAR calculation logic, economic engine, tests, and existing UI.",
+      "Identify exactly which existing components calculate TAR.",
+      "Identify exactly which existing components calculate economic exposure and strategy costs.",
+      "Identify all current assumptions, thresholds, probability calculations, Monte Carlo calculations, sensitivity calculations, and recommendation logic.",
+      "Identify which parts are empirically validated, which are assumptions, and which are merely implementation conveniences.",
+      "Do not immediately rewrite the current engine.",
+      "Create an architecture and migration plan based on the actual codebase before modifying core logic."
+    ],
+    "implementation_principle": "The five capabilities must be implemented as coordinated analytical modules under one Procurement Decision Engine architecture, not as five unrelated engines.",
+    "important": "Do not invent data, coefficients, probabilities, thresholds, causal relationships, or predictive capabilities simply to make the interface work."
+  },
+
+  "conceptual_architecture": {
+    "name": "TAR Procurement Decision Engine",
+    "hierarchy": {
+      "level_1": "TAR geopolitical signal",
+      "level_2": "Scenario construction",
+      "level_3": "Counterfactual procurement simulation",
+      "level_4": "Economic valuation",
+      "level_5": "Decision timing analysis",
+      "level_6": "Geopolitical risk monetary valuation",
+      "level_7": "Risk mitigation pricing",
+      "level_8": "Final procurement recommendation"
+    },
+
+    "core_flow": [
+      "Load procurement order",
+      "Load relevant TAR signal and evidence",
+      "Determine current disruption state",
+      "Construct plausible disruption scenarios",
+      "Determine feasible procurement strategies",
+      "Simulate each strategy under each scenario",
+      "Calculate economic consequences",
+      "Propagate uncertainty",
+      "Calculate expected outcomes",
+      "Rank strategies",
+      "Calculate decision deadline",
+      "Calculate point of no return where supportable",
+      "Calculate shadow price of geopolitical risk",
+      "Calculate maximum rational premium",
+      "Generate transparent final decision",
+      "Expose assumptions, evidence, uncertainty, and limitations"
+    ]
+  },
+
+  "methodological_foundation": {
+    "central_question": "What would happen under each plausible procurement decision?",
+    "decision_problem": "Select the procurement action that minimizes expected risk-adjusted economic cost while respecting service, timing, operational, and contractual constraints.",
+    "important_distinction": {
+      "TAR": "Upstream geopolitical signal/evidence about threat versus acts and disruption risk.",
+      "scenario": "A conditional future assumption or model-generated state.",
+      "counterfactual": "The simulated procurement outcome if a particular action is chosen.",
+      "economic_valuation": "Translation of operational consequences into monetary and service outcomes.",
+      "decision": "Comparison of feasible counterfactual outcomes.",
+      "recommendation": "The action selected from the modeled alternatives under stated assumptions."
+    },
+    "do_not_conflate": [
+      "Do not treat TAR as the procurement decision itself.",
+      "Do not treat a TAR score as an economic loss.",
+      "Do not treat scenario assumptions as predictions.",
+      "Do not treat simulated counterfactuals as observed outcomes.",
+      "Do not hide the recommendation behind a single composite score."
+    ]
+  },
+
+  "module_1_procurement_counterfactual_engine": {
+    "name": "Procurement Counterfactual Engine",
+    "priority": "highest",
+    "role": "Core analytical engine.",
+    "question": "What would happen to this procurement order under each feasible procurement strategy and plausible future scenario?",
+
+    "inputs": {
+      "order": [
+        "order_id",
+        "SKU/product",
+        "quantity",
+        "unit price",
+        "cargo value",
+        "currency",
+        "supplier",
+        "origin",
+        "destination",
+        "Incoterm",
+        "required delivery date",
+        "current lead time",
+        "contract constraints where available"
+      ],
+      "logistics": [
+        "current route",
+        "chokepoint",
+        "transport mode",
+        "freight cost",
+        "insurance",
+        "transit time",
+        "alternative route information where available"
+      ],
+      "procurement": [
+        "supplier price",
+        "alternative supplier information where available",
+        "supplier capacity where available",
+        "inventory information where available",
+        "minimum order constraints where available",
+        "lead times",
+        "contractual flexibility"
+      ],
+      "tar": [
+        "chokepoint",
+        "current TAR signal",
+        "historical TAR evidence",
+        "current disruption state",
+        "relevant historical cases",
+        "signal confidence/evidence quality"
+      ]
+    },
+
+    "strategy_generation": {
+      "principle": "Only generate strategies that are feasible given the actual order and available data.",
+      "candidate_strategies": [
+        "buy_now",
+        "wait_7_days",
+        "wait_14_days",
+        "wait_30_days",
+        "reroute",
+        "alternative_supplier",
+        "expedite",
+        "dual_source",
+        "increase_inventory",
+        "insurance"
+      ],
+      "important": [
+        "Do not display an alternative supplier strategy if no alternative supplier is available.",
+        "Do not display rerouting if no feasible alternative route exists.",
+        "Do not assume unlimited supplier capacity.",
+        "Do not assume unlimited freight capacity.",
+        "Do not assume the user can arbitrarily delay an order.",
+        "Respect required delivery dates and operational constraints."
+      ]
+    },
+
+    "scenario_generation": {
+      "purpose": "Represent uncertainty about how the disruption evolves.",
+      "initial_scenarios": [
+        {
+          "name": "baseline",
+          "description": "No material worsening relative to the current disruption state."
+        },
+        {
+          "name": "continued_disruption",
+          "description": "Current disruption persists without major escalation."
+        },
+        {
+          "name": "moderate_disruption",
+          "description": "Disruption becomes materially more costly or operationally restrictive."
+        },
+        {
+          "name": "severe_prolonged_disruption",
+          "description": "Disruption persists for an extended period and produces substantial procurement consequences."
+        }
+      ],
+      "duration_dimensions": [
+        "7_days",
+        "14_days",
+        "30_days",
+        "45_days",
+        "60_days"
+      ],
+      "methodological_rule": "Duration scenarios are conditional scenarios, not deterministic predictions.",
+      "probabilities": {
+        "rule": "Use empirically supported probabilities if the existing methodology provides them.",
+        "fallback": "If probabilities cannot be estimated defensibly, allow scenario-weighted analysis without fabricated probabilities and clearly label the result as conditional."
+      }
+    },
+
+    "counterfactual_calculation": {
+      "for_each_strategy": [
+        "determine operational consequences",
+        "determine additional lead time",
+        "determine additional freight/logistics cost",
+        "determine additional inventory requirement",
+        "determine delay exposure",
+        "determine disruption exposure",
+        "determine service consequences",
+        "determine cash/working-capital consequences where data supports it",
+        "calculate total economic outcome",
+        "record assumptions and data provenance"
+      ],
+      "output": "Strategy x Scenario outcome matrix."
+    },
+
+    "example_output": {
+      "strategy_matrix": [
+        {
+          "strategy": "buy_now",
+          "baseline_expected_cost": 100000,
+          "moderate_disruption_expected_cost": 102000,
+          "severe_disruption_expected_cost": 103000
+        },
+        {
+          "strategy": "wait_14_days",
+          "baseline_expected_cost": 94000,
+          "moderate_disruption_expected_cost": 98000,
+          "severe_disruption_expected_cost": 110000
+        },
+        {
+          "strategy": "reroute",
+          "baseline_expected_cost": 106000,
+          "moderate_disruption_expected_cost": 108000,
+          "severe_disruption_expected_cost": 109000
+        }
+      ]
+    },
+
+    "required_outputs": [
+      "expected total cost",
+      "expected disruption loss",
+      "expected delay cost",
+      "expected logistics cost",
+      "inventory impact",
+      "cash impact where supported",
+      "service risk",
+      "scenario robustness",
+      "strategy ranking",
+      "recommended strategy"
+    ]
+  },
+
+  "module_2_decision_deadline_engine": {
+    "name": "Decision Deadline Engine",
+    "priority": "second",
+    "role": "Determine when the preferred procurement action changes as time passes.",
+    "question": "How long can I wait before acting becomes economically preferable?",
+
+    "method": {
+      "principle": "The decision deadline must emerge from counterfactual economic comparison rather than an arbitrary threshold.",
+      "calculation": [
+        "Evaluate act-now expected cost at each relevant future time.",
+        "Evaluate wait expected cost at each relevant future time.",
+        "Evaluate other feasible mitigation strategies.",
+        "Identify strategy crossover points.",
+        "Identify the last point at which the current preferred waiting strategy remains economically preferable.",
+        "Report the result with uncertainty."
+      ]
+    },
+
+    "time_grid": {
+      "default": [
+        0,
+        3,
+        7,
+        10,
+        14,
+        18,
+        21,
+        30,
+        45,
+        60
+      ],
+      "rule": "Use finer resolution around detected crossover points where useful."
+    },
+
+    "output": {
+      "decision_deadline": "Estimated final time at which waiting remains economically preferable under the modeled assumptions.",
+      "preferred_action_before_deadline": "Current preferred action.",
+      "preferred_action_after_deadline": "Action that becomes economically preferable.",
+      "uncertainty_range": "Range if supported by the model.",
+      "explanation": "Explicit explanation of which cost/risk components cause the crossover."
+    },
+
+    "example": {
+      "day_0": "WAIT",
+      "day_14": "WAIT",
+      "day_18": "WAIT approximately equal to ACT",
+      "day_19": "ACT",
+      "decision_deadline": "Day 18"
+    },
+
+    "important": [
+      "Do not claim the deadline is exact.",
+      "Use 'estimated decision deadline' where uncertainty exists.",
+      "Do not derive the deadline from TAR score alone.",
+      "The deadline must be linked to procurement economics and operational constraints."
+    ]
+  },
+
+  "module_3_point_of_no_return_detector": {
+    "name": "Point-of-No-Return Detector",
+    "priority": "third",
+    "role": "Identify when a mitigation option or procurement decision becomes practically or economically unavailable.",
+    "question": "When does waiting cause the organization to lose the ability to respond effectively?",
+
+    "distinction_from_deadline": {
+      "decision_deadline": "When should I act?",
+      "point_of_no_return": "When may the ability to act effectively disappear?"
+    },
+
+    "tracked_constraints": [
+      "supplier capacity",
+      "alternative supplier availability",
+      "alternative supplier lead time",
+      "freight capacity",
+      "alternative route availability",
+      "inventory remaining",
+      "required delivery date",
+      "production schedule",
+      "contractual constraints",
+      "minimum feasible mitigation lead time",
+      "expected price escalation where supported"
+    ],
+
+    "method": {
+      "step_1": "Identify available mitigation options.",
+      "step_2": "Determine the latest time each option can still satisfy operational requirements.",
+      "step_3": "Determine whether economic feasibility disappears before operational feasibility.",
+      "step_4": "Identify the earliest binding constraint.",
+      "step_5": "Report the estimated point of no return and its causal mechanism."
+    },
+
+    "example": {
+      "day_18": "Alternative supplier still available.",
+      "day_23": "Alternative supplier capacity becomes constrained.",
+      "day_27": "Alternative supplier can no longer meet required delivery date.",
+      "point_of_no_return": "Approximately Day 27",
+      "reason": "Alternative sourcing can no longer satisfy the required delivery window."
+    },
+
+    "important": [
+      "Do not use the phrase 'point of no return' as a deterministic prediction.",
+      "Use 'estimated point of no return' when uncertainty exists.",
+      "Always provide the underlying constraint.",
+      "If no reliable data exists to determine the point, return 'not determinable from available data' rather than inventing a date."
+    ]
+  },
+
+  "module_4_shadow_price_engine": {
+    "name": "Shadow Price of Geopolitical Risk Engine",
+    "priority": "fourth",
+    "role": "Translate geopolitical exposure into a monetary value.",
+    "question": "How much expected economic cost is attributable to the geopolitical disruption relative to a baseline?",
+
+    "core_definition": {
+      "baseline_cost": "Expected procurement cost under the reference/no-additional-disruption condition.",
+      "risk_adjusted_cost": "Expected procurement cost under the modeled geopolitical disruption scenarios.",
+      "shadow_price": "Risk-adjusted expected cost minus baseline expected cost."
+    },
+
+    "formula": "Shadow Price = Risk-Adjusted Expected Procurement Cost - Baseline Expected Procurement Cost",
+
+    "cost_components": [
+      "transport",
+      "freight",
+      "insurance",
+      "delay",
+      "inventory",
+      "commodity",
+      "expediting",
+      "rerouting",
+      "disruption loss",
+      "service-related economic loss where quantifiable",
+      "working-capital impact where supported"
+    ],
+
+    "example": {
+      "baseline_expected_cost": 1000000,
+      "expected_delay_cost": 18000,
+      "expected_inventory_cost": 12000,
+      "expected_disruption_cost": 31000,
+      "risk_adjusted_cost": 1061000,
+      "shadow_price": 61000
+    },
+
+    "interpretation": "Under the stated assumptions, geopolitical exposure adds approximately the calculated shadow price to expected procurement cost.",
+
+    "important": [
+      "Do not claim the shadow price is an observed market price.",
+      "Do not imply causal attribution beyond what the model can support.",
+      "Clearly separate baseline assumptions from disruption assumptions.",
+      "If some cost components are missing, identify them explicitly."
+    ]
+  },
+
+  "module_5_maximum_rational_premium_engine": {
+    "name": "Maximum Rational Premium Engine",
+    "priority": "fifth",
+    "role": "Calculate the maximum additional amount procurement should rationally pay for a mitigation option.",
+    "question": "How much should I be willing to pay to reduce or avoid the modeled geopolitical exposure?",
+
+    "concept": {
+      "principle": "The maximum rational premium is bounded by the expected economic benefit of the mitigation relative to the reference option.",
+      "reference_option": "Current/default procurement strategy.",
+      "mitigation_option": "Alternative route, supplier, expedited shipment, additional inventory, insurance, or other feasible mitigation."
+    },
+
+    "core_formula": "Maximum Rational Premium = Expected Cost of Reference Strategy - Expected Cost of Mitigation Strategy before the mitigation premium",
+
+    "example": {
+      "reference_expected_cost": 120000,
+      "alternative_expected_cost_before_premium": 106300,
+      "maximum_rational_premium": 13700
+    },
+
+    "decision_rule": {
+      "premium_less_than_or_equal_to_maximum": "Economically rational under model assumptions.",
+      "premium_greater_than_maximum": "Not economically justified under model assumptions."
+    },
+
+    "important": [
+      "Do not treat the result as a guaranteed negotiation price.",
+      "Call it a maximum economically rational premium under the modeled assumptions.",
+      "Include uncertainty ranges where possible.",
+      "Account for service, timing, and operational differences between alternatives.",
+      "Do not compare nominal prices alone; compare expected total economic outcomes."
+    ]
+  },
+
+  "economic_valuation_layer": {
+    "purpose": "Provide the monetary calculations required by all five modules.",
+    "relationship": "This layer incorporates the existing Economic Engine rather than replacing it.",
+    "preserve_existing_components": [
+      "baseline versus disrupted cost",
+      "transport cost",
+      "insurance",
+      "delay cost",
+      "inventory cost",
+      "commodity cost",
+      "expected exposure",
+      "avoidable loss",
+      "strategy comparison",
+      "break-even probability where methodologically valid",
+      "Monte Carlo uncertainty",
+      "sensitivity analysis"
+    ],
+    "refactoring_rule": "If an existing calculation is valid and tested, reuse it. If it is methodologically weak, document the problem before changing it.",
+    "no_black_box_score": true
+  },
+
+  "uncertainty_framework": {
+    "purpose": "Prevent false precision.",
+    "requirements": [
+      "Represent uncertain inputs as ranges or distributions where justified.",
+      "Propagate uncertainty through scenario and economic calculations.",
+      "Report expected values together with uncertainty where possible.",
+      "Perform sensitivity analysis on major assumptions.",
+      "Identify which assumptions can change the recommended strategy."
+    ],
+    "monte_carlo": {
+      "preserve_existing_implementation": true,
+      "use_for": [
+        "strategy outcome distributions",
+        "decision deadline uncertainty",
+        "shadow price uncertainty",
+        "maximum rational premium uncertainty"
+      ],
+      "do_not_use": "Monte Carlo should not manufacture precision when input distributions are unsupported."
+    }
+  },
+
+  "decision_logic": {
+    "primary_objective": "Choose the feasible procurement strategy with the best expected risk-adjusted economic outcome under stated scenarios and constraints.",
+    "secondary_objectives": [
+      "preserve service feasibility",
+      "respect delivery requirements",
+      "identify timing constraints",
+      "make trade-offs transparent"
+    ],
+    "ranking": {
+      "primary_metric": "Expected total economic cost",
+      "secondary_metrics": [
+        "service risk",
+        "delivery feasibility",
+        "cash impact",
+        "scenario robustness",
+        "uncertainty"
+      ]
+    },
+    "important": [
+      "Do not collapse all dimensions into an arbitrary score.",
+      "Do not recommend a strategy merely because it has the lowest nominal price.",
+      "Do not recommend a strategy that violates a hard operational constraint.",
+      "If two strategies are statistically/economically indistinguishable within uncertainty, report that rather than forcing a winner."
+    ]
+  },
+
+  "decision_object": {
+    "purpose": "Create a unified backend output consumed by the frontend.",
+    "schema_concept": {
+      "order": {},
+      "tar_signal": {},
+      "scenario_set": {},
+      "strategies": [],
+      "counterfactual_results": [],
+      "recommended_strategy": {},
+      "decision_deadline": {},
+      "point_of_no_return": {},
+      "shadow_price": {},
+      "maximum_rational_premium": {},
+      "uncertainty": {},
+      "sensitivity": {},
+      "assumptions": [],
+      "missing_information": [],
+      "evidence": [],
+      "limitations": []
+    },
+    "example": {
+      "order_id": "PO-123",
+      "recommended_strategy": {
+        "action": "wait",
+        "duration_days": 14,
+        "expected_cost": 97000
+      },
+      "decision_deadline": {
+        "estimated_day": 21,
+        "uncertainty": "Day 18-24"
+      },
+      "point_of_no_return": {
+        "estimated_day": 27,
+        "reason": "Alternative supplier cannot satisfy required delivery date after this point."
+      },
+      "shadow_price": {
+        "amount": 61000,
+        "currency": "EUR"
+      },
+      "maximum_rational_premium": {
+        "amount": 13700,
+        "currency": "EUR"
+      }
+    }
+  },
+
+  "missing_data_handling": {
+    "rule": "Never silently invent missing values.",
+    "behavior": [
+      "Identify missing variables.",
+      "Determine whether the variable materially affects the decision.",
+      "If immaterial, continue and document.",
+      "If material, lower confidence or provide conditional results.",
+      "If essential, return an explicit insufficient-data state."
+    ],
+    "example": {
+      "missing_variable": "supplier_finished_goods_inventory",
+      "effect": "May materially change the wait-versus-act decision.",
+      "output": "Decision is sensitive to supplier inventory; obtain supplier inventory information before committing."
+    }
+  },
+
+  "methodological_guardrails": [
+    "Do not create corridor-specific TAR thresholds unless supported by validated evidence.",
+    "Do not claim TAR velocity predicts escalation if the existing validated methodology does not support that claim.",
+    "Do not turn correlation into causation.",
+    "Do not use a single TAR score as the decision rule.",
+    "Do not treat historical similarity as proof of future behavior.",
+    "Do not use arbitrary weights merely to make rankings look decisive.",
+    "Do not hide assumptions.",
+    "Do not create false precision.",
+    "Do not use unsupported supplier, freight, inventory, or capacity data.",
+    "Distinguish observed data, estimated parameters, assumptions, simulated outcomes, and final decisions."
+  ],
+
+  "backend_architecture": {
+    "preferred_service_structure": {
+      "tar_signal_service": "Existing TAR calculation and evidence.",
+      "scenario_service": "Scenario construction and probability/weight handling.",
+      "counterfactual_service": "Strategy simulation.",
+      "economic_valuation_service": "Cost and loss calculations.",
+      "uncertainty_service": "Monte Carlo and sensitivity.",
+      "deadline_service": "Decision deadline calculation.",
+      "point_of_no_return_service": "Operational/economic feasibility boundary detection.",
+      "shadow_price_service": "Geopolitical risk monetary valuation.",
+      "premium_service": "Maximum rational premium.",
+      "decision_service": "Orchestration and final decision object."
+    },
+    "principle": "Keep domain logic out of frontend components.",
+    "frontend_role": "Input collection, visualization, explanation, and user interaction only."
+  },
+
+  "frontend_design_requirements": {
+    "goal": "The frontend should communicate decisions and economic trade-offs, not simply display risk scores.",
+    "primary_screen": {
+      "title": "TAR Procurement Decision",
+      "sections": [
+        "Current TAR Signal",
+        "Recommended Action",
+        "Counterfactual Strategy Comparison",
+        "Decision Timeline",
+        "Decision Deadline",
+        "Point of No Return",
+        "Shadow Price of Geopolitical Risk",
+        "Maximum Rational Premium",
+        "Scenario Analysis",
+        "Uncertainty",
+        "Sensitivity",
+        "Assumptions",
+        "Evidence",
+        "Missing Information"
+      ]
+    },
+
+    "recommended_decision_display": {
+      "example": "WAIT 14 DAYS",
+      "supporting_text": "Waiting 14 days currently has the lowest expected risk-adjusted economic cost among feasible strategies under the stated scenario assumptions."
+    },
+
+    "counterfactual_table": {
+      "columns": [
+        "Strategy",
+        "Expected Cost",
+        "Disruption Loss",
+        "Delay Cost",
+        "Cash Impact",
+        "Service Risk",
+        "Robustness",
+        "Decision"
+      ]
+    },
+
+    "timeline": {
+      "show": [
+        "today",
+        "preferred waiting period",
+        "decision deadline",
+        "estimated point of no return",
+        "required delivery date"
+      ]
+    },
+
+    "important": [
+      "Do not make the UI primarily score-based.",
+      "Do not hide calculations behind an AI explanation.",
+      "Users must be able to inspect why a recommendation was made.",
+      "Clearly label simulated scenarios.",
+      "Clearly label uncertainty."
+    ]
+  },
+
+  "api_requirements": {
+    "design_principle": "The frontend should request a complete decision analysis from a unified decision endpoint rather than independently calculating results.",
+    "conceptual_endpoint": {
+      "method": "POST",
+      "path": "/decisions/analyze",
+      "input": "Order and decision parameters",
+      "output": "Unified Decision Object"
+    },
+    "additional_endpoints_if_needed": [
+      "GET decision history",
+      "GET decision details",
+      "GET scenario results",
+      "GET evidence",
+      "GET engine assumptions"
+    ],
+    "important": "Adapt endpoint names and structure to the existing application's architecture rather than blindly creating duplicate APIs."
+  },
+
+  "testing_strategy": {
+    "required": true,
+    "layers": [
+      "unit tests",
+      "integration tests",
+      "API tests",
+      "regression tests",
+      "edge-case tests"
+    ],
+    "unit_tests": [
+      "scenario generation",
+      "strategy feasibility",
+      "counterfactual simulation",
+      "economic valuation",
+      "expected cost calculation",
+      "strategy ranking",
+      "deadline crossover calculation",
+      "point-of-no-return detection",
+      "shadow price calculation",
+      "maximum rational premium calculation",
+      "uncertainty propagation"
+    ],
+    "edge_cases": [
+      "zero disruption probability",
+      "very high disruption probability",
+      "no feasible alternative supplier",
+      "no alternative route",
+      "zero inventory",
+      "very large inventory",
+      "delivery date already imminent",
+      "wait strategy infeasible",
+      "equal expected costs",
+      "missing freight cost",
+      "missing supplier capacity",
+      "missing inventory",
+      "missing probability",
+      "multiple strategies with statistically indistinguishable outcomes"
+    ],
+    "critical_test": "The same inputs must produce reproducible deterministic results when stochastic simulation is controlled by a seed."
+  },
+
+  "validation_framework": {
+    "requirement": "Every engine must have a clearly defined validation strategy.",
+    "counterfactual_engine": {
+      "validate": [
+        "logical consistency",
+        "strategy feasibility",
+        "cost conservation",
+        "scenario consistency",
+        "known historical/order cases"
+      ]
+    },
+    "deadline_engine": {
+      "validate": [
+        "known crossover cases",
+        "monotonicity where expected",
+        "sensitivity to delay costs",
+        "sensitivity to disruption probability"
+      ]
+    },
+    "point_of_no_return": {
+      "validate": [
+        "constraint detection",
+        "delivery feasibility",
+        "supplier capacity constraints",
+        "alternative availability"
+      ]
+    },
+    "shadow_price": {
+      "validate": [
+        "baseline equals risk-adjusted cost when geopolitical exposure is zero",
+        "shadow price increases appropriately when expected disruption costs increase",
+        "shadow price does not depend on arbitrary TAR score weights"
+      ]
+    },
+    "maximum_rational_premium": {
+      "validate": [
+        "premium equals zero when mitigation provides no economic benefit",
+        "premium increases when mitigation reduces expected loss",
+        "premium decreases when mitigation becomes less effective"
+      ]
+    }
+  },
+
+  "example_end_to_end_case": {
+    "scenario": {
+      "chokepoint": "Hormuz",
+      "current_tar_signal": "elevated",
+      "order_value": 100000,
+      "required_delivery": "30 days"
+    },
+    "candidate_strategies": [
+      "buy_now",
+      "wait_7_days",
+      "wait_14_days",
+      "wait_30_days",
+      "reroute",
+      "alternative_supplier"
+    ],
+    "example_result": {
+      "recommended_action": "wait_14_days",
+      "expected_cost": 97000,
+      "decision_deadline": "approximately Day 21",
+      "point_of_no_return": "approximately Day 27",
+      "shadow_price": 74000,
+      "maximum_rational_premium": 13700
+    },
+    "important": "These numbers are illustrative only. Do not hard-code them into the application."
+  },
+
+  "development_sequence": {
+    "phase_0": {
+      "name": "Repository and methodology audit",
+      "deliverables": [
+        "architecture map",
+        "current engine map",
+        "data dependency map",
+        "existing calculation inventory",
+        "existing test inventory",
+        "methodological risk inventory"
+      ]
+    },
+    "phase_1": {
+      "name": "Counterfactual foundation",
+      "deliverables": [
+        "scenario model",
+        "strategy model",
+        "counterfactual simulation",
+        "economic valuation integration",
+        "strategy comparison",
+        "unified Decision Object"
+      ]
+    },
+    "phase_2": {
+      "name": "Decision timing",
+      "deliverables": [
+        "Decision Deadline Engine",
+        "time-based strategy comparison",
+        "decision crossover detection",
+        "uncertainty around deadline"
+      ]
+    },
+    "phase_3": {
+      "name": "Irreversibility",
+      "deliverables": [
+        "Point-of-No-Return Detector",
+        "constraint tracking",
+        "feasibility boundary detection",
+        "explanation of binding constraint"
+      ]
+    },
+    "phase_4": {
+      "name": "Economic risk valuation",
+      "deliverables": [
+        "Shadow Price Engine",
+        "baseline versus risk-adjusted cost",
+        "uncertainty range",
+        "component attribution"
+      ]
+    },
+    "phase_5": {
+      "name": "Mitigation pricing",
+      "deliverables": [
+        "Maximum Rational Premium Engine",
+        "reference versus mitigation comparison",
+        "premium sensitivity",
+        "uncertainty range"
+      ]
+    },
+    "phase_6": {
+      "name": "Frontend integration",
+      "deliverables": [
+        "decision dashboard",
+        "counterfactual comparison",
+        "timeline",
+        "deadline",
+        "point of no return",
+        "shadow price",
+        "maximum premium",
+        "assumptions and evidence"
+      ]
+    },
+    "phase_7": {
+      "name": "Validation and hardening",
+      "deliverables": [
+        "complete test suite",
+        "regression testing",
+        "edge-case testing",
+        "methodology documentation",
+        "API documentation",
+        "engine documentation"
+      ]
+    }
+  },
+
+  "non_goals": [
+    "Do not build a digital twin yet.",
+    "Do not build a full supplier marketplace.",
+    "Do not build a supplier bluff detector yet.",
+    "Do not build a negotiation copilot yet.",
+    "Do not build a procurement arbitrage detector yet.",
+    "Do not build a portfolio contagion engine yet.",
+    "Do not build autonomous purchasing.",
+    "Do not replace the TAR signal methodology.",
+    "Do not create five disconnected engines with duplicated calculations.",
+    "Do not rebuild the frontend merely for visual changes before the analytical architecture is stable."
+  ],
+
+  "future_architecture": {
+    "potential_v2_modules": [
+      "Value of Information Engine",
+      "What Are We Missing layer",
+      "Alternative Sourcing Engine",
+      "Supplier Cost Attribution",
+      "Negotiation Copilot",
+      "Portfolio Stress Test",
+      "Supply Chain Contagion Engine",
+      "Disruption DNA",
+      "TAR Learning and Calibration Loop"
+    ],
+    "potential_v3": [
+      "Procurement Digital Twin",
+      "Procurement Arbitrage Detector"
+    ],
+    "rule": "Do not implement these future modules unless explicitly requested."
+  },
+
+  "final_acceptance_criteria": [
+    "Procurement Counterfactual Engine is the central decision architecture.",
+    "The existing TAR signal methodology remains intact unless a documented methodological correction is necessary.",
+    "Existing validated economic calculations are preserved and integrated.",
+    "A single order can be evaluated across multiple feasible strategies.",
+    "Each strategy can be evaluated across multiple plausible scenarios.",
+    "Expected economic outcomes are calculated transparently.",
+    "Strategy rankings are traceable to calculations.",
+    "Decision Deadline is derived from strategy crossover economics rather than arbitrary thresholds.",
+    "Point of No Return is derived from identifiable operational or economic constraints.",
+    "Shadow Price translates modeled geopolitical exposure into monetary value.",
+    "Maximum Rational Premium calculates the economically justified premium for mitigation.",
+    "All outputs distinguish observed data, assumptions, modeled scenarios, simulated outcomes, and decisions.",
+    "Missing material data is explicitly reported.",
+    "Uncertainty and sensitivity are visible.",
+    "No unsupported predictive claims are introduced.",
+    "No arbitrary composite score replaces the underlying economic comparison.",
+    "Backend contains the decision logic.",
+    "Frontend visualizes and explains the decision but does not independently calculate it.",
+    "Existing tests continue to pass.",
+    "New tests cover all five capabilities.",
+    "The architecture is modular enough to add future engines without rewriting the core.",
+    "The system is explainable enough for procurement managers and academically defensible."
+  ],
+
+  "final_instruction_to_claude": {
+    "step_1": "Inspect the existing codebase completely.",
+    "step_2": "Map the current TAR and Economic Engine architecture.",
+    "step_3": "Identify reusable components and methodological weaknesses.",
+    "step_4": "Produce a concrete implementation plan before changing code.",
+    "step_5": "Implement the Counterfactual Engine first.",
+    "step_6": "Integrate the existing economic engine as the Economic Valuation layer.",
+    "step_7": "Implement Decision Deadline.",
+    "step_8": "Implement Point-of-No-Return.",
+    "step_9": "Implement Shadow Price.",
+    "step_10": "Implement Maximum Rational Premium.",
+    "step_11": "Integrate all five through one unified Decision Object/API.",
+    "step_12": "Update the frontend only after the backend decision architecture is functioning.",
+    "step_13": "Run all tests and add new tests.",
+    "step_14": "Do not declare completion if a calculation is only mocked or hard-coded.",
+    "step_15": "At the end, provide a concise technical report showing what was changed, why it was changed, what was preserved, what was tested, and what remains unsupported."
+  }
+}

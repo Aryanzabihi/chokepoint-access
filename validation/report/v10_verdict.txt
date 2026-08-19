@@ -1,0 +1,28 @@
+RECONCILIATION GRID -- PERMUTATION NULL ON THE CLOSEST MATCH
+==============================================================================
+
+CAVEAT ON THE INPUT DATA, READ THIS FIRST
+  final_output/panel_final.csv is not available on this machine (it is
+  .gitignored, same as the manuscript itself). This run scores a
+  RECONSTRUCTION: tar_ingest.build_tar() against data/gpr_monthly.dta,
+  repeated across the 7 manuscript panel units -- reference.py confirms
+  this construction matches the pinned fingerprint of the real
+  panel's own tar column to better than 0.0005 (484 overlapping
+  months). Treat this run as strong evidence, not a substitute for
+  running it again against the authentic file.
+
+target 1: 0.753 (README's 'pooled')
+  observed closest gap    : 0.0005
+  null gap,  median       : 0.0837
+  null gap,  5th pct      : 0.0026
+  p-value                 : 0.0166
+
+target 2: 0.842 (README's 'chokepoint-restricted')
+  observed closest gap    : 0.0548
+  null gap,  median       : 0.1727
+  null gap,  5th pct      : 0.0554
+  p-value                 : 0.0532
+
+  VERDICT (0.753): noise searched this hard lands at least as close to 0.753 only p=0.0166 of the time (observed gap 0.0005). This is a real correspondence, not a search artifact -- the design that produces it is worth naming plainly.
+
+  VERDICT (0.842): noise searched this hard lands at least as close to 0.842 p=0.0532 of the time (observed gap 0.0548). NOT distinguishable from a search artifact -- do not report this match as reproducing the published figure.
