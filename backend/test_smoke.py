@@ -93,10 +93,11 @@ def test_full_walkthrough(client):
     r = client.post("/signup", data={"email": "broker@example.com", "password": "x" * 12})
     assert r.status_code == 422
 
-    # logged-out state can't see the dashboard
+    # logged-out state can't see the dashboard -- sent to /login, not a bare 401
     anon = TestClient(app)
     r = anon.get("/clients", follow_redirects=False)
-    assert r.status_code == 401
+    assert r.status_code == 303
+    assert r.headers["location"] == "/login"
 
     # create a client
     r = client.post("/clients", data={"name": "Adriatic Bulk Ltd"}, follow_redirects=False)
@@ -2332,8 +2333,9 @@ def test_map_page(client):
     src/map.html's actual body content directly into this page instead.
     No standalone nav (Act or wait / Track record) since this page's own
     base.html nav already covers navigation; no iframe, no nested scroll."""
-    r = client.get("/map")
-    assert r.status_code == 401   # not logged in yet -- gated like every other dashboard page
+    r = client.get("/map", follow_redirects=False)
+    assert r.status_code == 303   # not logged in yet -- sent to /login like every other dashboard page
+    assert r.headers["location"] == "/login"
 
     client.post("/signup", data={"email": "map-user@example.com",
                                   "password": "correct horse battery staple"})

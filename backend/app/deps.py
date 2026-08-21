@@ -52,13 +52,20 @@ def get_user_from_api_key(
     return session.get(User, key.user_id)
 
 
+class NotLoggedIn(Exception):
+    """Raised by current_user when there's no session cookie. These are
+    browser pages, not API responses, so main.py turns this into a redirect
+    to /login instead of a bare 401 — current_principal (the JSON API) still
+    raises HTTPException below and is unaffected."""
+
+
 def current_user(
     from_cookie: User | None = Depends(get_user_from_cookie),
 ) -> User:
     """Dashboard pages: cookie only. A stray API key header should not log
     someone into the HTML dashboard of a session that isn't theirs."""
     if from_cookie is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not logged in")
+        raise NotLoggedIn()
     return from_cookie
 
 

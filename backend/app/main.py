@@ -10,10 +10,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .deps import NotLoggedIn
 from .routers import (
     api_keys, api_v1, clients, corridors, dashboard, economic, exposures,
     orders, reports, strategy_decisions,
@@ -23,6 +25,11 @@ APP_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
 app = FastAPI(title="Chokepoint Access — client portfolio")
+
+
+@app.exception_handler(NotLoggedIn)
+def redirect_to_login(request: Request, exc: NotLoggedIn) -> RedirectResponse:
+    return RedirectResponse("/login", status_code=303)
 
 # The existing static site's design system, served as-is (at /static/site.css)
 # so the dashboard looks like the same product rather than a bolted-on SaaS
